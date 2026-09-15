@@ -43,9 +43,11 @@ npm install
 npm run dev
 ```
 
-Server chạy tại `http://localhost:3000`.
+Server chạy tại `http://localhost:3000` — mở link này trên trình duyệt sẽ thấy **giao diện web demo** (không cần dùng `curl`): tạo doanh nghiệp, tải tài liệu lên, và chat trực tiếp. Trạng thái xử lý tài liệu (`processing` → `ready`) tự cập nhật trên giao diện sau vài giây.
 
-### Test tạo doanh nghiệp mẫu
+### (Tuỳ chọn) Test bằng curl thay vì giao diện web
+
+Nếu muốn kiểm tra API trực tiếp:
 
 Vào Supabase → **Table Editor** → bảng `organizations` → **Insert row** → điền `name` bất kỳ (ví dụ "Công ty Demo") → copy `id` vừa tạo, dùng làm `organization_id` cho các bước dưới.
 
@@ -78,6 +80,8 @@ curl -X POST http://localhost:3000/chat \
 3. Build command: `npm install` — Start command: `npm start`.
 4. Vào tab **Environment** → dán toàn bộ biến trong `.env` vào (không upload file `.env`).
 5. Deploy — Render cấp cho bạn 1 URL public dạng `https://ten-app.onrender.com`.
+
+**Sau khi deploy xong**, mở URL public (ví dụ `https://ten-app.onrender.com`) trên trình duyệt — giao diện web demo sẽ hiện ra, dùng y hệt như lúc chạy local.
 
 **Railway** làm tương tự: **New Project → Deploy from GitHub repo**, rồi vào tab **Variables** để điền `.env`.
 
