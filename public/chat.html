@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hỏi đáp tài liệu — DocBot</title>
+<link rel="stylesheet" href="/assets/app.css" />
+</head>
+<body>
+<div class="shell" id="shell"></div>
+
+<script type="module">
+import { api, Session, requireSession, buildSidebar, logout, icon, esc, fmt, toast, emptyState } from '/assets/app.js';
+
+const me = await requireSession();
+if (!me.organizations.length) {
+  document.body.innerHTML = `<div style="min-height:100vh;display:grid;place-items:center;text-align:center;padding:24px">
+    <div><h1>Bạn chưa thuộc doanh nghiệp nào</h1>
+    <p class="muted mt-1">Hãy liên hệ quản trị viên doanh nghiệp để được mời vào tổ chức.</p>
+    <button class="btn mt-2" onclick="localStorage.clear();location.href='/login.html'">Đăng xuất</button></div></div>`;
+  throw new Error('no org');
+}
+
+let orgId = me.organizations.some((o) => o.id === Session.orgId) ? Session.orgId : me.organizations[0].id;
+Session.orgId = orgId;
+let currentOrg = me.organizations.find((o) => o.id === orgId);
+let folders = [];
+
+function render() {
+  const isAdmin = currentOrg.role === 'admin' || me.user.is_system_admin;
+  document.getElementById('shell').innerHTML = `
+    ${buildSidebar({
+      brandSub: 'Không gian hỏi đáp',
+      user: me.user,
+      orgs: me.organizations,
+      currentOrgId: orgId,
+      items: [
+        { group: 'Trò chuyện' },
+        { view: 'chat', icon: 'chat', label: 'Hỏi đáp tài liệu' },
+        { view: 'history', icon: 'history', label: 'Lịch sử của tôi' },
+      ],
+    })}
+    <div class="main">
+      <div class="topbar">
+        <div class="title">
+          <h1 id="pageTitle">Hỏi đáp tài liệu</h1>
+          <p id="pageDesc">Chatbot chỉ trả lời dựa trên tài liệu đã được duyệt của ${esc(currentOrg.name)}.</p>
+        </div>
+        ${isAdmin ? `<a class="btn" href="/admin.html">${icon.settings} Bảng quản trị</a>` : ''}
+        ${me.user.is_system_admin ? `<a class="btn" href="/sysadmin.html">${icon.shield} Quản trị hệ thống</a>` : ''}
+      </div>
+
+      <div class="page-section active" data-view="chat">
+        <div class="chat-layout">
+          <div class="chat-scroll" id="chatScroll"><div class="chat-inner" id="chatInner"></div></div>
+          <div class="composer">
+            <div class="composer-inner">
+              <div class="composer-box">
+                <textarea id="q" rows="1" placeholder="Đặt câu hỏi về tài liệu của doanh nghiệp…"></textarea>
+                <button class="btn primary" id="sendBtn">${icon.send} Gửi</button>
+              </div>
+              <div class="meta">
+                <span>Enter để gửi · Shift+Enter xuống dòng</span>
+                <span class="spacer"></span>
+                <label class="row" style="gap:6px">Phạm vi:
+                  <select id="folderScope" style="width:auto;padding:3px 8px;font-size:12px"><option value="">Tất cả thư mục</option></select>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="page-section" data-view="history">
+        <div class="page"><div class="card"><div class="card-body" id="historyBox">Đang tải…</div></div></div>
+      </div>
+    </div>`;
+
+  document.getElementById('logoutBtn').onclick = logout;
+  document.getElementById('orgSwitch').onchange = (e) => { Session.orgId = e.target.value; location.reload(); };
+
+  document.querySelectorAll('.nav-item[data-view]').forEach((b) => {
+    b.onclick = () => {
+      document.querySelectorAll('.nav-item[data-view]').forEach((x) => x.classList.remove('active'));
+      b.classList.add('active');
+      document.querySelectorAll('.page-section').forEach((s) => s.classList.toggle('active', s.dataset.view === b.dataset.view));
+      const isChat = b.dataset.view === 'chat';
+      document.getElementById('pageTitle').textContent = isChat ? 'Hỏi đáp tài liệu' : 'Lịch sử của tôi';
+      document.getElementById('pageDesc').textContent = isChat
+        ? `Chatbot chỉ trả lời dựa trên tài liệu đã được duyệt của ${currentOrg.name}.`
+        : '50 câu hỏi gần nhất bạn đã gửi.';
+      if (!isChat) loadHistory();
+    };
+  });
+  document.querySelector('.nav-item[data-view="chat"]').classList.add('active');
+
+  const ta = document.getElementById('q');
+  ta.oninput = () => { ta.style.height = 'auto'; ta.style.height = Math.min(160, ta.scrollHeight) + 'px'; };
+  ta.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(); } };
+  document.getElementById('sendBtn').onclick = ask;
+
+  greet();
+  loadFolders();
+}
+
+function greet() {
+  document.getElementById('chatInner').innerHTML = `
+    <div style="text-align:center;padding:48px 10px">
+      <div class="brand-mark" style="margin:0 auto 14px;width:42px;height:42px;font-size:19px">D</div>
+      <h2>Xin chào ${esc(me.user.full_name || me.user.email.split('@')[0])}</h2>
+      <p class="muted mt-1">Hãy đặt câu hỏi về tài liệu nội bộ. Câu trả lời luôn kèm tên tài liệu nguồn.</p>
+      <div class="row wrap mt-2" style="justify-content:center">
+        ${['Tóm tắt nội dung chính của tài liệu mới nhất', 'Quy trình xin nghỉ phép được quy định thế nào?', 'Chính sách bảo mật thông tin gồm những điểm gì?']
+          .map((s) => `<button class="btn sm" data-suggest="${esc(s)}">${esc(s)}</button>`).join('')}
+      </div>
+    </div>`;
+  document.querySelectorAll('[data-suggest]').forEach((b) => {
+    b.onclick = () => { document.getElementById('q').value = b.dataset.suggest; ask(); };
+  });
+}
+
+async function loadFolders() {
+  try {
+    const res = await api(`/orgs/${orgId}/folders`);
+    folders = res.folders;
+    const sel = document.getElementById('folderScope');
+    sel.innerHTML = '<option value="">Tất cả thư mục</option>' +
+      folders.map((f) => `<option value="${esc(f.id)}">${esc(f.name)} (${f.document_count})</option>`).join('');
+  } catch { /* thành viên thường vẫn xem được thư mục */ }
+}
+
+function bubble(role, html) {
+  const inner = document.getElementById('chatInner');
+  if (inner.querySelector('[data-suggest]')) inner.innerHTML = '';
+  const el = document.createElement('div');
+  el.className = `msg ${role}`;
+  el.innerHTML = `
+    <div class="bubble-avatar">${role === 'user' ? esc((me.user.full_name || me.user.email)[0].toUpperCase()) : 'D'}</div>
+    <div class="body">
+      <div class="who">${role === 'user' ? esc(me.user.full_name || 'Bạn') : 'DocBot'}</div>
+      <div class="text">${html}</div>
+      <div class="srcs"></div>
+    </div>`;
+  inner.appendChild(el);
+  const scroll = document.getElementById('chatScroll');
+  scroll.scrollTop = scroll.scrollHeight;
+  return el;
+}
+
+let busy = false;
+async function ask() {
+  if (busy) return;
+  const ta = document.getElementById('q');
+  const question = ta.value.trim();
+  if (!question) return;
+
+  ta.value = ''; ta.style.height = 'auto';
+  bubble('user', esc(question));
+
+  const botEl = bubble('bot', `<span class="typing"><span></span><span></span><span></span></span>`);
+  busy = true;
+  document.getElementById('sendBtn').disabled = true;
+
+  try {
+    const folderId = document.getElementById('folderScope').value;
+    const data = await api(`/orgs/${orgId}/chat`, {
+      method: 'POST',
+      body: { question, folder_ids: folderId ? [folderId] : null },
+    });
+    botEl.querySelector('.text').innerHTML = esc(data.answer);
+    botEl.querySelector('.srcs').innerHTML = (data.sources || [])
+      .map((s) => `<span class="src-chip">${icon.file}${esc(s)}</span>`).join('');
+  } catch (err) {
+    botEl.querySelector('.text').innerHTML = `<span style="color:var(--danger)">${esc(err.message)}</span>`;
+  } finally {
+    busy = false;
+    document.getElementById('sendBtn').disabled = false;
+    const scroll = document.getElementById('chatScroll');
+    scroll.scrollTop = scroll.scrollHeight;
+  }
+}
+
+async function loadHistory() {
+  const box = document.getElementById('historyBox');
+  box.innerHTML = 'Đang tải…';
+  try {
+    const items = await api(`/orgs/${orgId}/chat/mine`);
+    if (!items.length) return (box.innerHTML = emptyState('Chưa có câu hỏi nào', 'Lịch sử sẽ hiện ở đây sau khi bạn bắt đầu hỏi.'));
+    box.innerHTML = items.reverse().map((m) => `
+      <div style="padding:14px 0;border-bottom:1px solid var(--border)">
+        <div class="row between"><b>${esc(m.question)}</b><span class="small muted nowrap">${esc(fmt.ago(m.created_at))}</span></div>
+        <div class="muted mt-1" style="white-space:pre-wrap">${esc(m.answer || '')}</div>
+        <div class="srcs mt-1">${(m.sources || []).map((s) => `<span class="src-chip">${icon.file}${esc(s)}</span>`).join('')}</div>
+      </div>`).join('');
+  } catch (err) { box.innerHTML = `<div class="muted">${esc(err.message)}</div>`; }
+}
+
+render();
+</script>
+</body>
+</html>

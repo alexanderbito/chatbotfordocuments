@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Đăng ký — DocBot</title>
+<link rel="stylesheet" href="/assets/app.css" />
+</head>
+<body>
+<div class="auth-wrap">
+  <div class="auth-side">
+    <div>
+      <div class="brand" style="padding:0 0 30px">
+        <div class="brand-mark">D</div>
+        <div><div class="brand-name">DocBot</div><div class="brand-sub">Chatbot tài liệu doanh nghiệp</div></div>
+      </div>
+      <h2>Bắt đầu miễn phí<br />trong vài phút</h2>
+      <p>Gói Dùng thử cho phép tải lên 20 tài liệu, mời 5 thành viên và 500 lượt hỏi mỗi tháng — đủ để đánh giá hệ thống trước khi nâng cấp.</p>
+      <div id="plans" class="mt-3"></div>
+    </div>
+    <p class="small" style="color:#9ea1d8">© 2026 DocBot</p>
+  </div>
+
+  <div class="auth-main">
+    <div class="auth-card">
+      <h1 id="heading">Đăng ký doanh nghiệp</h1>
+      <p class="lead" id="lead">Tài khoản đầu tiên sẽ là quản trị viên của doanh nghiệp.</p>
+
+      <div class="alert error" id="alert"></div>
+
+      <form id="form">
+        <div class="field" id="orgField">
+          <label for="orgName">Tên doanh nghiệp</label>
+          <input type="text" id="orgName" placeholder="Công ty TNHH ABC" />
+        </div>
+        <div class="field">
+          <label for="fullName">Họ và tên</label>
+          <input type="text" id="fullName" placeholder="Nguyễn Văn A" />
+        </div>
+        <div class="field">
+          <label for="email">Email công việc</label>
+          <input type="email" id="email" required autocomplete="username" placeholder="ban@congty.vn" />
+        </div>
+        <div class="field">
+          <label for="password">Mật khẩu</label>
+          <input type="password" id="password" required minlength="6" autocomplete="new-password" placeholder="Ít nhất 6 ký tự" />
+          <div class="hint">Dùng mật khẩu riêng, không trùng với email công việc.</div>
+        </div>
+        <button class="btn primary block" type="submit" id="submitBtn">Tạo tài khoản</button>
+      </form>
+
+      <p class="auth-alt">Đã có tài khoản? <a href="/login.html">Đăng nhập</a></p>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { api, Session, fmt, esc } from '/assets/app.js';
+
+  const alertEl = document.getElementById('alert');
+  const show = (msg, kind = 'error') => { alertEl.textContent = msg; alertEl.className = `alert ${kind} show`; };
+  const inviteToken = new URLSearchParams(location.search).get('invite');
+
+  // Bảng giá hiển thị bên trái
+  api('/public/plans').then((plans) => {
+    document.getElementById('plans').innerHTML = plans.map((p) => `
+      <div class="auth-feature">
+        <div class="ico">${p.price_vnd === 0 ? '0đ' : ''}</div>
+        <div><b>${esc(p.name)} — ${p.price_vnd === 0 ? 'Miễn phí' : esc(fmt.money(p.price_vnd)) + '/tháng'}</b>
+        <span>${fmt.num(p.max_documents)} tài liệu · ${fmt.num(p.max_members)} thành viên · ${fmt.num(p.max_questions_per_month)} lượt hỏi/tháng</span></div>
+      </div>`).join('');
+  }).catch(() => {});
+
+  // Nếu vào từ lời mời thì ẩn ô tên doanh nghiệp và khoá email
+  if (inviteToken) {
+    document.getElementById('orgField').classList.add('hidden');
+    api(`/auth/invite/${inviteToken}`)
+      .then((info) => {
+        document.getElementById('heading').textContent = 'Tham gia doanh nghiệp';
+        document.getElementById('lead').textContent = `Bạn được mời vào "${info.organization_name}" với vai trò ${info.role === 'admin' ? 'quản trị' : 'thành viên'}.`;
+        const emailEl = document.getElementById('email');
+        emailEl.value = info.email;
+        emailEl.readOnly = true;
+      })
+      .catch((err) => show(err.message));
+  }
+
+  document.getElementById('form').onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('submitBtn');
+    if (!inviteToken && !orgName.value.trim()) return show('Vui lòng nhập tên doanh nghiệp');
+
+    btn.disabled = true; btn.textContent = 'Đang tạo tài khoản…';
+    try {
+      const data = await api('/auth/register', {
+        method: 'POST',
+        body: {
+          email: email.value.trim(),
+          password: password.value,
+          full_name: fullName.value.trim(),
+          organization_name: inviteToken ? null : orgName.value.trim(),
+          invite_token: inviteToken || null,
+        },
+      });
+      if (data.requires_login) return (location.href = '/login.html');
+      Session.token = data.access_token;
+      location.href = '/';
+    } catch (err) {
+      show(err.message);
+      btn.disabled = false; btn.textContent = 'Tạo tài khoản';
+    }
+  };
+</script>
+</body>
+</html>

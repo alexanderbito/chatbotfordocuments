@@ -1,95 +1,160 @@
-# Demo Chatbot RAG cho tài liệu doanh nghiệp (chi phí ~$0)
+# DocBot — SaaS chatbot hỏi đáp tài liệu doanh nghiệp
 
-Stack: Supabase (Postgres + pgvector, free) + Cloudflare R2 (storage, free) +
-DeepSeek Flash (LLM, trả theo request) + Render/Railway (hosting, free tier).
+Mỗi doanh nghiệp đăng ký một tài khoản quản trị, tải tài liệu lên (có chia thư mục),
+hệ thống lập chỉ mục và tạo chatbot trả lời **chỉ trong phạm vi tài liệu của doanh nghiệp đó**.
+Admin mời thành viên vào tổ chức; thành viên chỉ trò chuyện với chatbot.
 
-## Bước 1 — Tạo project Supabase (DB + pgvector)
+Stack: Node/Express · Supabase (Postgres + pgvector) · Cloudflare R2 · Voyage AI (embedding) ·
+DeepSeek (LLM) · Render/Railway (hosting). Giao diện là HTML/CSS/JS thuần, **không cần build step**.
 
-1. Vào https://supabase.com → Sign up → **New project** (chọn gói Free).
-2. Sau khi project tạo xong, vào **SQL Editor** → **New query**.
-3. Copy toàn bộ nội dung file `supabase_schema.sql` trong thư mục này, dán vào và bấm **Run**.
-   → Việc này tạo các bảng `organizations`, `documents`, `document_chunks` và bật pgvector.
-4. Vào **Project Settings → API**, lấy 2 giá trị:
-   - `Project URL` → điền vào `SUPABASE_URL`
-   - `service_role` key (mục **Project API keys**, KHÔNG phải `anon` key) → điền vào `SUPABASE_SERVICE_ROLE_KEY`
+---
 
-   ⚠️ `service_role` key có toàn quyền, tuyệt đối không đưa lên frontend hay commit lên Git công khai.
+## 1. Ba vai trò trong hệ thống
 
-## Bước 2 — Tạo bucket Cloudflare R2 (lưu file)
+| Vai trò | Truy cập | Làm được gì |
+|---|---|---|
+| **Admin hệ thống** (super admin) | `/sysadmin.html` | Quản lý toàn bộ doanh nghiệp, gói cước, thanh toán, người dùng, nhật ký, sức khoẻ hệ thống |
+| **Admin tổ chức** | `/admin.html` | Tải lên / xoá / tải xuống tài liệu, quản lý thư mục, mời & phân quyền thành viên, xem lịch sử hỏi đáp, xem hạn mức gói |
+| **Thành viên** | `/chat.html` | Chỉ trò chuyện với chatbot và xem lịch sử của chính mình |
 
-1. Vào https://dash.cloudflare.com → **R2** → **Create bucket**, đặt tên ví dụ `doc-chatbot-demo`.
-2. Vào bucket vừa tạo → **Settings** → bật **Public access** (hoặc để riêng tư và tự ký URL nếu muốn bảo mật hơn — bản demo dùng public cho đơn giản) → copy **Public bucket URL** → điền vào `R2_PUBLIC_URL`.
-3. Vào **R2 → Manage API tokens** → **Create API token** → chọn quyền **Object Read & Write**.
-   Lấy `Account ID`, `Access Key ID`, `Secret Access Key` → điền vào `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`.
-4. Điền tên bucket vào `R2_BUCKET_NAME`.
+Toàn bộ API đều kiểm tra quyền ở backend, không chỉ ẩn nút trên giao diện.
 
-## Bước 3 — Lấy API key Voyage AI (dùng để tạo embedding — có 200 triệu token miễn phí)
+---
 
-1. Vào https://www.voyageai.com → Sign up → vào dashboard → **API Keys** → tạo key mới.
-2. Điền vào `VOYAGE_API_KEY`. Mỗi tài khoản được tặng 200 triệu token miễn phí cho dòng model voyage-4 — đủ dùng rất lâu ở quy mô demo mà không tốn tiền. Kiểm tra khi đăng ký xem có yêu cầu thẻ thanh toán hay không (chính sách có thể thay đổi theo thời gian).
+## 2. Các trang giao diện
 
-## Bước 4 — Lấy API key DeepSeek (dùng để chatbot trả lời)
+| Đường dẫn | Mục đích |
+|---|---|
+| `/login.html` | Đăng nhập |
+| `/register.html` | Đăng ký doanh nghiệp mới, hoặc tham gia qua link mời (`?invite=<token>`) |
+| `/chat.html` | Không gian hỏi đáp cho mọi thành viên |
+| `/admin.html` | Console admin tổ chức: Tổng quan · Tài liệu & thư mục · Thành viên · Lịch sử hỏi đáp · Gói cước · Thiết lập |
+| `/sysadmin.html` | Console admin hệ thống: Bảng điều khiển · Tổ chức · Gói cước · Thanh toán · Người dùng · Nhật ký · Sức khoẻ hệ thống |
+| `/` | Tự chuyển hướng theo vai trò của người đang đăng nhập |
 
-1. Vào https://platform.deepseek.com → Đăng ký → **API keys** → **Create new key**.
-2. Điền vào `DEEPSEEK_API_KEY`. Nạp một khoản nhỏ (vài đô) để test — giá rất rẻ như đã tính ở phần trước.
+---
 
-## Bước 5 — Cấu hình và chạy thử ở máy local
+## 3. Cài đặt lần đầu
+
+### Bước 1 — Cơ sở dữ liệu
+
+Trong **Supabase Dashboard → SQL Editor → New query**, chạy lần lượt:
+
+1. `supabase_schema.sql` — chỉ cần chạy nếu đây là project mới (tạo `organizations`, `documents`, `document_chunks`, bật pgvector).
+2. `migration_v2_auth.sql` — **bắt buộc**, tạo phần auth/phân quyền/thư mục/gói cước/nhật ký và cập nhật hàm tìm kiếm.
+
+File `migration_v2_auth.sql` chạy lại nhiều lần vẫn an toàn (dùng `if not exists`).
+
+> Nếu project đang dùng embedding 1536 chiều (OpenAI cũ), chạy `migration_to_voyage.sql` trước.
+
+### Bước 2 — Biến môi trường
 
 ```bash
-cp .env.example .env
-# Mở file .env, điền đầy đủ các giá trị đã lấy ở bước 1-4
+cp .env.example .env    # rồi điền giá trị thật
+```
 
+So với bản cũ có **thêm một biến**: `SUPABASE_ANON_KEY`
+(Supabase Dashboard → Project Settings → API → `anon public`).
+Bỏ trống vẫn chạy được nhưng nên điền cho đúng chuẩn bảo mật.
+
+Bucket R2 giờ **không cần để public**: hệ thống tạo link tải có chữ ký, hết hạn sau 5 phút,
+và chỉ admin tổ chức mới lấy được link.
+
+### Bước 3 — Chạy thử
+
+```bash
 npm install
-npm run dev
+npm run dev        # http://localhost:3000
 ```
 
-Server chạy tại `http://localhost:3000` — mở link này trên trình duyệt sẽ thấy **giao diện web demo** (không cần dùng `curl`): tạo doanh nghiệp, tải tài liệu lên, và chat trực tiếp. Trạng thái xử lý tài liệu (`processing` → `ready`) tự cập nhật trên giao diện sau vài giây.
+### Bước 4 — Tạo admin hệ thống đầu tiên
 
-### (Tuỳ chọn) Test bằng curl thay vì giao diện web
+1. Vào `/register.html`, đăng ký một tài khoản (ví dụ với tên doanh nghiệp "Quản trị hệ thống").
+2. Trong Supabase SQL Editor chạy:
 
-Nếu muốn kiểm tra API trực tiếp:
-
-Vào Supabase → **Table Editor** → bảng `organizations` → **Insert row** → điền `name` bất kỳ (ví dụ "Công ty Demo") → copy `id` vừa tạo, dùng làm `organization_id` cho các bước dưới.
-
-### Test upload tài liệu
-
-```bash
-curl -X POST http://localhost:3000/upload \
-  -F "organization_id=<paste-organization-id-vào-đây>" \
-  -F "file=@/duong-dan/toi/tai-lieu.pdf"
+```sql
+update app_users set is_system_admin = true where email = 'email-cua-ban@example.com';
 ```
 
-Đợi vài giây đến vài chục giây (tuỳ độ dài tài liệu) rồi kiểm tra bảng `documents` trên Supabase — cột `status` chuyển từ `processing` sang `ready` là xong.
+3. Đăng nhập lại — bạn sẽ được đưa thẳng vào `/sysadmin.html`.
 
-### Test hỏi chatbot
+---
 
-```bash
-curl -X POST http://localhost:3000/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "organization_id": "<paste-organization-id-vào-đây>",
-    "question": "Nội dung chính của tài liệu là gì?"
-  }'
+## 4. Deploy lên Render
+
+Cấu hình **không đổi** so với bản cũ:
+
+- Build command: `npm install`
+- Start command: `npm start`
+- Tab **Environment**: dán toàn bộ biến trong `.env` (nhớ **thêm `SUPABASE_ANON_KEY`** khi deploy bản này).
+
+Sau khi deploy, nhớ chạy `migration_v2_auth.sql` trên Supabase **trước** khi mở giao diện,
+nếu không các trang sẽ báo lỗi thiếu bảng.
+
+Gói Free của Render "ngủ" sau một thời gian không có traffic — request đầu tiên sau khi ngủ
+sẽ chậm vài chục giây.
+
+---
+
+## 5. Bản đồ API
+
+```
+POST   /auth/register                         đăng ký doanh nghiệp mới hoặc nhận lời mời
+POST   /auth/login                            đăng nhập
+GET    /auth/me                               hồ sơ + danh sách tổ chức
+POST   /auth/change-password
+PATCH  /auth/profile
+GET    /auth/invite/:token                    xem thông tin lời mời (công khai)
+
+GET    /orgs/:orgId                           thông tin tổ chức + vai trò
+PATCH  /orgs/:orgId                           sửa hồ sơ doanh nghiệp          (admin tổ chức)
+GET    /orgs/:orgId/overview                  số liệu dashboard               (admin tổ chức)
+GET    /orgs/:orgId/billing                   gói cước + lịch sử thanh toán   (admin tổ chức)
+
+GET    /orgs/:orgId/folders                   cây thư mục
+POST   | PATCH | DELETE  /orgs/:orgId/folders quản lý thư mục                 (admin tổ chức)
+
+GET    /orgs/:orgId/documents                 danh sách tài liệu              (admin tổ chức)
+POST   /orgs/:orgId/documents                 tải lên (multipart: file, folder_id)
+PATCH  /orgs/:orgId/documents/:id             đổi tên / chuyển thư mục
+GET    /orgs/:orgId/documents/:id/download    link tải có chữ ký (5 phút)
+POST   /orgs/:orgId/documents/:id/reindex     xử lý lại tài liệu lỗi
+DELETE /orgs/:orgId/documents/:id             xoá tài liệu + chunk + file R2
+
+GET    | POST | PATCH | DELETE  /orgs/:orgId/members   quản lý thành viên     (admin tổ chức)
+
+POST   /orgs/:orgId/chat                      hỏi chatbot (mọi thành viên)
+GET    /orgs/:orgId/chat/mine                 lịch sử của chính mình
+GET    /orgs/:orgId/chat/history              toàn bộ lịch sử                 (admin tổ chức)
+
+/admin/*                                      toàn bộ khu vực admin hệ thống
+       overview · organizations · users · plans · payments · logs
+       failed-documents · health
 ```
 
-## Bước 6 — Deploy miễn phí lên Render hoặc Railway
+Xác thực: header `Authorization: Bearer <access_token>` (token do Supabase Auth cấp).
 
-**Render (Free Web Service):**
-1. Đẩy code này lên một repo GitHub.
-2. Vào https://render.com → **New → Web Service** → chọn repo.
-3. Build command: `npm install` — Start command: `npm start`.
-4. Vào tab **Environment** → dán toàn bộ biến trong `.env` vào (không upload file `.env`).
-5. Deploy — Render cấp cho bạn 1 URL public dạng `https://ten-app.onrender.com`.
+---
 
-**Sau khi deploy xong**, mở URL public (ví dụ `https://ten-app.onrender.com`) trên trình duyệt — giao diện web demo sẽ hiện ra, dùng y hệt như lúc chạy local.
+## 6. Hạn mức theo gói cước
 
-**Railway** làm tương tự: **New Project → Deploy from GitHub repo**, rồi vào tab **Variables** để điền `.env`.
+Backend chặn ở mức API, không chỉ hiển thị:
 
-⚠️ Lưu ý gói Free của cả hai nền tảng đều có thể "ngủ" (sleep) sau một thời gian không có traffic, và request đầu tiên sau khi ngủ sẽ chậm (cold start vài chục giây) — chấp nhận được ở giai đoạn demo, cần nâng cấp khi có khách hàng thật.
+- Tải tài liệu: kiểm tra số tài liệu và dung lượng còn lại → trả `402` nếu vượt.
+- Mời thành viên: kiểm tra số thành viên tối đa.
+- Hỏi chatbot: kiểm tra số lượt hỏi trong tháng.
 
-## Giới hạn đã biết của bản demo này (nên biết trước khi thử)
+Ba gói mặc định (Dùng thử / Chuyên nghiệp / Doanh nghiệp) được tạo sẵn bởi migration
+và có thể sửa trong `/sysadmin.html → Gói cước`.
 
-- **Xử lý đồng bộ**: file được xử lý (extract → chunk → embed) ngay trong request upload, không dùng queue riêng. Với file lớn (vài trăm trang) có thể timeout trên Render Free (giới hạn ~30-60s/request tuỳ nền tảng). Đủ dùng cho tài liệu vài chục trang.
-- **Chưa có OCR**: chỉ đọc được PDF có text thật (không phải file scan/ảnh) và DOCX/TXT.
-- **Chưa có xác thực (auth)**: `organization_id` truyền trực tiếp trong request, ai biết ID cũng gọi được — đủ cho demo nội bộ, **chưa dùng được cho khách hàng thật**. Bước tiếp theo cần thêm Supabase Auth + kiểm tra quyền theo user đăng nhập.
-- **Supabase Free tự pause sau 7 ngày không hoạt động** — nếu định để demo chạy lâu dài không ai dùng, cần ping định kỳ hoặc chấp nhận resume thủ công.
+---
+
+## 7. Giới hạn đã biết
+
+- **Xử lý tài liệu đồng bộ trong tiến trình web**: file rất lớn có thể timeout trên Render Free.
+  Khi có khách hàng thật nên tách thành worker riêng.
+- **Chưa có OCR**: chỉ đọc PDF có text thật, DOCX và TXT. PDF scan sẽ báo lỗi kèm nguyên nhân
+  và có thể bấm "Xử lý lại" sau khi thay file.
+- **Lời mời gửi bằng link thủ công**: hệ thống tạo link mời để admin tự gửi, chưa gắn dịch vụ email.
+- **Thanh toán ghi nhận thủ công**: admin hệ thống nhập giao dịch, chưa tích hợp cổng thanh toán.
+- **Supabase Free tự pause sau 7 ngày không hoạt động.**

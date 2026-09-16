@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Quản trị hệ thống — DocBot</title>
+<link rel="stylesheet" href="/assets/app.css" />
+</head>
+<body>
+<div class="shell" id="shell"></div>
+
+<script type="module">
+import {
+  api, requireSession, buildSidebar, logout, icon, esc, fmt, toast,
+  modal, confirmDialog, emptyState, badge, LABEL, renderBars, debounce, router,
+} from '/assets/app.js';
+
+const me = await requireSession({ systemAdmin: true });
+let cache = { plans: [], orgs: [] };
+let state = { logPage: 1 };
+
+const TITLES = {
+  overview: ['Bảng điều khiển hệ thống', 'Toàn cảnh khách hàng, mức sử dụng và doanh thu.'],
+  orgs: ['Tổ chức', 'Toàn bộ doanh nghiệp đang dùng hệ thống.'],
+  plans: ['Gói cước', 'Định nghĩa hạn mức và giá bán của từng gói.'],
+  payments: ['Thanh toán', 'Ghi nhận giao dịch và gia hạn gói cho khách hàng.'],
+  users: ['Người dùng', 'Tất cả tài khoản trong hệ thống.'],
+  logs: ['Nhật ký', 'Sự kiện và lỗi phát sinh trong quá trình vận hành.'],
+  health: ['Sức khoẻ hệ thống', 'Kiểm tra kết nối tới các dịch vụ phụ thuộc.'],
+};
+
+function shell() {
+  document.getElementById('shell').innerHTML = `
+    ${buildSidebar({
+      brandSub: 'Quản trị hệ thống',
+      user: me.user,
+      items: [
+        { group: 'Kinh doanh' },
+        { view: 'overview', icon: 'dashboard', label: 'Bảng điều khiển' },
+        { view: 'orgs', icon: 'building', label: 'Tổ chức' },
+        { view: 'plans', icon: 'card', label: 'Gói cước' },
+        { view: 'payments', icon: 'chart', label: 'Thanh toán' },
+        { group: 'Vận hành' },
+        { view: 'users', icon: 'users', label: 'Người dùng' },
+        { view: 'logs', icon: 'history', label: 'Nhật ký' },
+        { view: 'health', icon: 'pulse', label: 'Sức khoẻ hệ thống' },
+      ],
+    })}
+    <div class="main">
+      <div class="topbar">
+        <div class="title"><h1 id="ttl"></h1><p id="dsc"></p></div>
+        <span class="badge purple">${icon.shield} Admin hệ thống</span>
+        <a class="btn" href="/admin.html">Bảng quản trị doanh nghiệp</a>
+      </div>
+      <div class="page">
+        ${Object.keys(TITLES).map((v) => `<section class="page-section" data-view="${v}" id="view-${v}"></section>`).join('')}
+      </div>
+    </div>`;
+  document.getElementById('logoutBtn').onclick = logout;
+}
+
+/* =================== BẢNG ĐIỀU KHIỂN =================== */
+async function viewOverview() {
+  const el = document.getElementById('view-overview');
+  el.innerHTML = '<div class="loading-line"></div>';
+  const d = await api('/admin/overview');
+  const t = d.totals;
+
+  const stat = (label, value, ic, foot = '') => `
+    <div class="stat">
+      <div class="row between"><div class="label">${esc(label)}</div><div class="icon">${icon[ic]}</div></div>
+      <div class="value">${value}</div>
+      ${foot ? `<div class="foot">${foot}</div>` : ''}
+    </div>`;
+
+  el.innerHTML = `
+    <div class="stat-grid">
+      ${stat('Doanh nghiệp', fmt.num(t.organizations), 'building', `${t.suspended_organizations} đang bị tạm khoá`)}
+      ${stat('Người dùng', fmt.num(t.users), 'users')}
+      ${stat('Tài liệu', fmt.num(t.documents), 'file', `${fmt.num(t.chunks)} đoạn · ${t.failed_documents} lỗi`)}
+      ${stat('Lượt hỏi', fmt.num(t.questions), 'chat')}
+      ${stat('Dung lượng', fmt.mb(t.storage_mb), 'db')}
+      ${stat('Doanh thu tháng này', fmt.money(d.revenue.this_month_vnd), 'card', `Luỹ kế ${fmt.money(d.revenue.total_vnd)}`)}
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Lượt hỏi 30 ngày gần nhất</h2><span class="sub">Tổng ${fmt.num(d.series.reduce((s, x) => s + x.questions, 0))} câu hỏi</span></div>
+      <div class="card-body"><div id="chartQ"></div></div>
+    </div>
+
+    <div class="split" style="grid-template-columns:1fr 1fr">
+      <div class="card">
+        <div class="card-head"><h3>Tài liệu tải lên 30 ngày</h3></div>
+        <div class="card-body"><div id="chartD"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Phân bố theo gói cước</h3></div>
+        <div class="card-body">
+          ${Object.entries(d.by_plan).map(([name, count]) => {
+            const total = Object.values(d.by_plan).reduce((s, x) => s + x, 0) || 1;
+            const pct = Math.round((count / total) * 100);
+            return `<div class="mb-2">
+              <div class="row between small"><span>${esc(name)}</span><span class="muted">${count} tổ chức · ${pct}%</span></div>
+              <div class="meter"><i style="width:${pct}%"></i></div></div>`;
+          }).join('') || emptyState('Chưa có dữ liệu')}
+        </div>
+      </div>
+    </div>`;
+
+  renderBars(document.getElementById('chartQ'), d.series, 'questions');
+  renderBars(document.getElementById('chartD'), d.series, 'documents');
+}
+
+/* =================== TỔ CHỨC =================== */
+async function viewOrgs() {
+  const el = document.getElementById('view-orgs');
+  el.innerHTML = `
+    <div class="toolbar">
+      <div class="search-box">${icon.search}<input type="search" id="oq" placeholder="Tìm theo tên doanh nghiệp…" /></div>
+      <select id="ostatus" style="width:auto"><option value="">Mọi trạng thái</option><option value="active">Hoạt động</option><option value="suspended">Tạm khoá</option></select>
+      <span class="spacer"></span>
+      <button class="btn" id="reloadOrgs">${icon.refresh} Làm mới</button>
+    </div>
+    <div class="card"><div class="card-body flush" id="orgTable">Đang tải…</div></div>`;
+  document.getElementById('oq').oninput = debounce(loadOrgs, 350);
+  document.getElementById('ostatus').onchange = loadOrgs;
+  document.getElementById('reloadOrgs').onclick = loadOrgs;
+  if (!cache.plans.length) cache.plans = await api('/admin/plans');
+  await loadOrgs();
+}
+
+async function loadOrgs() {
+  const box = document.getElementById('orgTable');
+  const q = document.getElementById('oq')?.value || '';
+  const st = document.getElementById('ostatus')?.value || '';
+  const orgs = await api(`/admin/organizations?q=${encodeURIComponent(q)}&status=${st}`);
+  cache.orgs = orgs;
+
+  if (!orgs.length) return (box.innerHTML = emptyState('Không có tổ chức nào'));
+
+  box.innerHTML = `<div class="table-wrap"><table class="tbl">
+    <thead><tr><th>Doanh nghiệp</th><th>Gói</th><th>Thanh toán</th><th class="num">Tài liệu</th><th class="num">Thành viên</th><th class="num">Lượt hỏi</th><th>Trạng thái</th><th>Tạo lúc</th><th></th></tr></thead>
+    <tbody>${orgs.map((o) => `
+      <tr>
+        <td><div class="cell-main">${esc(o.name)}</div><div class="cell-sub">${esc(o.owner_email)}</div></td>
+        <td class="small">${esc(o.plan?.name || '—')}</td>
+        <td>${badge(o.billing_status, LABEL.billing)}</td>
+        <td class="num">${fmt.num(o.document_count)}</td>
+        <td class="num">${fmt.num(o.member_count)}</td>
+        <td class="num">${fmt.num(o.question_count)}</td>
+        <td>${badge(o.status, LABEL.status)}</td>
+        <td class="small nowrap">${esc(fmt.date(o.created_at))}</td>
+        <td class="nowrap" style="width:1%">
+          <button class="icon-btn" data-view="${esc(o.id)}" title="Xem chi tiết">${icon.search}</button>
+          <button class="icon-btn" data-edit="${esc(o.id)}" title="Sửa">${icon.edit}</button>
+          <button class="icon-btn" data-rm="${esc(o.id)}" title="Xoá">${icon.trash}</button>
+        </td>
+      </tr>`).join('')}</tbody></table></div>`;
+
+  box.querySelectorAll('[data-view]').forEach((b) => (b.onclick = () => orgDetail(b.dataset.view)));
+  box.querySelectorAll('[data-edit]').forEach((b) => (b.onclick = () => orgEdit(orgs.find((o) => o.id === b.dataset.edit))));
+  box.querySelectorAll('[data-rm]').forEach((b) => {
+    b.onclick = async () => {
+      const o = orgs.find((x) => x.id === b.dataset.rm);
+      if (!(await confirmDialog('Xoá tổ chức', `Xoá vĩnh viễn "${o.name}" cùng toàn bộ tài liệu, thành viên và lịch sử? Không thể hoàn tác.`))) return;
+      await api(`/admin/organizations/${o.id}`, { method: 'DELETE' });
+      toast('Đã xoá tổ chức', 'ok'); loadOrgs();
+    };
+  });
+}
+
+async function orgDetail(id) {
+  const d = await api(`/admin/organizations/${id}`);
+  const o = d.organization, u = d.usage, L = u.limits;
+  modal({
+    title: o.name, wide: true, okText: 'Đóng', cancelText: 'Đóng',
+    body: `
+      <div class="stat-grid" style="margin-bottom:14px">
+        <div class="stat"><div class="label">Tài liệu</div><div class="value" style="font-size:20px">${fmt.num(u.documents)} <small>/ ${fmt.num(L.max_documents)}</small></div></div>
+        <div class="stat"><div class="label">Thành viên</div><div class="value" style="font-size:20px">${fmt.num(u.members)} <small>/ ${fmt.num(L.max_members)}</small></div></div>
+        <div class="stat"><div class="label">Lượt hỏi tháng</div><div class="value" style="font-size:20px">${fmt.num(u.questions_this_month)}</div></div>
+        <div class="stat"><div class="label">Dung lượng</div><div class="value" style="font-size:20px">${fmt.mb(u.storage_mb)}</div></div>
+      </div>
+      <div class="form-grid">
+        <div class="field"><label>Gói cước</label><div>${esc(o.plan?.name || '—')} · ${esc(fmt.money(o.plan?.price_vnd || 0))}/tháng</div></div>
+        <div class="field"><label>Hạn dùng</label><div>${esc(o.plan_expires_at ? fmt.date(o.plan_expires_at) : 'không giới hạn')}</div></div>
+        <div class="field"><label>Email liên hệ</label><div>${esc(o.contact_email || '—')}</div></div>
+        <div class="field"><label>Mã số thuế</label><div>${esc(o.tax_code || '—')}</div></div>
+      </div>
+      <h3 class="mt-2 mb-1">Thành viên (${d.members.length})</h3>
+      <div class="table-wrap"><table class="tbl"><tbody>
+        ${d.members.map((m) => `<tr><td>${esc(m.email)}</td><td style="width:1%">${badge(m.role, LABEL.role)}</td><td style="width:1%">${badge(m.status, LABEL.status)}</td></tr>`).join('') || '<tr><td class="muted">Chưa có</td></tr>'}
+      </tbody></table></div>
+      <h3 class="mt-2 mb-1">Tài liệu gần đây</h3>
+      <div class="table-wrap"><table class="tbl"><tbody>
+        ${d.recent_documents.map((x) => `<tr><td>${esc(x.filename)}</td><td style="width:1%">${badge(x.status, LABEL.status)}</td><td class="small nowrap" style="width:1%">${esc(fmt.date(x.created_at))}</td></tr>`).join('') || '<tr><td class="muted">Chưa có</td></tr>'}
+      </tbody></table></div>`,
+  });
+}
+
+function orgEdit(o) {
+  const planOpts = cache.plans.map((p) => `<option value="${esc(p.id)}" ${o.plan_id === p.id ? 'selected' : ''}>${esc(p.name)} — ${fmt.money(p.price_vnd)}/tháng</option>`).join('');
+  modal({
+    title: `Sửa tổ chức: ${o.name}`, wide: true,
+    body: `
+      <div class="form-grid">
+        <div class="field"><label>Tên doanh nghiệp</label><input id="e_name" value="${esc(o.name)}" /></div>
+        <div class="field"><label>Email liên hệ</label><input id="e_mail" value="${esc(o.contact_email || '')}" /></div>
+        <div class="field"><label>Gói cước</label><select id="e_plan">${planOpts}</select></div>
+        <div class="field"><label>Trạng thái</label><select id="e_status">
+          <option value="active" ${o.status === 'active' ? 'selected' : ''}>Hoạt động</option>
+          <option value="suspended" ${o.status === 'suspended' ? 'selected' : ''}>Tạm khoá</option></select></div>
+        <div class="field"><label>Tình trạng thanh toán</label><select id="e_billing">
+          <option value="trial" ${o.billing_status === 'trial' ? 'selected' : ''}>Dùng thử</option>
+          <option value="paid" ${o.billing_status === 'paid' ? 'selected' : ''}>Đã thanh toán</option>
+          <option value="overdue" ${o.billing_status === 'overdue' ? 'selected' : ''}>Quá hạn</option></select></div>
+        <div class="field"><label>Hạn dùng đến</label><input type="date" id="e_exp" value="${o.plan_expires_at ? new Date(o.plan_expires_at).toISOString().slice(0, 10) : ''}" /></div>
+      </div>
+      <div class="field"><label>Ghi chú nội bộ</label><textarea id="e_note">${esc(o.note || '')}</textarea></div>`,
+    onOk: async (box) => {
+      await api(`/admin/organizations/${o.id}`, { method: 'PATCH', body: {
+        name: box.querySelector('#e_name').value.trim(),
+        contact_email: box.querySelector('#e_mail').value.trim(),
+        plan_id: box.querySelector('#e_plan').value,
+        status: box.querySelector('#e_status').value,
+        billing_status: box.querySelector('#e_billing').value,
+        plan_expires_at: box.querySelector('#e_exp').value || null,
+        note: box.querySelector('#e_note').value.trim(),
+      }});
+      toast('Đã cập nhật tổ chức', 'ok'); loadOrgs();
+    },
+  });
+}
+
+/* =================== GÓI CƯỚC =================== */
+async function viewPlans() {
+  const el = document.getElementById('view-plans');
+  el.innerHTML = `
+    <div class="toolbar"><span class="spacer"></span><button class="btn primary" id="addPlan">${icon.plus} Thêm gói</button></div>
+    <div class="card"><div class="card-body flush" id="planTable">Đang tải…</div></div>`;
+  document.getElementById('addPlan').onclick = () => planModal();
+  await loadPlans();
+}
+
+async function loadPlans() {
+  cache.plans = await api('/admin/plans');
+  document.getElementById('planTable').innerHTML = `<div class="table-wrap"><table class="tbl">
+    <thead><tr><th>Gói</th><th class="num">Giá/tháng</th><th class="num">Tài liệu</th><th class="num">Thành viên</th><th class="num">Dung lượng</th><th class="num">Lượt hỏi/tháng</th><th class="num">Đang dùng</th><th>Trạng thái</th><th></th></tr></thead>
+    <tbody>${cache.plans.map((p) => `
+      <tr>
+        <td><div class="cell-main">${esc(p.name)}</div><div class="cell-sub mono">${esc(p.code)}</div></td>
+        <td class="num">${esc(fmt.money(p.price_vnd))}</td>
+        <td class="num">${fmt.num(p.max_documents)}</td>
+        <td class="num">${fmt.num(p.max_members)}</td>
+        <td class="num">${fmt.num(p.max_storage_mb)} MB</td>
+        <td class="num">${fmt.num(p.max_questions_per_month)}</td>
+        <td class="num">${fmt.num(p.organization_count)}</td>
+        <td>${p.is_active ? '<span class="badge ok">Đang bán</span>' : '<span class="badge">Ngừng bán</span>'}</td>
+        <td class="nowrap" style="width:1%">
+          <button class="icon-btn" data-edit="${esc(p.id)}">${icon.edit}</button>
+          <button class="icon-btn" data-rm="${esc(p.id)}">${icon.trash}</button>
+        </td>
+      </tr>`).join('')}</tbody></table></div>`;
+
+  document.querySelectorAll('#planTable [data-edit]').forEach((b) => (b.onclick = () => planModal(cache.plans.find((p) => p.id === b.dataset.edit))));
+  document.querySelectorAll('#planTable [data-rm]').forEach((b) => {
+    b.onclick = async () => {
+      const p = cache.plans.find((x) => x.id === b.dataset.rm);
+      if (!(await confirmDialog('Xoá gói cước', `Xoá gói "${p.name}"?`))) return;
+      try { await api(`/admin/plans/${p.id}`, { method: 'DELETE' }); toast('Đã xoá gói', 'ok'); loadPlans(); }
+      catch (err) { toast(err.message, 'err'); }
+    };
+  });
+}
+
+function planModal(p) {
+  const f = (id, label, value, type = 'text') => `<div class="field"><label>${esc(label)}</label><input type="${type}" id="${id}" value="${esc(value ?? '')}" /></div>`;
+  modal({
+    title: p ? `Sửa gói: ${p.name}` : 'Thêm gói cước', wide: true,
+    body: `
+      <div class="form-grid">
+        ${f('p_code', 'Mã gói (không dấu)', p?.code)}
+        ${f('p_name', 'Tên hiển thị', p?.name)}
+        ${f('p_price', 'Giá mỗi tháng (đ)', p?.price_vnd ?? 0, 'number')}
+        ${f('p_sort', 'Thứ tự hiển thị', p?.sort_order ?? 0, 'number')}
+        ${f('p_docs', 'Số tài liệu tối đa', p?.max_documents ?? 20, 'number')}
+        ${f('p_members', 'Số thành viên tối đa', p?.max_members ?? 5, 'number')}
+        ${f('p_storage', 'Dung lượng tối đa (MB)', p?.max_storage_mb ?? 100, 'number')}
+        ${f('p_questions', 'Lượt hỏi mỗi tháng', p?.max_questions_per_month ?? 500, 'number')}
+      </div>
+      <div class="field"><label>Mô tả</label><textarea id="p_desc">${esc(p?.description || '')}</textarea></div>
+      <label class="check"><input type="checkbox" id="p_active" ${p?.is_active !== false ? 'checked' : ''} /> Đang mở bán</label>`,
+    onOk: async (box) => {
+      const g = (id) => box.querySelector('#' + id).value;
+      const body = {
+        code: g('p_code').trim(), name: g('p_name').trim(), description: g('p_desc').trim(),
+        price_vnd: g('p_price'), sort_order: g('p_sort'),
+        max_documents: g('p_docs'), max_members: g('p_members'),
+        max_storage_mb: g('p_storage'), max_questions_per_month: g('p_questions'),
+        is_active: box.querySelector('#p_active').checked,
+      };
+      if (!body.code || !body.name) { toast('Thiếu mã hoặc tên gói', 'err'); return false; }
+      if (p) await api(`/admin/plans/${p.id}`, { method: 'PATCH', body });
+      else await api('/admin/plans', { method: 'POST', body });
+      toast('Đã lưu gói cước', 'ok'); loadPlans();
+    },
+  });
+}
+
+/* =================== THANH TOÁN =================== */
+async function viewPayments() {
+  const el = document.getElementById('view-payments');
+  el.innerHTML = `
+    <div class="toolbar">
+      <select id="pstatus" style="width:auto"><option value="">Mọi trạng thái</option>
+        <option value="paid">Đã thu</option><option value="pending">Chờ thu</option><option value="failed">Thất bại</option></select>
+      <span class="spacer"></span>
+      <button class="btn primary" id="addPay">${icon.plus} Ghi nhận thanh toán</button>
+    </div>
+    <div class="card"><div class="card-body flush" id="payTable">Đang tải…</div></div>`;
+  document.getElementById('pstatus').onchange = loadPayments;
+  document.getElementById('addPay').onclick = paymentModal;
+  if (!cache.plans.length) cache.plans = await api('/admin/plans');
+  if (!cache.orgs.length) cache.orgs = await api('/admin/organizations');
+  await loadPayments();
+}
+
+async function loadPayments() {
+  const st = document.getElementById('pstatus')?.value || '';
+  const rows = await api(`/admin/payments?status=${st}`);
+  const box = document.getElementById('payTable');
+  if (!rows.length) return (box.innerHTML = emptyState('Chưa có giao dịch nào', 'Bấm "Ghi nhận thanh toán" để tạo giao dịch đầu tiên.'));
+
+  box.innerHTML = `<div class="table-wrap"><table class="tbl">
+    <thead><tr><th>Ngày</th><th>Doanh nghiệp</th><th>Gói</th><th>Kỳ dịch vụ</th><th class="num">Số tiền</th><th>Hình thức</th><th>Trạng thái</th><th></th></tr></thead>
+    <tbody>${rows.map((p) => `
+      <tr>
+        <td class="small nowrap">${esc(fmt.date(p.created_at))}</td>
+        <td class="cell-main">${esc(p.organization?.name || '—')}</td>
+        <td class="small">${esc(p.plan?.name || '—')}</td>
+        <td class="small nowrap">${esc(fmt.date(p.period_start))} → ${esc(fmt.date(p.period_end))}</td>
+        <td class="num">${esc(fmt.money(p.amount_vnd))}</td>
+        <td class="small">${esc(p.method || '—')}</td>
+        <td>${badge(p.status, LABEL.payment)}</td>
+        <td style="width:1%">${p.status === 'pending' ? `<button class="btn sm" data-ok="${esc(p.id)}">Xác nhận đã thu</button>` : ''}</td>
+      </tr>`).join('')}</tbody></table></div>`;
+
+  box.querySelectorAll('[data-ok]').forEach((b) => {
+    b.onclick = async () => {
+      await api(`/admin/payments/${b.dataset.ok}`, { method: 'PATCH', body: { status: 'paid' } });
+      toast('Đã xác nhận thanh toán', 'ok'); loadPayments();
+    };
+  });
+}
+
+function paymentModal() {
+  const today = new Date();
+  const nextMonth = new Date(today); nextMonth.setMonth(today.getMonth() + 1);
+  modal({
+    title: 'Ghi nhận thanh toán', wide: true, okText: 'Lưu giao dịch',
+    body: `
+      <div class="form-grid">
+        <div class="field"><label>Doanh nghiệp</label><select id="y_org">${cache.orgs.map((o) => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>Gói cước</label><select id="y_plan">${cache.plans.map((p) => `<option value="${esc(p.id)}" data-price="${p.price_vnd}">${esc(p.name)} — ${fmt.money(p.price_vnd)}</option>`).join('')}</select></div>
+        <div class="field"><label>Số tiền (đ)</label><input type="number" id="y_amount" value="${cache.plans[0]?.price_vnd || 0}" /></div>
+        <div class="field"><label>Hình thức</label><select id="y_method">
+          <option value="bank_transfer">Chuyển khoản</option><option value="momo">Ví MoMo</option>
+          <option value="card">Thẻ</option><option value="manual">Ghi nhận thủ công</option></select></div>
+        <div class="field"><label>Từ ngày</label><input type="date" id="y_start" value="${today.toISOString().slice(0, 10)}" /></div>
+        <div class="field"><label>Đến ngày</label><input type="date" id="y_end" value="${nextMonth.toISOString().slice(0, 10)}" /></div>
+        <div class="field"><label>Trạng thái</label><select id="y_status"><option value="paid">Đã thu</option><option value="pending">Chờ thu</option></select></div>
+        <div class="field"><label>Mã tham chiếu</label><input id="y_ref" placeholder="Mã giao dịch ngân hàng" /></div>
+      </div>
+      <div class="field"><label>Ghi chú</label><textarea id="y_note"></textarea></div>
+      <div class="alert info show">Khi trạng thái là "Đã thu", gói cước và hạn dùng của doanh nghiệp sẽ được cập nhật ngay.</div>`,
+    onOk: async (box) => {
+      const g = (id) => box.querySelector('#' + id).value;
+      await api('/admin/payments', { method: 'POST', body: {
+        organization_id: g('y_org'), plan_id: g('y_plan'), amount_vnd: g('y_amount'),
+        period_start: g('y_start'), period_end: g('y_end'), status: g('y_status'),
+        method: g('y_method'), reference: g('y_ref').trim(), note: g('y_note').trim(),
+      }});
+      toast('Đã ghi nhận thanh toán', 'ok'); loadPayments();
+    },
+  }).el.querySelector('#y_plan').onchange = (e) => {
+    const price = e.target.selectedOptions[0]?.dataset.price;
+    if (price !== undefined) document.getElementById('y_amount').value = price;
+  };
+}
+
+/* =================== NGƯỜI DÙNG =================== */
+async function viewUsers() {
+  const el = document.getElementById('view-users');
+  el.innerHTML = `
+    <div class="toolbar"><div class="search-box">${icon.search}<input type="search" id="uq" placeholder="Tìm theo email…" /></div></div>
+    <div class="card"><div class="card-body flush" id="userTable">Đang tải…</div></div>`;
+  document.getElementById('uq').oninput = debounce(loadUsers, 350);
+  await loadUsers();
+}
+
+async function loadUsers() {
+  const q = document.getElementById('uq')?.value || '';
+  const users = await api(`/admin/users?q=${encodeURIComponent(q)}`);
+  const box = document.getElementById('userTable');
+  if (!users.length) return (box.innerHTML = emptyState('Không tìm thấy người dùng'));
+
+  box.innerHTML = `<div class="table-wrap"><table class="tbl">
+    <thead><tr><th>Người dùng</th><th>Quyền hệ thống</th><th>Trạng thái</th><th>Đăng nhập gần nhất</th><th>Tạo lúc</th><th></th></tr></thead>
+    <tbody>${users.map((u) => `
+      <tr>
+        <td><div class="cell-main">${esc(u.full_name || u.email.split('@')[0])}</div><div class="cell-sub">${esc(u.email)}</div></td>
+        <td>${u.is_system_admin ? '<span class="badge purple">Admin hệ thống</span>' : '<span class="badge">Người dùng</span>'}</td>
+        <td>${badge(u.status, LABEL.status)}</td>
+        <td class="small">${esc(fmt.ago(u.last_login_at))}</td>
+        <td class="small nowrap">${esc(fmt.date(u.created_at))}</td>
+        <td class="nowrap" style="width:1%">
+          <button class="btn sm" data-sa="${esc(u.id)}" data-on="${u.is_system_admin ? '1' : '0'}">${u.is_system_admin ? 'Gỡ quyền admin' : 'Cấp quyền admin'}</button>
+          <button class="btn sm" data-block="${esc(u.id)}" data-st="${esc(u.status)}">${u.status === 'disabled' ? 'Mở khoá' : 'Khoá'}</button>
+        </td>
+      </tr>`).join('')}</tbody></table></div>`;
+
+  box.querySelectorAll('[data-sa]').forEach((b) => {
+    b.onclick = async () => {
+      try {
+        await api(`/admin/users/${b.dataset.sa}`, { method: 'PATCH', body: { is_system_admin: b.dataset.on !== '1' } });
+        toast('Đã cập nhật quyền', 'ok'); loadUsers();
+      } catch (err) { toast(err.message, 'err'); }
+    };
+  });
+  box.querySelectorAll('[data-block]').forEach((b) => {
+    b.onclick = async () => {
+      await api(`/admin/users/${b.dataset.block}`, { method: 'PATCH', body: { status: b.dataset.st === 'disabled' ? 'active' : 'disabled' } });
+      toast('Đã cập nhật trạng thái', 'ok'); loadUsers();
+    };
+  });
+}
+
+/* =================== NHẬT KÝ =================== */
+async function viewLogs() {
+  const el = document.getElementById('view-logs');
+  el.innerHTML = `
+    <div class="toolbar">
+      <select id="llevel" style="width:auto"><option value="">Mọi mức độ</option><option value="info">Thông tin</option><option value="warn">Cảnh báo</option><option value="error">Lỗi</option></select>
+      <select id="lscope" style="width:auto"><option value="">Mọi nhóm</option><option value="auth">Tài khoản</option><option value="upload">Tài liệu</option><option value="chat">Hỏi đáp</option><option value="billing">Thanh toán</option><option value="system">Hệ thống</option></select>
+      <span class="spacer"></span>
+      <button class="btn" id="reloadLogs">${icon.refresh} Làm mới</button>
+    </div>
+    <div class="card"><div class="card-head"><h3>Tài liệu xử lý lỗi</h3></div><div class="card-body flush" id="failedBox">Đang tải…</div></div>
+    <div class="card"><div class="card-body flush" id="logBox">Đang tải…</div><div class="pager" id="logPager"></div></div>`;
+  document.getElementById('llevel').onchange = () => { state.logPage = 1; loadLogs(); };
+  document.getElementById('lscope').onchange = () => { state.logPage = 1; loadLogs(); };
+  document.getElementById('reloadLogs').onclick = () => { loadLogs(); loadFailed(); };
+  await Promise.all([loadLogs(), loadFailed()]);
+}
+
+async function loadFailed() {
+  const rows = await api('/admin/failed-documents');
+  const box = document.getElementById('failedBox');
+  if (!rows.length) return (box.innerHTML = `<div class="card-body"><span class="badge ok">${icon.check} Không có tài liệu nào bị lỗi</span></div>`);
+  box.innerHTML = `<div class="table-wrap"><table class="tbl">
+    <thead><tr><th>Tài liệu</th><th>Doanh nghiệp</th><th>Nguyên nhân</th><th>Lúc</th></tr></thead>
+    <tbody>${rows.map((r) => `<tr>
+      <td class="cell-main">${esc(r.filename)}</td>
+      <td class="small">${esc(r.organization?.name || '—')}</td>
+      <td class="small" style="color:var(--danger)">${esc(r.error_message || 'Không rõ')}</td>
+      <td class="small nowrap">${esc(fmt.dateTime(r.created_at))}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+async function loadLogs() {
+  const level = document.getElementById('llevel')?.value || '';
+  const scope = document.getElementById('lscope')?.value || '';
+  const res = await api(`/admin/logs?page=${state.logPage}&size=50&level=${level}&scope=${scope}`);
+  const box = document.getElementById('logBox');
+
+  if (!res.items.length) { box.innerHTML = emptyState('Chưa có nhật ký'); document.getElementById('logPager').innerHTML = ''; return; }
+
+  box.innerHTML = `<div class="table-wrap"><table class="tbl">
+    <thead><tr><th>Thời điểm</th><th>Mức độ</th><th>Nhóm</th><th>Nội dung</th><th>Doanh nghiệp</th></tr></thead>
+    <tbody>${res.items.map((l) => `
+      <tr>
+        <td class="small nowrap">${esc(fmt.dateTime(l.created_at))}</td>
+        <td>${badge(l.level === 'error' ? 'err' : l.level === 'warn' ? 'warn' : 'info', { err: 'Lỗi', warn: 'Cảnh báo', info: 'Thông tin' })}</td>
+        <td class="small">${esc(LABEL.scope[l.scope] || l.scope)}</td>
+        <td>${esc(l.message)}${l.detail ? `<div class="cell-sub mono truncate" style="max-width:420px">${esc(JSON.stringify(l.detail))}</div>` : ''}</td>
+        <td class="small">${esc(l.organization?.name || '—')}</td>
+      </tr>`).join('')}</tbody></table></div>`;
+
+  const pages = Math.ceil(res.total / res.size);
+  document.getElementById('logPager').innerHTML = `
+    <span>${fmt.num(res.total)} dòng · trang ${res.page}/${pages || 1}</span>
+    <button class="btn sm" id="lprev" ${res.page <= 1 ? 'disabled' : ''}>Trước</button>
+    <button class="btn sm" id="lnext" ${res.page >= pages ? 'disabled' : ''}>Sau</button>`;
+  const prev = document.getElementById('lprev'), next = document.getElementById('lnext');
+  if (prev) prev.onclick = () => { state.logPage--; loadLogs(); };
+  if (next) next.onclick = () => { state.logPage++; loadLogs(); };
+}
+
+/* =================== SỨC KHOẺ HỆ THỐNG =================== */
+async function viewHealth() {
+  const el = document.getElementById('view-health');
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-head"><h2>Kiểm tra dịch vụ phụ thuộc</h2>
+        <span class="sub">Gọi thử tới từng dịch vụ. Lần kiểm tra có phát sinh chi phí rất nhỏ ở Voyage và DeepSeek.</span>
+        <button class="btn primary" id="runHealth">${icon.pulse} Chạy kiểm tra</button></div>
+      <div class="card-body" id="healthBox">
+        <p class="muted mb-0">Bấm "Chạy kiểm tra" để xem trạng thái kết nối tới Supabase, Cloudflare R2, Voyage AI và DeepSeek.</p>
+      </div>
+    </div>`;
+  document.getElementById('runHealth').onclick = async (e) => {
+    e.target.disabled = true;
+    const box = document.getElementById('healthBox');
+    box.innerHTML = '<div class="loading-line"></div><p class="muted mt-2">Đang kiểm tra…</p>';
+    try {
+      const d = await api('/admin/health');
+      box.innerHTML = `
+        <div class="table-wrap"><table class="tbl">
+          <thead><tr><th>Dịch vụ</th><th>Trạng thái</th><th class="num">Thời gian phản hồi</th><th>Chi tiết</th></tr></thead>
+          <tbody>${d.checks.map((c) => `<tr>
+            <td class="cell-main">${esc(c.name)}</td>
+            <td>${c.ok ? '<span class="badge ok">Bình thường</span>' : '<span class="badge err">Lỗi</span>'}</td>
+            <td class="num small">${c.ms} ms</td>
+            <td class="small ${c.ok ? 'muted' : ''}" style="${c.ok ? '' : 'color:var(--danger)'}">${esc(c.detail)}</td>
+          </tr>`).join('')}</tbody></table></div>
+        <p class="small muted mt-2 mb-0">Kiểm tra lúc ${esc(fmt.dateTime(d.checked_at))}</p>`;
+    } catch (err) { box.innerHTML = `<div class="alert error show">${esc(err.message)}</div>`; }
+    finally { e.target.disabled = false; }
+  };
+}
+
+/* =================== KHỞI CHẠY =================== */
+const VIEWS = { overview: viewOverview, orgs: viewOrgs, plans: viewPlans, payments: viewPayments, users: viewUsers, logs: viewLogs, health: viewHealth };
+
+shell();
+router(async (view) => {
+  const [t, d] = TITLES[view] || TITLES.overview;
+  document.getElementById('ttl').textContent = t;
+  document.getElementById('dsc').textContent = d;
+  try { await (VIEWS[view] || viewOverview)(); }
+  catch (err) { toast(err.message, 'err'); }
+}, 'overview');
+</script>
+</body>
+</html>

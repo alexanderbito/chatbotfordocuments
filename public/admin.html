@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Quản trị doanh nghiệp — DocBot</title>
+<link rel="stylesheet" href="/assets/app.css" />
+</head>
+<body>
+<div class="shell" id="shell"></div>
+
+<script type="module">
+import {
+  api, Session, requireSession, buildSidebar, logout, icon, esc, fmt, toast,
+  modal, confirmDialog, emptyState, badge, LABEL, meter, renderBars, debounce, router,
+} from '/assets/app.js';
+
+const me = await requireSession();
+const adminOrgs = me.user.is_system_admin ? me.organizations : me.organizations.filter((o) => o.role === 'admin');
+if (!adminOrgs.length) location.href = '/chat.html';
+
+let orgId = adminOrgs.some((o) => o.id === Session.orgId) ? Session.orgId : adminOrgs[0].id;
+Session.orgId = orgId;
+let org = null;
+let state = { folder: null, folders: [], unfiled: 0, historyPage: 1 };
+
+const TITLES = {
+  overview: ['Tổng quan', 'Bức tranh nhanh về tài liệu, thành viên và mức sử dụng.'],
+  documents: ['Tài liệu & thư mục', 'Tải lên, sắp xếp và kiểm soát tài liệu được đưa vào chatbot.'],
+  members: ['Thành viên', 'Mời đồng nghiệp và phân quyền sử dụng chatbot.'],
+  history: ['Lịch sử hỏi đáp', 'Toàn bộ câu hỏi thành viên đã gửi và câu trả lời của chatbot.'],
+  billing: ['Gói cước', 'Hạn mức đang dùng và lịch sử thanh toán.'],
+  settings: ['Thiết lập', 'Hồ sơ doanh nghiệp và tài khoản của bạn.'],
+};
+
+function shell() {
+  document.getElementById('shell').innerHTML = `
+    ${buildSidebar({
+      brandSub: 'Quản trị doanh nghiệp',
+      user: me.user,
+      orgs: adminOrgs,
+      currentOrgId: orgId,
+      items: [
+        { group: 'Vận hành' },
+        { view: 'overview', icon: 'dashboard', label: 'Tổng quan' },
+        { view: 'documents', icon: 'folder', label: 'Tài liệu & thư mục' },
+        { view: 'members', icon: 'users', label: 'Thành viên' },
+        { view: 'history', icon: 'history', label: 'Lịch sử hỏi đáp' },
+        { group: 'Tài khoản' },
+        { view: 'billing', icon: 'card', label: 'Gói cước' },
+        { view: 'settings', icon: 'settings', label: 'Thiết lập' },
+      ],
+    })}
+    <div class="main">
+      <div class="topbar">
+        <div class="title"><h1 id="ttl">Tổng quan</h1><p id="dsc"></p></div>
+        <a class="btn" href="/chat.html">${icon.chat} Mở chatbot</a>
+      </div>
+      <div class="page">
+        ${['overview', 'documents', 'members', 'history', 'billing', 'settings']
+          .map((v) => `<section class="page-section" data-view="${v}" id="view-${v}"></section>`).join('')}
+      </div>
+    </div>`;
+
+  document.getElementById('logoutBtn').onclick = logout;
+  document.getElementById('orgSwitch').onchange = (e) => { Session.orgId = e.target.value; location.reload(); };
+}
+
+/* =================== TỔNG QUAN =================== */
+async function viewOverview() {
+  const el = document.getElementById('view-overview');
+  el.innerHTML = '<div class="loading-line"></div>';
+  const d = await api(`/orgs/${orgId}/overview`);
+  const u = d.usage, L = u.limits;
+
+  const stat = (label, value, ic, foot, used, limit) => `
+    <div class="stat">
+      <div class="row between"><div class="label">${esc(label)}</div><div class="icon">${icon[ic]}</div></div>
+      <div class="value">${value}</div>
+      ${limit !== undefined ? meter(used, limit) : ''}
+      ${foot ? `<div class="foot">${foot}</div>` : ''}
+    </div>`;
+
+  el.innerHTML = `
+    <div class="stat-grid">
+      ${stat('Tài liệu', `${fmt.num(u.documents)} <small>/ ${fmt.num(L.max_documents)}</small>`, 'file', `${d.documents_by_status.ready || 0} sẵn sàng · ${d.documents_by_status.failed || 0} lỗi`, u.documents, L.max_documents)}
+      ${stat('Thành viên', `${fmt.num(u.members)} <small>/ ${fmt.num(L.max_members)}</small>`, 'users', '', u.members, L.max_members)}
+      ${stat('Lượt hỏi tháng này', `${fmt.num(u.questions_this_month)} <small>/ ${fmt.num(L.max_questions_per_month)}</small>`, 'chat', '', u.questions_this_month, L.max_questions_per_month)}
+      ${stat('Dung lượng', `${fmt.mb(u.storage_mb)} <small>/ ${fmt.num(L.max_storage_mb)} MB</small>`, 'db', `${fmt.num(u.chunks)} đoạn đã lập chỉ mục`, u.storage_mb, L.max_storage_mb)}
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Lượt hỏi 30 ngày gần nhất</h2><span class="sub">Tổng ${fmt.num(d.questions_series.reduce((s, x) => s + x.questions, 0))} câu hỏi</span></div>
+      <div class="card-body"><div id="chart"></div></div>
+    </div>
+
+    <div class="split" style="grid-template-columns:1fr 1fr">
+      <div class="card">
+        <div class="card-head"><h3>Tài liệu mới nhất</h3><a href="#documents" class="small">Xem tất cả</a></div>
+        <div class="card-body flush">${d.recent_documents.length ? `<div class="table-wrap"><table class="tbl"><tbody>
+          ${d.recent_documents.map((x) => `<tr><td><div class="cell-main truncate">${esc(x.filename)}</div><div class="cell-sub">${esc(fmt.ago(x.created_at))}</div></td><td style="width:1%">${badge(x.status, LABEL.status)}</td></tr>`).join('')}
+        </tbody></table></div>` : emptyState('Chưa có tài liệu nào')}</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Câu hỏi gần đây</h3><a href="#history" class="small">Xem tất cả</a></div>
+        <div class="card-body flush">${d.recent_chats.length ? `<div class="table-wrap"><table class="tbl"><tbody>
+          ${d.recent_chats.map((x) => `<tr><td><div class="cell-main truncate">${esc(x.question)}</div><div class="cell-sub">${esc(x.user_email || '')} · ${esc(fmt.ago(x.created_at))}</div></td></tr>`).join('')}
+        </tbody></table></div>` : emptyState('Chưa có câu hỏi nào')}</div>
+      </div>
+    </div>`;
+
+  renderBars(document.getElementById('chart'), d.questions_series, 'questions');
+}
+
+/* =================== TÀI LIỆU & THƯ MỤC =================== */
+async function viewDocuments() {
+  const el = document.getElementById('view-documents');
+  el.innerHTML = `
+    <div class="split">
+      <div class="card" style="margin:0">
+        <div class="card-head"><h3>Thư mục</h3><button class="icon-btn" id="addFolder" title="Thêm thư mục">${icon.plus}</button></div>
+        <div class="card-body" id="tree">Đang tải…</div>
+      </div>
+      <div>
+        <div class="toolbar">
+          <div class="search-box">${icon.search}<input type="search" id="docSearch" placeholder="Tìm theo tên tài liệu…" /></div>
+          <span class="spacer"></span>
+          <button class="btn primary" id="uploadBtn">${icon.upload} Tải tài liệu lên</button>
+        </div>
+        <div class="card"><div class="card-body flush" id="docTable">Đang tải…</div></div>
+      </div>
+    </div>`;
+
+  document.getElementById('addFolder').onclick = () => folderModal();
+  document.getElementById('uploadBtn').onclick = uploadModal;
+  document.getElementById('docSearch').oninput = debounce((e) => loadDocs(e.target.value), 350);
+
+  await loadFolders();
+  await loadDocs();
+}
+
+async function loadFolders() {
+  const res = await api(`/orgs/${orgId}/folders`);
+  state.folders = res.folders; state.unfiled = res.unfiled_count;
+  const total = state.folders.reduce((s, f) => s + f.document_count, 0) + res.unfiled_count;
+
+  const roots = state.folders.filter((f) => !f.parent_id);
+  const row = (f, depth) => `
+    <div class="tree-item ${state.folder === f.id ? 'active' : ''}" data-folder="${esc(f.id)}" style="padding-left:${10 + depth * 14}px">
+      ${icon.folder}<span class="name">${esc(f.name)}</span>
+      <span class="count">${f.document_count}</span>
+      <span class="row-act">
+        <button class="icon-btn" data-edit="${esc(f.id)}" title="Đổi tên">${icon.edit}</button>
+        <button class="icon-btn" data-del="${esc(f.id)}" title="Xoá">${icon.trash}</button>
+      </span>
+    </div>
+    ${state.folders.filter((c) => c.parent_id === f.id).map((c) => row(c, depth + 1)).join('')}`;
+
+  document.getElementById('tree').innerHTML = `
+    <div class="tree">
+      <div class="tree-item ${state.folder === null ? 'active' : ''}" data-folder="">${icon.inbox}<span class="name">Tất cả tài liệu</span><span class="count">${total}</span></div>
+      ${roots.map((f) => row(f, 0)).join('')}
+      <div class="tree-item ${state.folder === 'none' ? 'active' : ''}" data-folder="none">${icon.file}<span class="name">Chưa phân loại</span><span class="count">${state.unfiled}</span></div>
+    </div>`;
+
+  document.querySelectorAll('[data-folder]').forEach((n) => {
+    n.onclick = (e) => {
+      if (e.target.closest('[data-edit],[data-del]')) return;
+      state.folder = n.dataset.folder || null;
+      loadFolders(); loadDocs();
+    };
+  });
+  document.querySelectorAll('[data-edit]').forEach((b) => {
+    b.onclick = () => folderModal(state.folders.find((f) => f.id === b.dataset.edit));
+  });
+  document.querySelectorAll('[data-del]').forEach((b) => {
+    b.onclick = async () => {
+      const f = state.folders.find((x) => x.id === b.dataset.del);
+      if (!(await confirmDialog('Xoá thư mục', `Xoá "${f.name}"? Tài liệu bên trong sẽ chuyển về mục Chưa phân loại, không bị mất.`))) return;
+      await api(`/orgs/${orgId}/folders/${f.id}`, { method: 'DELETE' });
+      toast('Đã xoá thư mục', 'ok');
+      state.folder = null; loadFolders(); loadDocs();
+    };
+  });
+}
+
+function folderModal(folder) {
+  const opts = state.folders.filter((f) => f.id !== folder?.id)
+    .map((f) => `<option value="${esc(f.id)}" ${folder?.parent_id === f.id ? 'selected' : ''}>${esc(f.name)}</option>`).join('');
+  modal({
+    title: folder ? 'Đổi tên thư mục' : 'Thư mục mới',
+    body: `
+      <div class="field"><label>Tên thư mục</label><input id="fname" value="${esc(folder?.name || '')}" placeholder="Ví dụ: Quy trình nhân sự" /></div>
+      <div class="field"><label>Thư mục cha</label><select id="fparent"><option value="">— Không có —</option>${opts}</select></div>`,
+    okText: folder ? 'Lưu' : 'Tạo thư mục',
+    onOk: async (box) => {
+      const name = box.querySelector('#fname').value.trim();
+      if (!name) { toast('Chưa nhập tên thư mục', 'err'); return false; }
+      const body = { name, parent_id: box.querySelector('#fparent').value || null };
+      if (folder) await api(`/orgs/${orgId}/folders/${folder.id}`, { method: 'PATCH', body });
+      else await api(`/orgs/${orgId}/folders`, { method: 'POST', body });
+      toast('Đã lưu thư mục', 'ok');
+      loadFolders();
+    },
+  });
+}
+
+function uploadModal() {
+  const opts = state.folders.map((f) => `<option value="${esc(f.id)}" ${state.folder === f.id ? 'selected' : ''}>${esc(f.name)}</option>`).join('');
+  modal({
+    title: 'Tải tài liệu lên',
+    okText: 'Tải lên',
+    body: `
+      <div class="field"><label>Chọn thư mục</label><select id="ufolder"><option value="">Chưa phân loại</option>${opts}</select></div>
+      <div class="field"><label>Tệp tài liệu</label><input type="file" id="ufile" multiple accept=".pdf,.docx,.txt" />
+        <div class="hint">Hỗ trợ PDF có chữ (không phải bản scan), DOCX và TXT. Tối đa 25 MB mỗi tệp.</div></div>
+      <div id="uprogress" class="small muted"></div>`,
+    onOk: async (box) => {
+      const files = [...box.querySelector('#ufile').files];
+      if (!files.length) { toast('Chưa chọn tệp', 'err'); return false; }
+      const folderId = box.querySelector('#ufolder').value;
+      const pg = box.querySelector('#uprogress');
+      let ok = 0, fail = 0;
+      for (const [i, file] of files.entries()) {
+        pg.textContent = `Đang tải ${i + 1}/${files.length}: ${file.name}…`;
+        const fd = new FormData();
+        fd.append('file', file);
+        if (folderId) fd.append('folder_id', folderId);
+        try { await api(`/orgs/${orgId}/documents`, { method: 'POST', form: fd }); ok++; }
+        catch (err) { fail++; toast(`${file.name}: ${err.message}`, 'err'); }
+      }
+      toast(`Đã tải lên ${ok} tệp${fail ? `, ${fail} tệp lỗi` : ''}`, fail ? 'err' : 'ok');
+      loadFolders(); loadDocs();
+    },
+  });
+}
+
+let docTimer = null;
+async function loadDocs(q = '') {
+  clearTimeout(docTimer);
+  const box = document.getElementById('docTable');
+  if (!box) return;
+  const params = new URLSearchParams();
+  if (state.folder) params.set('folder_id', state.folder);
+  if (q) params.set('q', q);
+
+  const docs = await api(`/orgs/${orgId}/documents?${params}`);
+  if (!docs.length) {
+    box.innerHTML = emptyState('Chưa có tài liệu', 'Bấm "Tải tài liệu lên" để đưa tài liệu đầu tiên vào chatbot.');
+    return;
+  }
+
+  const folderName = (id) => state.folders.find((f) => f.id === id)?.name || 'Chưa phân loại';
+  box.innerHTML = `<div class="table-wrap"><table class="tbl">
+    <thead><tr><th>Tài liệu</th><th>Thư mục</th><th class="num">Dung lượng</th><th class="num">Số đoạn</th><th>Trạng thái</th><th>Tải lên</th><th></th></tr></thead>
+    <tbody>${docs.map((d) => `
+      <tr>
+        <td><div class="cell-main truncate" style="max-width:280px" title="${esc(d.filename)}">${esc(d.filename)}</div>
+            <div class="cell-sub">${esc(d.uploader)}</div>
+            ${d.error_message ? `<div class="cell-sub" style="color:var(--danger)">${esc(d.error_message)}</div>` : ''}</td>
+        <td class="small">${esc(folderName(d.folder_id))}</td>
+        <td class="num small">${esc(fmt.bytes(d.size_bytes))}</td>
+        <td class="num small">${fmt.num(d.chunk_count)}</td>
+        <td>${badge(d.status, LABEL.status)}</td>
+        <td class="small nowrap">${esc(fmt.ago(d.created_at))}</td>
+        <td class="nowrap" style="width:1%">
+          <button class="icon-btn" data-dl="${esc(d.id)}" title="Tải xuống">${icon.download}</button>
+          <button class="icon-btn" data-mv="${esc(d.id)}" title="Chuyển thư mục">${icon.folder}</button>
+          ${d.status === 'failed' ? `<button class="icon-btn" data-re="${esc(d.id)}" title="Xử lý lại">${icon.refresh}</button>` : ''}
+          <button class="icon-btn" data-rm="${esc(d.id)}" title="Xoá">${icon.trash}</button>
+        </td>
+      </tr>`).join('')}</tbody></table></div>`;
+
+  box.querySelectorAll('[data-dl]').forEach((b) => {
+    b.onclick = async () => {
+      const { url } = await api(`/orgs/${orgId}/documents/${b.dataset.dl}/download`);
+      window.open(url, '_blank');
+    };
+  });
+  box.querySelectorAll('[data-mv]').forEach((b) => {
+    b.onclick = () => {
+      const d = docs.find((x) => x.id === b.dataset.mv);
+      modal({
+        title: 'Chuyển thư mục',
+        body: `<div class="field"><label>Thư mục đích cho "${esc(d.filename)}"</label>
+          <select id="mvf"><option value="">Chưa phân loại</option>
+          ${state.folders.map((f) => `<option value="${esc(f.id)}" ${d.folder_id === f.id ? 'selected' : ''}>${esc(f.name)}</option>`).join('')}</select></div>`,
+        onOk: async (box2) => {
+          await api(`/orgs/${orgId}/documents/${d.id}`, { method: 'PATCH', body: { folder_id: box2.querySelector('#mvf').value || null } });
+          toast('Đã chuyển thư mục', 'ok'); loadFolders(); loadDocs();
+        },
+      });
+    };
+  });
+  box.querySelectorAll('[data-re]').forEach((b) => {
+    b.onclick = async () => {
+      await api(`/orgs/${orgId}/documents/${b.dataset.re}/reindex`, { method: 'POST' });
+      toast('Đang xử lý lại tài liệu', 'ok'); loadDocs();
+    };
+  });
+  box.querySelectorAll('[data-rm]').forEach((b) => {
+    b.onclick = async () => {
+      const d = docs.find((x) => x.id === b.dataset.rm);
+      if (!(await confirmDialog('Xoá tài liệu', `Xoá vĩnh viễn "${d.filename}"? Chatbot sẽ không còn dùng tài liệu này.`))) return;
+      await api(`/orgs/${orgId}/documents/${d.id}`, { method: 'DELETE' });
+      toast('Đã xoá tài liệu', 'ok'); loadFolders(); loadDocs();
+    };
+  });
+
+  if (docs.some((d) => d.status === 'processing')) docTimer = setTimeout(() => loadDocs(q), 4000);
+}
+
+/* =================== THÀNH VIÊN =================== */
+async function viewMembers() {
+  const el = document.getElementById('view-members');
+  el.innerHTML = `
+    <div class="toolbar"><span class="spacer"></span><button class="btn primary" id="inviteBtn">${icon.plus} Mời thành viên</button></div>
+    <div class="card"><div class="card-body flush" id="memberTable">Đang tải…</div></div>
+    <div class="card"><div class="card-body">
+      <h3>Phân quyền hoạt động thế nào?</h3>
+      <p class="muted mt-1"><b>Quản trị</b> — tải lên, xem, xoá tài liệu, quản lý thư mục, mời và gỡ thành viên, xem lịch sử hỏi đáp của cả tổ chức.</p>
+      <p class="muted mb-0"><b>Thành viên</b> — chỉ trò chuyện với chatbot và xem lịch sử của chính mình. Không thấy danh sách tài liệu, không tải lên hay xoá được.</p>
+    </div></div>`;
+  document.getElementById('inviteBtn').onclick = inviteModal;
+  await loadMembers();
+}
+
+async function loadMembers() {
+  const box = document.getElementById('memberTable');
+  const members = await api(`/orgs/${orgId}/members`);
+  box.innerHTML = `<div class="table-wrap"><table class="tbl">
+    <thead><tr><th>Thành viên</th><th>Vai trò</th><th>Trạng thái</th><th>Đăng nhập gần nhất</th><th></th></tr></thead>
+    <tbody>${members.map((m) => `
+      <tr>
+        <td><div class="row" style="gap:10px">
+          <div class="avatar" style="background:var(--primary-soft);color:var(--primary)">${esc((m.full_name || m.email)[0].toUpperCase())}</div>
+          <div><div class="cell-main">${esc(m.full_name || m.email.split('@')[0])} ${m.is_owner ? '<span class="badge purple">Chủ sở hữu</span>' : ''}</div>
+          <div class="cell-sub">${esc(m.email)}</div></div></div></td>
+        <td>${badge(m.role, LABEL.role)}</td>
+        <td>${badge(m.status, LABEL.status)}${m.invite_token ? `<button class="btn sm mt-1" data-link="${esc(m.invite_token)}">Sao chép link mời</button>` : ''}</td>
+        <td class="small">${esc(fmt.ago(m.last_login_at))}</td>
+        <td class="nowrap" style="width:1%">
+          ${m.is_owner ? '' : `<button class="icon-btn" data-edit="${esc(m.id)}" title="Đổi vai trò">${icon.edit}</button>
+          <button class="icon-btn" data-rm="${esc(m.id)}" title="Gỡ khỏi tổ chức">${icon.trash}</button>`}
+        </td>
+      </tr>`).join('')}</tbody></table></div>`;
+
+  box.querySelectorAll('[data-link]').forEach((b) => {
+    b.onclick = () => {
+      const url = `${location.origin}/register.html?invite=${b.dataset.link}`;
+      navigator.clipboard.writeText(url).then(() => toast('Đã sao chép link mời', 'ok'), () => prompt('Sao chép link này:', url));
+    };
+  });
+  box.querySelectorAll('[data-edit]').forEach((b) => {
+    b.onclick = () => {
+      const m = members.find((x) => x.id === b.dataset.edit);
+      modal({
+        title: 'Đổi vai trò',
+        body: `<div class="field"><label>Vai trò của ${esc(m.email)}</label>
+          <select id="mrole"><option value="member" ${m.role === 'member' ? 'selected' : ''}>Thành viên — chỉ dùng chatbot</option>
+          <option value="admin" ${m.role === 'admin' ? 'selected' : ''}>Quản trị — quản lý tài liệu và thành viên</option></select></div>`,
+        onOk: async (box2) => {
+          await api(`/orgs/${orgId}/members/${m.id}`, { method: 'PATCH', body: { role: box2.querySelector('#mrole').value } });
+          toast('Đã cập nhật vai trò', 'ok'); loadMembers();
+        },
+      });
+    };
+  });
+  box.querySelectorAll('[data-rm]').forEach((b) => {
+    b.onclick = async () => {
+      const m = members.find((x) => x.id === b.dataset.rm);
+      if (!(await confirmDialog('Gỡ thành viên', `Gỡ ${m.email} khỏi tổ chức? Họ sẽ không truy cập được chatbot nữa.`, 'Gỡ'))) return;
+      await api(`/orgs/${orgId}/members/${m.id}`, { method: 'DELETE' });
+      toast('Đã gỡ thành viên', 'ok'); loadMembers();
+    };
+  });
+}
+
+function inviteModal() {
+  modal({
+    title: 'Mời thành viên',
+    okText: 'Gửi lời mời',
+    body: `
+      <div class="field"><label>Email</label><input type="email" id="iemail" placeholder="nhanvien@congty.vn" /></div>
+      <div class="field"><label>Vai trò</label>
+        <select id="irole"><option value="member">Thành viên — chỉ dùng chatbot</option><option value="admin">Quản trị — quản lý tài liệu và thành viên</option></select></div>
+      <div class="alert info show">Nếu email chưa có tài khoản, hệ thống tạo một link mời để bạn gửi cho họ.</div>`,
+    onOk: async (box) => {
+      const email = box.querySelector('#iemail').value.trim();
+      if (!email) { toast('Chưa nhập email', 'err'); return false; }
+      const res = await api(`/orgs/${orgId}/members`, { method: 'POST', body: { email, role: box.querySelector('#irole').value } });
+      loadMembers();
+      if (res.invite_link) {
+        const url = location.origin + res.invite_link;
+        modal({ title: 'Link mời đã sẵn sàng', okText: 'Sao chép link', cancelText: 'Đóng',
+          body: `<p>Gửi link dưới đây cho <b>${esc(email)}</b> để họ tạo tài khoản và vào tổ chức:</p>
+                 <div class="field"><input type="text" readonly value="${esc(url)}" /></div>`,
+          onOk: () => navigator.clipboard.writeText(url).then(() => toast('Đã sao chép', 'ok')) });
+      } else {
+        toast('Đã thêm thành viên vào tổ chức', 'ok');
+      }
+    },
+  });
+}
+
+/* =================== LỊCH SỬ HỎI ĐÁP =================== */
+async function viewHistory() {
+  const el = document.getElementById('view-history');
+  el.innerHTML = `
+    <div class="toolbar"><div class="search-box">${icon.search}<input type="search" id="hq" placeholder="Tìm trong câu hỏi…" /></div></div>
+    <div class="card"><div class="card-body flush" id="histBox">Đang tải…</div><div class="pager" id="histPager"></div></div>`;
+  document.getElementById('hq').oninput = debounce(() => { state.historyPage = 1; loadHistory(); }, 350);
+  await loadHistory();
+}
+
+async function loadHistory() {
+  const box = document.getElementById('histBox');
+  const q = document.getElementById('hq')?.value || '';
+  const res = await api(`/orgs/${orgId}/chat/history?page=${state.historyPage}&size=25&q=${encodeURIComponent(q)}`);
+
+  if (!res.items.length) { box.innerHTML = emptyState('Chưa có câu hỏi nào'); document.getElementById('histPager').innerHTML = ''; return; }
+
+  box.innerHTML = `<div class="table-wrap"><table class="tbl">
+    <thead><tr><th>Câu hỏi</th><th>Người hỏi</th><th class="num">Nguồn</th><th class="num">Thời gian xử lý</th><th>Lúc</th></tr></thead>
+    <tbody>${res.items.map((m, i) => `
+      <tr data-row="${i}" style="cursor:pointer">
+        <td><div class="cell-main truncate" style="max-width:420px">${esc(m.question)}</div>
+            <div class="cell-sub truncate" style="max-width:420px">${esc((m.answer || '').slice(0, 120))}</div></td>
+        <td class="small">${esc(m.user_email || '—')}</td>
+        <td class="num small">${(m.sources || []).length}</td>
+        <td class="num small">${m.latency_ms ? (m.latency_ms / 1000).toFixed(1) + 's' : '—'}</td>
+        <td class="small nowrap">${esc(fmt.dateTime(m.created_at))}</td>
+      </tr>`).join('')}</tbody></table></div>`;
+
+  box.querySelectorAll('[data-row]').forEach((tr) => {
+    tr.onclick = () => {
+      const m = res.items[+tr.dataset.row];
+      modal({ title: 'Chi tiết hỏi đáp', wide: true, okText: 'Đóng', cancelText: 'Đóng',
+        body: `<div class="field"><label>Câu hỏi</label><div>${esc(m.question)}</div></div>
+               <div class="field"><label>Trả lời</label><div style="white-space:pre-wrap">${esc(m.answer || '')}</div></div>
+               <div class="field"><label>Nguồn tham chiếu</label><div class="srcs">${(m.sources || []).map((s) => `<span class="src-chip">${icon.file}${esc(s)}</span>`).join('') || '<span class="muted">Không có</span>'}</div></div>
+               <div class="small muted">${esc(m.user_email || '')} · ${esc(fmt.dateTime(m.created_at))}</div>` });
+    };
+  });
+
+  const pages = Math.ceil(res.total / res.size);
+  document.getElementById('histPager').innerHTML = `
+    <span>${fmt.num(res.total)} câu hỏi · trang ${res.page}/${pages || 1}</span>
+    <button class="btn sm" id="prev" ${res.page <= 1 ? 'disabled' : ''}>Trước</button>
+    <button class="btn sm" id="next" ${res.page >= pages ? 'disabled' : ''}>Sau</button>`;
+  const prev = document.getElementById('prev'), next = document.getElementById('next');
+  if (prev) prev.onclick = () => { state.historyPage--; loadHistory(); };
+  if (next) next.onclick = () => { state.historyPage++; loadHistory(); };
+}
+
+/* =================== GÓI CƯỚC =================== */
+async function viewBilling() {
+  const el = document.getElementById('view-billing');
+  el.innerHTML = '<div class="loading-line"></div>';
+  const b = await api(`/orgs/${orgId}/billing`);
+  const u = b.usage, L = u.limits;
+
+  const line = (label, used, limit, unit = '') => `
+    <div class="mb-2">
+      <div class="row between small"><span>${esc(label)}</span><span class="muted">${fmt.num(used)}${unit} / ${fmt.num(limit)}${unit}</span></div>
+      ${meter(used, limit)}
+    </div>`;
+
+  el.innerHTML = `
+    <div class="split" style="grid-template-columns:1fr 340px">
+      <div>
+        <div class="card">
+          <div class="card-head"><h2>Mức sử dụng</h2><span class="sub">Hạn mức theo gói ${esc(b.plan?.name || '—')}</span></div>
+          <div class="card-body">
+            ${line('Tài liệu', u.documents, L.max_documents)}
+            ${line('Thành viên', u.members, L.max_members)}
+            ${line('Lượt hỏi trong tháng', u.questions_this_month, L.max_questions_per_month)}
+            ${line('Dung lượng lưu trữ', u.storage_mb, L.max_storage_mb, ' MB')}
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Lịch sử thanh toán</h2></div>
+          <div class="card-body flush">${b.payments.length ? `<div class="table-wrap"><table class="tbl">
+            <thead><tr><th>Ngày</th><th>Kỳ</th><th class="num">Số tiền</th><th>Hình thức</th><th>Trạng thái</th></tr></thead>
+            <tbody>${b.payments.map((p) => `<tr>
+              <td class="small">${esc(fmt.date(p.created_at))}</td>
+              <td class="small">${esc(fmt.date(p.period_start))} → ${esc(fmt.date(p.period_end))}</td>
+              <td class="num">${esc(fmt.money(p.amount_vnd))}</td>
+              <td class="small">${esc(p.method || '—')}</td>
+              <td>${badge(p.status, LABEL.payment)}</td></tr>`).join('')}</tbody></table></div>`
+            : emptyState('Chưa có giao dịch', 'Doanh nghiệp đang dùng gói miễn phí.')}</div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="card-head"><h3>Gói hiện tại</h3></div>
+          <div class="card-body">
+            <div style="font-size:22px;font-weight:680">${esc(b.plan?.name || 'Chưa gán gói')}</div>
+            <div class="muted small">${esc(b.plan?.description || '')}</div>
+            <div class="mt-2">${badge(b.billing_status, LABEL.billing)}</div>
+            <div class="small muted mt-1">Hạn dùng: ${esc(b.plan_expires_at ? fmt.date(b.plan_expires_at) : 'không giới hạn')}</div>
+            <div class="mt-2" style="font-size:20px;font-weight:650">${esc(fmt.money(b.plan?.price_vnd || 0))}<span class="muted small"> / tháng</span></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>Các gói khác</h3></div>
+          <div class="card-body">
+            ${b.available_plans.filter((p) => p.id !== b.plan?.id).map((p) => `
+              <div class="mb-2" style="padding-bottom:12px;border-bottom:1px solid var(--border)">
+                <div class="row between"><b>${esc(p.name)}</b><span>${esc(fmt.money(p.price_vnd))}/tháng</span></div>
+                <div class="small muted">${fmt.num(p.max_documents)} tài liệu · ${fmt.num(p.max_members)} thành viên · ${fmt.num(p.max_questions_per_month)} lượt hỏi/tháng</div>
+              </div>`).join('') || '<span class="muted small">Không có gói khác</span>'}
+            <p class="small muted mb-0">Để đổi gói, liên hệ quản trị hệ thống. Việc nâng cấp có hiệu lực ngay sau khi được ghi nhận thanh toán.</p>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* =================== THIẾT LẬP =================== */
+async function viewSettings() {
+  const el = document.getElementById('view-settings');
+  const d = await api(`/orgs/${orgId}`);
+  org = d.organization;
+
+  el.innerHTML = `
+    <div class="split" style="grid-template-columns:1fr 1fr">
+      <div class="card">
+        <div class="card-head"><h2>Hồ sơ doanh nghiệp</h2></div>
+        <div class="card-body">
+          <div class="field"><label>Tên doanh nghiệp</label><input id="oname" value="${esc(org.name)}" /></div>
+          <div class="field"><label>Email liên hệ</label><input id="omail" value="${esc(org.contact_email || '')}" placeholder="ketoan@congty.vn" /></div>
+          <div class="field"><label>Mã số thuế</label><input id="otax" value="${esc(org.tax_code || '')}" /></div>
+          <div class="field"><label>Mã tổ chức</label><input class="mono" value="${esc(org.id)}" readonly /></div>
+          <button class="btn primary" id="saveOrg">Lưu thay đổi</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Tài khoản của bạn</h2></div>
+        <div class="card-body">
+          <div class="field"><label>Họ và tên</label><input id="uname" value="${esc(me.user.full_name || '')}" /></div>
+          <div class="field"><label>Email</label><input value="${esc(me.user.email)}" readonly /></div>
+          <button class="btn" id="saveUser">Lưu hồ sơ</button>
+          <hr style="border:none;border-top:1px solid var(--border);margin:20px 0" />
+          <h3 class="mb-1">Đổi mật khẩu</h3>
+          <div class="field"><label>Mật khẩu hiện tại</label><input type="password" id="pwOld" /></div>
+          <div class="field"><label>Mật khẩu mới</label><input type="password" id="pwNew" placeholder="Ít nhất 6 ký tự" /></div>
+          <button class="btn" id="savePw">${icon.key} Đổi mật khẩu</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('saveOrg').onclick = async (e) => {
+    e.target.disabled = true;
+    try {
+      await api(`/orgs/${orgId}`, { method: 'PATCH', body: {
+        name: document.getElementById('oname').value.trim(),
+        contact_email: document.getElementById('omail').value.trim(),
+        tax_code: document.getElementById('otax').value.trim(),
+      }});
+      toast('Đã lưu hồ sơ doanh nghiệp', 'ok');
+      setTimeout(() => location.reload(), 700);
+    } catch (err) { toast(err.message, 'err'); e.target.disabled = false; }
+  };
+  document.getElementById('saveUser').onclick = async () => {
+    try { await api('/auth/profile', { method: 'PATCH', body: { full_name: document.getElementById('uname').value.trim() } }); toast('Đã lưu hồ sơ', 'ok'); }
+    catch (err) { toast(err.message, 'err'); }
+  };
+  document.getElementById('savePw').onclick = async () => {
+    try {
+      await api('/auth/change-password', { method: 'POST', body: {
+        current_password: document.getElementById('pwOld').value,
+        new_password: document.getElementById('pwNew').value,
+      }});
+      toast('Đã đổi mật khẩu', 'ok');
+      document.getElementById('pwOld').value = ''; document.getElementById('pwNew').value = '';
+    } catch (err) { toast(err.message, 'err'); }
+  };
+}
+
+/* =================== KHỞI CHẠY =================== */
+const VIEWS = { overview: viewOverview, documents: viewDocuments, members: viewMembers, history: viewHistory, billing: viewBilling, settings: viewSettings };
+
+shell();
+router(async (view) => {
+  const [t, d] = TITLES[view] || TITLES.overview;
+  document.getElementById('ttl').textContent = t;
+  document.getElementById('dsc').textContent = d;
+  try { await (VIEWS[view] || viewOverview)(); }
+  catch (err) { toast(err.message, 'err'); }
+}, 'overview');
+</script>
+</body>
+</html>

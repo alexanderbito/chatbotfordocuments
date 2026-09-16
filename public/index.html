@@ -2,233 +2,28 @@
 <html lang="vi">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Demo Chatbot Tài liệu Doanh nghiệp</title>
-<style>
-  * { box-sizing: border-box; }
-  body {
-    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-    max-width: 720px;
-    margin: 40px auto;
-    padding: 0 16px;
-    background: #f7f7f8;
-    color: #1a1a1a;
-  }
-  h1 { font-size: 20px; }
-  h2 { font-size: 15px; color: #555; margin-top: 32px; }
-  .card {
-    background: #fff;
-    border: 1px solid #e3e3e3;
-    border-radius: 10px;
-    padding: 16px;
-    margin-bottom: 16px;
-  }
-  select, input[type=text], input[type=file] {
-    width: 100%;
-    padding: 8px;
-    border: 1px solid #ccc;
-    border-radius: 6px;
-    margin-top: 6px;
-    margin-bottom: 10px;
-    font-size: 14px;
-  }
-  button {
-    background: #111;
-    color: #fff;
-    border: none;
-    padding: 9px 16px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 14px;
-  }
-  button:disabled { background: #999; cursor: not-allowed; }
-  .doc-item {
-    display: flex;
-    justify-content: space-between;
-    padding: 6px 0;
-    border-bottom: 1px solid #eee;
-    font-size: 13px;
-  }
-  .status { font-size: 12px; padding: 2px 8px; border-radius: 10px; }
-  .status.ready { background: #d7f5dd; color: #167a2f; }
-  .status.processing { background: #fff3cd; color: #8a6d00; }
-  .status.failed { background: #fddede; color: #b30000; }
-  .chat-box {
-    height: 320px;
-    overflow-y: auto;
-    border: 1px solid #eee;
-    border-radius: 8px;
-    padding: 10px;
-    margin-bottom: 10px;
-    background: #fafafa;
-  }
-  .msg { margin-bottom: 12px; font-size: 14px; line-height: 1.5; }
-  .msg.user { text-align: right; }
-  .msg.user span { background: #111; color: #fff; padding: 6px 10px; border-radius: 10px; display: inline-block; }
-  .msg.bot span { background: #eee; padding: 6px 10px; border-radius: 10px; display: inline-block; }
-  .sources { font-size: 12px; color: #777; margin-top: 4px; }
-  .chat-input { display: flex; gap: 8px; }
-  .chat-input input { flex: 1; margin: 0; }
-  small.hint { color: #888; }
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DocBot — Chatbot tài liệu doanh nghiệp</title>
+<link rel="stylesheet" href="/assets/app.css" />
 </head>
 <body>
-
-<h1>🤖 Demo Chatbot Tài liệu Doanh nghiệp</h1>
-
-<div class="card">
-  <h2 style="margin-top:0">1. Chọn hoặc tạo doanh nghiệp</h2>
-  <select id="orgSelect"></select>
-  <div style="display:flex; gap:8px; margin-top:8px;">
-    <input type="text" id="newOrgName" placeholder="Tên doanh nghiệp mới..." style="margin:0;" />
-    <button onclick="createOrg()">+ Tạo mới</button>
+<div style="min-height:100vh;display:grid;place-items:center">
+  <div style="text-align:center">
+    <div class="brand-mark" style="margin:0 auto 14px;width:44px;height:44px;font-size:20px">D</div>
+    <p class="muted">Đang chuyển hướng…</p>
   </div>
 </div>
-
-<div class="card">
-  <h2 style="margin-top:0">2. Tải tài liệu lên</h2>
-  <input type="file" id="fileInput" accept=".pdf,.docx,.txt" />
-  <button onclick="uploadFile()" id="uploadBtn">Tải lên</button>
-  <p><small class="hint">Hỗ trợ PDF (có chữ, không phải scan/ảnh), DOCX, TXT.</small></p>
-  <div id="docList"></div>
-</div>
-
-<div class="card">
-  <h2 style="margin-top:0">3. Hỏi chatbot</h2>
-  <div class="chat-box" id="chatBox"></div>
-  <div class="chat-input">
-    <input type="text" id="questionInput" placeholder="Nhập câu hỏi..." onkeydown="if(event.key==='Enter') askQuestion()" />
-    <button onclick="askQuestion()" id="askBtn">Gửi</button>
-  </div>
-</div>
-
-<script>
-let currentOrgId = null;
-
-async function loadOrgs() {
-  const res = await fetch('/organizations');
-  const orgs = await res.json();
-  const select = document.getElementById('orgSelect');
-  select.innerHTML = orgs.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
-  if (orgs.length > 0) {
-    currentOrgId = orgs[0].id;
-    select.value = currentOrgId;
-    loadDocs();
-  }
-  select.onchange = () => {
-    currentOrgId = select.value;
-    loadDocs();
-  };
-}
-
-async function createOrg() {
-  const name = document.getElementById('newOrgName').value.trim();
-  if (!name) return alert('Nhập tên doanh nghiệp trước đã');
-  const res = await fetch('/organizations', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
-  });
-  const org = await res.json();
-  document.getElementById('newOrgName').value = '';
-  await loadOrgs();
-  document.getElementById('orgSelect').value = org.id;
-  currentOrgId = org.id;
-  loadDocs();
-}
-
-async function loadDocs() {
-  if (!currentOrgId) return;
-  const res = await fetch(`/organizations/${currentOrgId}/documents`);
-  const docs = await res.json();
-  const list = document.getElementById('docList');
-  if (docs.length === 0) {
-    list.innerHTML = '<p><small class="hint">Chưa có tài liệu nào.</small></p>';
-    return;
-  }
-  list.innerHTML = docs.map(d => `
-    <div class="doc-item">
-      <span>${d.filename}</span>
-      <span class="status ${d.status}">${d.status}</span>
-    </div>
-  `).join('');
-
-  // Nếu còn tài liệu đang xử lý, tự refresh sau 3s để cập nhật trạng thái
-  if (docs.some(d => d.status === 'processing')) {
-    setTimeout(loadDocs, 3000);
-  }
-}
-
-async function uploadFile() {
-  const fileInput = document.getElementById('fileInput');
-  if (!currentOrgId) return alert('Chọn hoặc tạo doanh nghiệp trước đã');
-  if (!fileInput.files[0]) return alert('Chọn file trước đã');
-
-  const btn = document.getElementById('uploadBtn');
-  btn.disabled = true;
-  btn.textContent = 'Đang tải lên...';
-
-  const formData = new FormData();
-  formData.append('organization_id', currentOrgId);
-  formData.append('file', fileInput.files[0]);
-
-  try {
-    const res = await fetch('/upload', { method: 'POST', body: formData });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Lỗi upload');
-    fileInput.value = '';
-    loadDocs();
-  } catch (err) {
-    alert('Lỗi: ' + err.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Tải lên';
-  }
-}
-
-function appendMessage(role, text, sources) {
-  const chatBox = document.getElementById('chatBox');
-  const div = document.createElement('div');
-  div.className = `msg ${role}`;
-  let html = `<span>${text}</span>`;
-  if (sources && sources.length > 0) {
-    html += `<div class="sources">Nguồn: ${sources.join(', ')}</div>`;
-  }
-  div.innerHTML = html;
-  chatBox.appendChild(div);
-  chatBox.scrollTop = chatBox.scrollHeight;
-}
-
-async function askQuestion() {
-  const input = document.getElementById('questionInput');
-  const question = input.value.trim();
-  if (!question) return;
-  if (!currentOrgId) return alert('Chọn hoặc tạo doanh nghiệp trước đã');
-
-  appendMessage('user', question);
-  input.value = '';
-
-  const btn = document.getElementById('askBtn');
-  btn.disabled = true;
-
-  try {
-    const res = await fetch('/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ organization_id: currentOrgId, question }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Lỗi chat');
-    appendMessage('bot', data.answer, data.sources);
-  } catch (err) {
-    appendMessage('bot', '⚠️ Lỗi: ' + err.message);
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-loadOrgs();
+<script type="module">
+  import { Session, api } from '/assets/app.js';
+  (async () => {
+    if (!Session.token) return (location.href = '/login.html');
+    try {
+      const me = await api('/auth/me');
+      if (me.user.is_system_admin) return (location.href = '/sysadmin.html');
+      const adminOrg = me.organizations.find((o) => o.role === 'admin');
+      location.href = adminOrg ? '/admin.html' : '/chat.html';
+    } catch { location.href = '/login.html'; }
+  })();
 </script>
-
 </body>
 </html>

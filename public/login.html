@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Đăng nhập — DocBot</title>
+<link rel="stylesheet" href="/assets/app.css" />
+</head>
+<body>
+<div class="auth-wrap">
+  <div class="auth-side">
+    <div>
+      <div class="brand" style="padding:0 0 30px">
+        <div class="brand-mark">D</div>
+        <div><div class="brand-name">DocBot</div><div class="brand-sub">Chatbot tài liệu doanh nghiệp</div></div>
+      </div>
+      <h2>Biến kho tài liệu nội bộ<br />thành trợ lý hỏi đáp</h2>
+      <p>Tải tài liệu lên, hệ thống tự phân tích và tạo chatbot trả lời trong đúng phạm vi tài liệu của doanh nghiệp bạn.</p>
+      <div id="features"></div>
+    </div>
+    <p class="small" style="color:#9ea1d8">© 2026 DocBot · Dữ liệu mỗi doanh nghiệp được cách ly hoàn toàn</p>
+  </div>
+
+  <div class="auth-main">
+    <div class="auth-card">
+      <h1>Đăng nhập</h1>
+      <p class="lead">Truy cập vào không gian làm việc của doanh nghiệp bạn.</p>
+
+      <div class="alert error" id="alert"></div>
+
+      <form id="form">
+        <div class="field">
+          <label for="email">Email công việc</label>
+          <input type="email" id="email" required autocomplete="username" placeholder="ban@congty.vn" />
+        </div>
+        <div class="field">
+          <label for="password">Mật khẩu</label>
+          <input type="password" id="password" required autocomplete="current-password" placeholder="••••••••" />
+        </div>
+        <button class="btn primary block" type="submit" id="submitBtn">Đăng nhập</button>
+      </form>
+
+      <p class="auth-alt">Chưa có tài khoản? <a href="/register.html">Đăng ký doanh nghiệp</a></p>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { api, Session, icon, esc } from '/assets/app.js';
+
+  document.getElementById('features').innerHTML = [
+    ['shield', 'Phân quyền rõ ràng', 'Admin quản lý tài liệu, thành viên chỉ hỏi đáp'],
+    ['folder', 'Sắp xếp theo thư mục', 'Phân loại tài liệu theo phòng ban, dự án'],
+    ['chart', 'Theo dõi mức sử dụng', 'Biết ai hỏi gì, dùng bao nhiêu hạn mức'],
+  ].map(([ic, t, s]) => `
+    <div class="auth-feature">
+      <div class="ico">${icon[ic]}</div>
+      <div><b>${esc(t)}</b><span>${esc(s)}</span></div>
+    </div>`).join('');
+
+  const alertEl = document.getElementById('alert');
+  const showError = (msg) => { alertEl.textContent = msg; alertEl.className = 'alert error show'; };
+
+  if (new URLSearchParams(location.search).get('expired')) {
+    alertEl.textContent = 'Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.';
+    alertEl.className = 'alert info show';
+  }
+  if (Session.token) location.href = '/';
+
+  document.getElementById('form').onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('submitBtn');
+    btn.disabled = true; btn.textContent = 'Đang đăng nhập…';
+    try {
+      const data = await api('/auth/login', {
+        method: 'POST',
+        body: { email: email.value.trim(), password: password.value },
+      });
+      Session.token = data.access_token;
+      location.href = '/';
+    } catch (err) {
+      showError(err.message);
+      btn.disabled = false; btn.textContent = 'Đăng nhập';
+    }
+  };
+</script>
+</body>
+</html>
