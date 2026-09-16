@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient.js';
 import { requireAuth, requireSystemAdmin } from '../auth.js';
 import { getUsage } from '../limits.js';
 import { logEvent } from '../logger.js';
+import { decodeFilename } from '../utils/filename.js';
 
 const router = express.Router();
 router.use(requireAuth, requireSystemAdmin);
@@ -407,6 +408,45 @@ router.get('/failed-documents', async (req, res) => {
     .limit(100);
   if (error) return res.status(500).json({ error: error.message });
   res.json(data || []);
+});
+
+/**
+ * POST /admin/maintenance/fix-filenames
+ * Sửa lại tên tài liệu đã lưu bị lỗi font (mojibake latin-1) hoặc còn ở dạng NFD.
+ * Chạy ?dry_run=1 để xem trước danh sách sẽ đổi mà chưa ghi vào CSDL.
+ */
+router.post('/maintenance/fix-filenames', async (req, res) => {
+  try {
+    const dryRun = req.query.dry_run === '1' || req.body?.dry_run === true;
+
+    const { data: docs, error } = await supabase
+      .from('documents')
+      .select('id, filename, organization_id');
+    if (error) throw error;
+
+    const changes = [];
+    for (const d of docs || []) {
+      const fixed = decodeFilename(d.filename);
+      if (fixed && fixed !== d.filename) changes.push({ id: d.id, from: d.filename, to: fixed });
+    }
+
+    if (!dryRun) {
+      for (const c of changes) {
+        await supabase.from('documents').update({ filename: c.to }).eq('id', c.id);
+      }
+      if (changes.length) {
+        await logEvent({
+          scope: 'system',
+          userId: req.user.id,
+          message: `Đã sửa tên cho ${changes.length} tài liệu bị lỗi font`,
+        });
+      }
+    }
+
+    res.json({ scanned: (docs || []).length, changed: changes.length, dry_run: dryRun, changes: changes.slice(0, 100) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /** GET /admin/health — kiểm tra kết nối các dịch vụ phụ thuộc */

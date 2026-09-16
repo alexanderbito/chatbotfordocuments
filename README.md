@@ -149,7 +149,21 @@ và có thể sửa trong `/sysadmin.html → Gói cước`.
 
 ---
 
-## 7. Giới hạn đã biết
+## 7. Xử lý sự cố thường gặp
+
+**Tên tài liệu hiển thị lỗi font** (`Quy định` thành `Quy Ä‘á»‹nh`)
+
+Nguyên nhân: multer 1.x đọc tên file trong header multipart theo latin-1, còn macOS
+gửi tên ở dạng NFD (ký tự và dấu tách rời). Đã xử lý trong `src/utils/filename.js`:
+tên hiển thị được giải mã lại và chuẩn hoá NFC, còn key lưu trên R2 dùng bản không dấu
+thuần ASCII cho an toàn khi ký URL.
+
+Tài liệu đã tải lên **trước** bản vá vẫn giữ tên sai trong CSDL. Để sửa:
+`/sysadmin.html` → **Sức khoẻ hệ thống** → **Bảo trì dữ liệu** → "Xem trước danh sách"
+rồi "Sửa tên tài liệu". (Tương đương `POST /admin/maintenance/fix-filenames`,
+thêm `?dry_run=1` để chỉ xem trước.)
+
+## 8. Giới hạn đã biết
 
 - **Xử lý tài liệu đồng bộ trong tiến trình web**: file rất lớn có thể timeout trên Render Free.
   Khi có khách hàng thật nên tách thành worker riêng.

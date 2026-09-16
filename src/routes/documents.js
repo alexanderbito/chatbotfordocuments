@@ -9,6 +9,7 @@ import { supabase } from '../supabaseClient.js';
 import { requireAuth, requireOrgMember, requireOrgAdmin } from '../auth.js';
 import { checkQuota } from '../limits.js';
 import { logEvent } from '../logger.js';
+import { decodeFilename, toStorageSafeName } from '../utils/filename.js';
 
 const router = express.Router({ mergeParams: true });
 const upload = multer({
@@ -57,8 +58,10 @@ router.post('/', requireOrgAdmin, upload.single('file'), async (req, res) => {
     const quota = await checkQuota(req.org.id, req.org.plan, 'upload', file.size);
     if (!quota.ok) return res.status(402).json({ error: quota.error });
 
+    // Tên hiển thị giữ nguyên tiếng Việt có dấu; key trên R2 dùng bản không dấu cho an toàn.
+    const filename = decodeFilename(file.originalname);
     const folderId = req.body?.folder_id || null;
-    const key = `${req.org.id}/${uuidv4()}-${file.originalname}`;
+    const key = `${req.org.id}/${uuidv4()}-${toStorageSafeName(filename)}`;
     const { storage_key, storage_url } = await uploadToR2(key, file.buffer, file.mimetype);
 
     const { data: doc, error: docErr } = await supabase
@@ -66,7 +69,7 @@ router.post('/', requireOrgAdmin, upload.single('file'), async (req, res) => {
       .insert({
         organization_id: req.org.id,
         folder_id: folderId,
-        filename: file.originalname,
+        filename,
         storage_key,
         storage_url,
         status: 'processing',
@@ -95,7 +98,7 @@ router.patch('/:docId', requireOrgAdmin, async (req, res) => {
   try {
     const patch = {};
     if (req.body?.folder_id !== undefined) patch.folder_id = req.body.folder_id || null;
-    if (req.body?.filename) patch.filename = String(req.body.filename).trim();
+    if (req.body?.filename) patch.filename = String(req.body.filename).normalize('NFC').trim();
 
     const { data, error } = await supabase
       .from('documents')

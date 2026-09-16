@@ -506,7 +506,46 @@ async function viewHealth() {
       <div class="card-body" id="healthBox">
         <p class="muted mb-0">Bấm "Chạy kiểm tra" để xem trạng thái kết nối tới Supabase, Cloudflare R2, Voyage AI và DeepSeek.</p>
       </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Bảo trì dữ liệu</h2>
+        <span class="sub">Sửa tên tài liệu cũ bị lỗi font (mojibake) hoặc còn ở dạng tổ hợp dấu rời NFD.</span>
+      </div>
+      <div class="card-body">
+        <div class="btn-row">
+          <button class="btn" id="fixDry">Xem trước danh sách</button>
+          <button class="btn primary" id="fixRun">Sửa tên tài liệu</button>
+        </div>
+        <div id="fixBox" class="mt-2"></div>
+      </div>
     </div>`;
+
+  const runFix = async (dry, btn) => {
+    btn.disabled = true;
+    const box = document.getElementById('fixBox');
+    box.innerHTML = '<div class="loading-line"></div>';
+    try {
+      const d = await api(`/admin/maintenance/fix-filenames${dry ? '?dry_run=1' : ''}`, { method: 'POST' });
+      if (!d.changed) {
+        box.innerHTML = `<span class="badge ok">${icon.check} Đã quét ${fmt.num(d.scanned)} tài liệu, không có tên nào cần sửa</span>`;
+      } else {
+        box.innerHTML = `
+          <div class="alert ${dry ? 'info' : 'success'} show">${dry
+            ? `Tìm thấy ${fmt.num(d.changed)}/${fmt.num(d.scanned)} tài liệu cần sửa. Bấm "Sửa tên tài liệu" để áp dụng.`
+            : `Đã sửa ${fmt.num(d.changed)}/${fmt.num(d.scanned)} tài liệu.`}</div>
+          <div class="table-wrap"><table class="tbl">
+            <thead><tr><th>Tên hiện tại</th><th>Tên sau khi sửa</th></tr></thead>
+            <tbody>${d.changes.map((c) => `<tr>
+              <td class="small" style="color:var(--danger)">${esc(c.from)}</td>
+              <td class="small">${esc(c.to)}</td></tr>`).join('')}</tbody></table></div>`;
+      }
+      if (!dry) toast('Đã cập nhật tên tài liệu', 'ok');
+    } catch (err) { box.innerHTML = `<div class="alert error show">${esc(err.message)}</div>`; }
+    finally { btn.disabled = false; }
+  };
+  document.getElementById('fixDry').onclick = (e) => runFix(true, e.target);
+  document.getElementById('fixRun').onclick = (e) => runFix(false, e.target);
   document.getElementById('runHealth').onclick = async (e) => {
     e.target.disabled = true;
     const box = document.getElementById('healthBox');

@@ -39,10 +39,17 @@ export async function deleteFromR2(key) {
  * Nhờ vậy bucket có thể để riêng tư, chỉ admin tổ chức mới xem được tài liệu.
  */
 export async function getDownloadUrl(key, filename, expiresIn = 300) {
+  // RFC 5987: filename* giữ được tiếng Việt có dấu, filename= là bản dự phòng ASCII
+  let disposition;
+  if (filename) {
+    const ascii = filename.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
+    disposition = `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+  }
+
   const cmd = new GetObjectCommand({
     Bucket: BUCKET,
     Key: key,
-    ResponseContentDisposition: filename ? `attachment; filename="${encodeURIComponent(filename)}"` : undefined,
+    ResponseContentDisposition: disposition,
   });
   return getSignedUrl(s3, cmd, { expiresIn });
 }
