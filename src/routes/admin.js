@@ -4,6 +4,8 @@ import { requireAuth, requireSystemAdmin } from '../auth.js';
 import { getUsage } from '../limits.js';
 import { logEvent } from '../logger.js';
 import { decodeFilename } from '../utils/filename.js';
+import { queueStats } from '../queue.js';
+import { isOcrEnabled } from '../ocr.js';
 
 const router = express.Router();
 router.use(requireAuth, requireSystemAdmin);
@@ -68,7 +70,21 @@ router.get('/overview', async (req, res) => {
       if (o.status === 'suspended') suspended++;
     }
 
+    // Thống kê OCR
+    const { data: ocrRows } = await supabase.from('documents').select('ocr_pages, extraction_method, created_at');
+    const monthPrefix = new Date().toISOString().slice(0, 7);
+    const ocr = (ocrRows || []).reduce(
+      (acc, d) => {
+        acc.pages_total += d.ocr_pages || 0;
+        if ((d.created_at || '').slice(0, 7) === monthPrefix) acc.pages_this_month += d.ocr_pages || 0;
+        if (d.extraction_method === 'ocr') acc.documents += 1;
+        return acc;
+      },
+      { documents: 0, pages_total: 0, pages_this_month: 0 }
+    );
+
     res.json({
+      ocr,
       totals: {
         organizations: orgs.count || 0,
         users: users.count || 0,
@@ -293,7 +309,7 @@ router.delete('/plans/:id', async (req, res) => {
 function sanitizePlan(body = {}) {
   const out = {};
   const strs = ['code', 'name', 'description'];
-  const nums = ['price_vnd', 'max_documents', 'max_members', 'max_storage_mb', 'max_questions_per_month', 'sort_order'];
+  const nums = ['price_vnd', 'max_documents', 'max_members', 'max_storage_mb', 'max_questions_per_month', 'max_ocr_pages_per_month', 'sort_order'];
   for (const f of strs) if (body[f] !== undefined) out[f] = body[f];
   for (const f of nums) if (body[f] !== undefined) out[f] = Number(body[f]) || 0;
   if (body.is_active !== undefined) out.is_active = !!body.is_active;
@@ -492,7 +508,36 @@ router.get('/health', async (req, res) => {
     checks.push({ name: 'DeepSeek (mô hình trả lời)', ok: false, ms: Date.now() - t3, detail: e.message });
   }
 
-  res.json({ checked_at: new Date().toISOString(), checks });
+  // Gemini — chỉ dùng cho OCR, nên thiếu key là cảnh báo chứ không phải lỗi chặn
+  const t4 = Date.now();
+  if (!isOcrEnabled()) {
+    checks.push({
+      name: 'Gemini (nhận dạng PDF scan)',
+      ok: false,
+      optional: true,
+      ms: 0,
+      detail: 'Chưa cấu hình GEMINI_API_KEY — PDF dạng scan sẽ báo lỗi khi tải lên',
+    });
+  } else {
+    try {
+      const model = process.env.GEMINI_OCR_MODEL || 'gemini-3.5-flash';
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}`, {
+        headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY },
+        signal: AbortSignal.timeout(15000),
+      });
+      const body = await r.json().catch(() => ({}));
+      checks.push({
+        name: 'Gemini (nhận dạng PDF scan)',
+        ok: r.ok,
+        ms: Date.now() - t4,
+        detail: r.ok ? `Sẵn sàng với mô hình ${model}` : (body?.error?.message || `HTTP ${r.status}`),
+      });
+    } catch (e) {
+      checks.push({ name: 'Gemini (nhận dạng PDF scan)', ok: false, ms: Date.now() - t4, detail: e.message });
+    }
+  }
+
+  res.json({ checked_at: new Date().toISOString(), checks, queue: queueStats() });
 });
 
 export default router;

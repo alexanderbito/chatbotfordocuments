@@ -8,21 +8,24 @@ export async function getUsage(orgId, plan) {
   startOfMonth.setDate(1);
   startOfMonth.setHours(0, 0, 0, 0);
 
-  const [docsRes, membersRes, questionsRes, chunksRes, sizeRes] = await Promise.all([
+  const [docsRes, membersRes, questionsRes, chunksRes, sizeRes, ocrRes] = await Promise.all([
     supabase.from('documents').select('id', { count: 'exact', head: true }).eq('organization_id', orgId),
     supabase.from('organization_members').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).neq('status', 'disabled'),
     supabase.from('chat_messages').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).gte('created_at', startOfMonth.toISOString()),
     supabase.from('document_chunks').select('id', { count: 'exact', head: true }).eq('organization_id', orgId),
     supabase.from('documents').select('size_bytes').eq('organization_id', orgId),
+    supabase.from('documents').select('ocr_pages').eq('organization_id', orgId).gte('created_at', startOfMonth.toISOString()),
   ]);
 
   const storageBytes = (sizeRes.data || []).reduce((sum, d) => sum + (d.size_bytes || 0), 0);
+  const ocrPages = (ocrRes.data || []).reduce((sum, d) => sum + (d.ocr_pages || 0), 0);
 
   const limits = {
     max_documents: plan?.max_documents ?? 20,
     max_members: plan?.max_members ?? 5,
     max_storage_mb: plan?.max_storage_mb ?? 100,
     max_questions_per_month: plan?.max_questions_per_month ?? 500,
+    max_ocr_pages_per_month: plan?.max_ocr_pages_per_month ?? 50,
   };
 
   return {
@@ -31,6 +34,7 @@ export async function getUsage(orgId, plan) {
     questions_this_month: questionsRes.count || 0,
     chunks: chunksRes.count || 0,
     storage_mb: Math.round((storageBytes / (1024 * 1024)) * 100) / 100,
+    ocr_pages_this_month: ocrPages,
     limits,
   };
 }
@@ -59,6 +63,18 @@ export async function checkQuota(orgId, plan, action, extraBytes = 0) {
 
   if (action === 'chat' && usage.questions_this_month >= L.max_questions_per_month) {
     return { ok: false, error: `Đã dùng hết ${L.max_questions_per_month} lượt hỏi trong tháng của gói hiện tại.` };
+  }
+
+  // extraBytes ở đây mang nghĩa số trang cần nhận dạng
+  if (action === 'ocr') {
+    const pages = extraBytes;
+    const remaining = L.max_ocr_pages_per_month - usage.ocr_pages_this_month;
+    if (remaining <= 0) {
+      return { ok: false, error: `Đã dùng hết ${L.max_ocr_pages_per_month} trang nhận dạng (OCR) trong tháng của gói hiện tại.` };
+    }
+    if (pages > remaining) {
+      return { ok: false, error: `Tài liệu cần ${pages} trang nhận dạng nhưng gói hiện tại chỉ còn ${remaining} trang trong tháng này.` };
+    }
   }
 
   return { ok: true, usage };

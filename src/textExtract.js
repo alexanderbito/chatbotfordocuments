@@ -2,26 +2,25 @@ import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 
 /**
- * Trích xuất text thô từ buffer file, dựa theo mimetype.
- * Lưu ý: bản demo này CHƯA xử lý PDF dạng scan/ảnh (cần OCR riêng,
- * ví dụ Tesseract hoặc dịch vụ OCR ngoài - không bật ở bản free/demo).
+ * Trích xuất text thô từ buffer file.
+ * Trả về { text, pages } — pages chỉ có giá trị với PDF (0 với định dạng khác).
+ *
+ * PDF dạng scan/ảnh sẽ cho text rỗng ở đây; phía gọi dùng needsOcr() trong
+ * src/ocr.js để quyết định có chuyển sang nhận dạng ký tự hay không.
  */
 export async function extractText(buffer, mimeType) {
   if (mimeType === 'application/pdf') {
     const data = await pdfParse(buffer);
-    return data.text;
+    return { text: data.text || '', pages: data.numpages || 0 };
   }
 
-  if (
-    mimeType ===
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-  ) {
+  if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
     const { value } = await mammoth.extractRawText({ buffer });
-    return value;
+    return { text: value || '', pages: 0 };
   }
 
   if (mimeType === 'text/plain') {
-    return buffer.toString('utf-8');
+    return { text: buffer.toString('utf-8'), pages: 0 };
   }
 
   throw new Error(`Định dạng file chưa hỗ trợ: ${mimeType}`);

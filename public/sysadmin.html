@@ -81,6 +81,7 @@ async function viewOverview() {
       ${stat('Lượt hỏi', fmt.num(t.questions), 'chat')}
       ${stat('Dung lượng', fmt.mb(t.storage_mb), 'db')}
       ${stat('Doanh thu tháng này', fmt.money(d.revenue.this_month_vnd), 'card', `Luỹ kế ${fmt.money(d.revenue.total_vnd)}`)}
+      ${stat('Trang OCR tháng này', fmt.num(d.ocr?.pages_this_month || 0), 'scan', `${fmt.num(d.ocr?.documents || 0)} tài liệu scan · luỹ kế ${fmt.num(d.ocr?.pages_total || 0)} trang`)}
     </div>
 
     <div class="card">
@@ -180,6 +181,7 @@ async function orgDetail(id) {
         <div class="stat"><div class="label">Thành viên</div><div class="value" style="font-size:20px">${fmt.num(u.members)} <small>/ ${fmt.num(L.max_members)}</small></div></div>
         <div class="stat"><div class="label">Lượt hỏi tháng</div><div class="value" style="font-size:20px">${fmt.num(u.questions_this_month)}</div></div>
         <div class="stat"><div class="label">Dung lượng</div><div class="value" style="font-size:20px">${fmt.mb(u.storage_mb)}</div></div>
+        <div class="stat"><div class="label">Trang OCR tháng này</div><div class="value" style="font-size:20px">${fmt.num(u.ocr_pages_this_month)} <small>/ ${fmt.num(L.max_ocr_pages_per_month)}</small></div></div>
       </div>
       <div class="form-grid">
         <div class="field"><label>Gói cước</label><div>${esc(o.plan?.name || '—')} · ${esc(fmt.money(o.plan?.price_vnd || 0))}/tháng</div></div>
@@ -245,7 +247,7 @@ async function viewPlans() {
 async function loadPlans() {
   cache.plans = await api('/admin/plans');
   document.getElementById('planTable').innerHTML = `<div class="table-wrap"><table class="tbl">
-    <thead><tr><th>Gói</th><th class="num">Giá/tháng</th><th class="num">Tài liệu</th><th class="num">Thành viên</th><th class="num">Dung lượng</th><th class="num">Lượt hỏi/tháng</th><th class="num">Đang dùng</th><th>Trạng thái</th><th></th></tr></thead>
+    <thead><tr><th>Gói</th><th class="num">Giá/tháng</th><th class="num">Tài liệu</th><th class="num">Thành viên</th><th class="num">Dung lượng</th><th class="num">Lượt hỏi/tháng</th><th class="num">Trang OCR/tháng</th><th class="num">Đang dùng</th><th>Trạng thái</th><th></th></tr></thead>
     <tbody>${cache.plans.map((p) => `
       <tr>
         <td><div class="cell-main">${esc(p.name)}</div><div class="cell-sub mono">${esc(p.code)}</div></td>
@@ -254,6 +256,7 @@ async function loadPlans() {
         <td class="num">${fmt.num(p.max_members)}</td>
         <td class="num">${fmt.num(p.max_storage_mb)} MB</td>
         <td class="num">${fmt.num(p.max_questions_per_month)}</td>
+        <td class="num">${fmt.num(p.max_ocr_pages_per_month || 0)}</td>
         <td class="num">${fmt.num(p.organization_count)}</td>
         <td>${p.is_active ? '<span class="badge ok">Đang bán</span>' : '<span class="badge">Ngừng bán</span>'}</td>
         <td class="nowrap" style="width:1%">
@@ -287,6 +290,7 @@ function planModal(p) {
         ${f('p_members', 'Số thành viên tối đa', p?.max_members ?? 5, 'number')}
         ${f('p_storage', 'Dung lượng tối đa (MB)', p?.max_storage_mb ?? 100, 'number')}
         ${f('p_questions', 'Lượt hỏi mỗi tháng', p?.max_questions_per_month ?? 500, 'number')}
+        ${f('p_ocr', 'Trang nhận dạng OCR mỗi tháng', p?.max_ocr_pages_per_month ?? 50, 'number')}
       </div>
       <div class="field"><label>Mô tả</label><textarea id="p_desc">${esc(p?.description || '')}</textarea></div>
       <label class="check"><input type="checkbox" id="p_active" ${p?.is_active !== false ? 'checked' : ''} /> Đang mở bán</label>`,
@@ -297,6 +301,7 @@ function planModal(p) {
         price_vnd: g('p_price'), sort_order: g('p_sort'),
         max_documents: g('p_docs'), max_members: g('p_members'),
         max_storage_mb: g('p_storage'), max_questions_per_month: g('p_questions'),
+        max_ocr_pages_per_month: g('p_ocr'),
         is_active: box.querySelector('#p_active').checked,
       };
       if (!body.code || !body.name) { toast('Thiếu mã hoặc tên gói', 'err'); return false; }
@@ -556,11 +561,16 @@ async function viewHealth() {
         <div class="table-wrap"><table class="tbl">
           <thead><tr><th>Dịch vụ</th><th>Trạng thái</th><th class="num">Thời gian phản hồi</th><th>Chi tiết</th></tr></thead>
           <tbody>${d.checks.map((c) => `<tr>
-            <td class="cell-main">${esc(c.name)}</td>
-            <td>${c.ok ? '<span class="badge ok">Bình thường</span>' : '<span class="badge err">Lỗi</span>'}</td>
+            <td class="cell-main">${esc(c.name)}${c.optional ? ' <span class="badge tiny">tuỳ chọn</span>' : ''}</td>
+            <td>${c.ok ? '<span class="badge ok">Bình thường</span>' : c.optional ? '<span class="badge warn">Chưa bật</span>' : '<span class="badge err">Lỗi</span>'}</td>
             <td class="num small">${c.ms} ms</td>
-            <td class="small ${c.ok ? 'muted' : ''}" style="${c.ok ? '' : 'color:var(--danger)'}">${esc(c.detail)}</td>
+            <td class="small ${c.ok ? 'muted' : ''}" style="${c.ok || c.optional ? '' : 'color:var(--danger)'}">${esc(c.detail)}</td>
           </tr>`).join('')}</tbody></table></div>
+        ${d.queue ? `<div class="mt-2 row wrap" style="gap:14px">
+          <span class="badge ${d.queue.running ? 'warn' : 'ok'}">Hàng đợi xử lý: ${d.queue.running} đang chạy</span>
+          <span class="badge">${d.queue.waiting} đang chờ / tối đa ${d.queue.max_queue}</span>
+          <span class="badge">Chạy đồng thời: ${d.queue.concurrency}</span>
+        </div>` : ''}
         <p class="small muted mt-2 mb-0">Kiểm tra lúc ${esc(fmt.dateTime(d.checked_at))}</p>`;
     } catch (err) { box.innerHTML = `<div class="alert error show">${esc(err.message)}</div>`; }
     finally { e.target.disabled = false; }

@@ -42,6 +42,7 @@ Trong **Supabase Dashboard → SQL Editor → New query**, chạy lần lượt:
 
 1. `supabase_schema.sql` — chỉ cần chạy nếu đây là project mới (tạo `organizations`, `documents`, `document_chunks`, bật pgvector).
 2. `migration_v2_auth.sql` — **bắt buộc**, tạo phần auth/phân quyền/thư mục/gói cước/nhật ký và cập nhật hàm tìm kiếm.
+3. `migration_v3_ocr.sql` — **bắt buộc**, thêm hạn mức và cột theo dõi OCR.
 
 File `migration_v2_auth.sql` chạy lại nhiều lần vẫn an toàn (dùng `if not exists`).
 
@@ -53,9 +54,15 @@ File `migration_v2_auth.sql` chạy lại nhiều lần vẫn an toàn (dùng `i
 cp .env.example .env    # rồi điền giá trị thật
 ```
 
-So với bản cũ có **thêm một biến**: `SUPABASE_ANON_KEY`
-(Supabase Dashboard → Project Settings → API → `anon public`).
-Bỏ trống vẫn chạy được nhưng nên điền cho đúng chuẩn bảo mật.
+So với bản gốc có **thêm các biến**:
+
+| Biến | Bắt buộc | Ý nghĩa |
+|---|---|---|
+| `SUPABASE_ANON_KEY` | Nên có | Supabase → Project Settings → API → `anon public` |
+| `GEMINI_API_KEY` | Chỉ khi cần OCR | Lấy tại https://aistudio.google.com/apikey |
+| `GEMINI_OCR_MODEL` | Không | Mặc định `gemini-3.5-flash`. Dùng `gemini-3.5-flash-lite` nếu muốn rẻ hơn |
+| `OCR_MAX_PAGES` | Không | Mặc định 30 trang/file |
+| `WORKER_CONCURRENCY` | Không | Mặc định 1 — giữ nguyên trên Render Free |
 
 Bucket R2 giờ **không cần để public**: hệ thống tạo link tải có chữ ký, hết hạn sau 5 phút,
 và chỉ admin tổ chức mới lấy được link.
@@ -129,7 +136,7 @@ GET    /orgs/:orgId/chat/history              toàn bộ lịch sử            
 
 /admin/*                                      toàn bộ khu vực admin hệ thống
        overview · organizations · users · plans · payments · logs
-       failed-documents · health
+       failed-documents · health · maintenance/fix-filenames
 ```
 
 Xác thực: header `Authorization: Bearer <access_token>` (token do Supabase Auth cấp).
@@ -143,6 +150,7 @@ Backend chặn ở mức API, không chỉ hiển thị:
 - Tải tài liệu: kiểm tra số tài liệu và dung lượng còn lại → trả `402` nếu vượt.
 - Mời thành viên: kiểm tra số thành viên tối đa.
 - Hỏi chatbot: kiểm tra số lượt hỏi trong tháng.
+- Nhận dạng PDF scan: kiểm tra số trang OCR còn lại trong tháng (xem mục 8).
 
 Ba gói mặc định (Dùng thử / Chuyên nghiệp / Doanh nghiệp) được tạo sẵn bởi migration
 và có thể sửa trong `/sysadmin.html → Gói cước`.
@@ -150,6 +158,12 @@ và có thể sửa trong `/sysadmin.html → Gói cước`.
 ---
 
 ## 7. Xử lý sự cố thường gặp
+
+**PDF scan không đọc được / báo lỗi OCR**
+
+Kiểm tra `/sysadmin.html` → **Sức khoẻ hệ thống** → dòng "Gemini (nhận dạng PDF scan)".
+Nếu báo "Chưa bật" nghĩa là thiếu `GEMINI_API_KEY`. Nếu tài liệu bị chặn vì hạn mức,
+lỗi sẽ ghi rõ trong cột trạng thái ở trang Tài liệu của admin tổ chức.
 
 **Tên tài liệu hiển thị lỗi font** (`Quy định` thành `Quy Ä‘á»‹nh`)
 
@@ -163,12 +177,36 @@ Tài liệu đã tải lên **trước** bản vá vẫn giữ tên sai trong CS
 rồi "Sửa tên tài liệu". (Tương đương `POST /admin/maintenance/fix-filenames`,
 thêm `?dry_run=1` để chỉ xem trước.)
 
-## 8. Giới hạn đã biết
+## 8. OCR cho PDF scan
+
+Khi tải lên một PDF, hệ thống đọc text thật trước. Nếu thu được dưới ~60 ký tự mỗi trang
+thì coi đó là bản scan và chuyển sang nhận dạng bằng Gemini.
+
+Cách hoạt động:
+
+1. `pdf-lib` tách file thành từng lô 5 trang (thuần JS, không cần thư viện native).
+2. Mỗi lô gửi thẳng dưới dạng PDF tới `generativelanguage.googleapis.com` — **không cần**
+   bước render trang thành ảnh, nên deploy Render giữ nguyên, không cần Docker.
+3. Text nhận được ghép lại rồi đi tiếp vào pipeline chia đoạn và tạo embedding như bình thường.
+4. Gặp lỗi 429/5xx sẽ tự thử lại 3 lần với thời gian chờ tăng dần.
+
+Tài liệu đang OCR hiển thị trạng thái **Đang nhận dạng** trên giao diện admin tổ chức,
+và số trang đã nhận dạng được ghi vào cột `documents.ocr_pages` để tính hạn mức.
+
+**Hạn mức theo gói** (`plans.max_ocr_pages_per_month`, sửa được trong `/sysadmin.html`):
+Dùng thử 50 trang/tháng · Chuyên nghiệp 2.000 · Doanh nghiệp 20.000.
+
+**Hàng đợi**: OCR chạy tuần tự (`WORKER_CONCURRENCY=1`) vì Render Free chỉ có 512 MB RAM.
+Nhiều file tải lên cùng lúc sẽ xếp hàng chứ không chạy song song. Trạng thái hàng đợi
+xem được ở trang Sức khoẻ hệ thống. Khi có khách hàng thật nên tách thành
+Background Worker riêng trên Render.
+
+## 9. Giới hạn đã biết
 
 - **Xử lý tài liệu đồng bộ trong tiến trình web**: file rất lớn có thể timeout trên Render Free.
   Khi có khách hàng thật nên tách thành worker riêng.
-- **Chưa có OCR**: chỉ đọc PDF có text thật, DOCX và TXT. PDF scan sẽ báo lỗi kèm nguyên nhân
-  và có thể bấm "Xử lý lại" sau khi thay file.
+- **OCR giới hạn 30 trang mỗi file** (đổi bằng `OCR_MAX_PAGES`). File dài hơn cần tách nhỏ.
+  Giới hạn này có chủ đích: OCR tính tiền theo trang và chạy lâu.
 - **Lời mời gửi bằng link thủ công**: hệ thống tạo link mời để admin tự gửi, chưa gắn dịch vụ email.
 - **Thanh toán ghi nhận thủ công**: admin hệ thống nhập giao dịch, chưa tích hợp cổng thanh toán.
 - **Supabase Free tự pause sau 7 ngày không hoạt động.**

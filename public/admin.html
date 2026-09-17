@@ -87,6 +87,7 @@ async function viewOverview() {
       ${stat('Thành viên', `${fmt.num(u.members)} <small>/ ${fmt.num(L.max_members)}</small>`, 'users', '', u.members, L.max_members)}
       ${stat('Lượt hỏi tháng này', `${fmt.num(u.questions_this_month)} <small>/ ${fmt.num(L.max_questions_per_month)}</small>`, 'chat', '', u.questions_this_month, L.max_questions_per_month)}
       ${stat('Dung lượng', `${fmt.mb(u.storage_mb)} <small>/ ${fmt.num(L.max_storage_mb)} MB</small>`, 'db', `${fmt.num(u.chunks)} đoạn đã lập chỉ mục`, u.storage_mb, L.max_storage_mb)}
+      ${stat('Trang nhận dạng (OCR)', `${fmt.num(u.ocr_pages_this_month)} <small>/ ${fmt.num(L.max_ocr_pages_per_month)}</small>`, 'scan', 'trong tháng này', u.ocr_pages_this_month, L.max_ocr_pages_per_month)}
     </div>
 
     <div class="card">
@@ -213,7 +214,7 @@ function uploadModal() {
     body: `
       <div class="field"><label>Chọn thư mục</label><select id="ufolder"><option value="">Chưa phân loại</option>${opts}</select></div>
       <div class="field"><label>Tệp tài liệu</label><input type="file" id="ufile" multiple accept=".pdf,.docx,.txt" />
-        <div class="hint">Hỗ trợ PDF có chữ (không phải bản scan), DOCX và TXT. Tối đa 25 MB mỗi tệp.</div></div>
+        <div class="hint">Hỗ trợ PDF (kể cả bản scan — hệ thống tự nhận dạng chữ), DOCX và TXT. Tối đa 25 MB mỗi tệp.<br>PDF scan xử lý lâu hơn và tính vào hạn mức trang nhận dạng của gói.</div></div>
       <div id="uprogress" class="small muted"></div>`,
     onOk: async (box) => {
       const files = [...box.querySelector('#ufile').files];
@@ -261,7 +262,8 @@ async function loadDocs(q = '') {
         <td class="small">${esc(folderName(d.folder_id))}</td>
         <td class="num small">${esc(fmt.bytes(d.size_bytes))}</td>
         <td class="num small">${fmt.num(d.chunk_count)}</td>
-        <td>${badge(d.status, LABEL.status)}</td>
+        <td>${badge(d.status, LABEL.status)}
+            ${d.extraction_method === 'ocr' ? `<div class="cell-sub">${icon.scan} OCR ${fmt.num(d.ocr_pages)} trang</div>` : ''}</td>
         <td class="small nowrap">${esc(fmt.ago(d.created_at))}</td>
         <td class="nowrap" style="width:1%">
           <button class="icon-btn" data-dl="${esc(d.id)}" title="Tải xuống">${icon.download}</button>
@@ -307,7 +309,12 @@ async function loadDocs(q = '') {
     };
   });
 
-  if (docs.some((d) => d.status === 'processing')) docTimer = setTimeout(() => loadDocs(q), 4000);
+  const busy = docs.filter((d) => d.status === 'processing' || d.status === 'ocr_processing');
+  if (busy.length) {
+    // OCR mất lâu hơn nhiều nên hỏi lại thưa hơn
+    const delay = busy.some((d) => d.status === 'ocr_processing') ? 8000 : 4000;
+    docTimer = setTimeout(() => loadDocs(q), delay);
+  }
 }
 
 /* =================== THÀNH VIÊN =================== */
@@ -476,6 +483,7 @@ async function viewBilling() {
             ${line('Thành viên', u.members, L.max_members)}
             ${line('Lượt hỏi trong tháng', u.questions_this_month, L.max_questions_per_month)}
             ${line('Dung lượng lưu trữ', u.storage_mb, L.max_storage_mb, ' MB')}
+            ${line('Trang nhận dạng PDF scan (OCR)', u.ocr_pages_this_month, L.max_ocr_pages_per_month)}
           </div>
         </div>
 
@@ -511,7 +519,7 @@ async function viewBilling() {
             ${b.available_plans.filter((p) => p.id !== b.plan?.id).map((p) => `
               <div class="mb-2" style="padding-bottom:12px;border-bottom:1px solid var(--border)">
                 <div class="row between"><b>${esc(p.name)}</b><span>${esc(fmt.money(p.price_vnd))}/tháng</span></div>
-                <div class="small muted">${fmt.num(p.max_documents)} tài liệu · ${fmt.num(p.max_members)} thành viên · ${fmt.num(p.max_questions_per_month)} lượt hỏi/tháng</div>
+                <div class="small muted">${fmt.num(p.max_documents)} tài liệu · ${fmt.num(p.max_members)} thành viên · ${fmt.num(p.max_questions_per_month)} lượt hỏi/tháng · ${fmt.num(p.max_ocr_pages_per_month || 0)} trang OCR/tháng</div>
               </div>`).join('') || '<span class="muted small">Không có gói khác</span>'}
             <p class="small muted mb-0">Để đổi gói, liên hệ quản trị hệ thống. Việc nâng cấp có hiệu lực ngay sau khi được ghi nhận thanh toán.</p>
           </div>

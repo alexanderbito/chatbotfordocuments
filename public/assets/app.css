@@ -176,6 +176,8 @@ table.tbl td.num, table.tbl th.num { text-align: right; font-variant-numeric: ta
 }
 .badge.ok, .badge.ready, .badge.active, .badge.paid { background: var(--success-soft); color: var(--success); border-color: transparent; }
 .badge.warn, .badge.processing, .badge.invited, .badge.pending, .badge.trial { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.badge.ocr_processing { background: var(--info-soft); color: var(--info); border-color: transparent; }
+.badge.tiny { font-size: 10.5px; padding: 1px 6px; font-weight: 600; }
 .badge.err, .badge.failed, .badge.suspended, .badge.disabled, .badge.overdue { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
 .badge.info, .badge.admin { background: var(--info-soft); color: var(--info); border-color: transparent; }
 .badge.purple { background: var(--primary-soft); color: var(--primary); border-color: transparent; }

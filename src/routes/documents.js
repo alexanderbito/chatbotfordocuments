@@ -10,6 +10,8 @@ import { requireAuth, requireOrgMember, requireOrgAdmin } from '../auth.js';
 import { checkQuota } from '../limits.js';
 import { logEvent } from '../logger.js';
 import { decodeFilename, toStorageSafeName } from '../utils/filename.js';
+import { needsOcr, ocrPdf, isOcrEnabled, countPdfPages, OCR_MAX_PAGES } from '../ocr.js';
+import { enqueue, QueueFullError } from '../queue.js';
 
 const router = express.Router({ mergeParams: true });
 const upload = multer({
@@ -24,7 +26,7 @@ router.get('/', requireOrgAdmin, async (req, res) => {
   try {
     let query = supabase
       .from('documents')
-      .select('id, filename, status, folder_id, size_bytes, mime_type, chunk_count, error_message, created_at, uploaded_by')
+      .select('id, filename, status, folder_id, size_bytes, mime_type, chunk_count, error_message, created_at, uploaded_by, extraction_method, ocr_pages, page_count')
       .eq('organization_id', req.org.id)
       .order('created_at', { ascending: false });
 
@@ -81,10 +83,18 @@ router.post('/', requireOrgAdmin, upload.single('file'), async (req, res) => {
       .single();
     if (docErr) throw docErr;
 
-    // Xử lý nền: extract -> chunk -> embed -> lưu
-    processDocument(doc, file.buffer, file.mimetype).catch((err) =>
-      logEvent({ level: 'error', scope: 'upload', organizationId: req.org.id, message: `Lỗi xử lý tài liệu ${doc.filename}`, detail: { error: err.message } })
-    );
+    // Xử lý nền qua hàng đợi: extract -> (OCR nếu là bản scan) -> chunk -> embed
+    try {
+      enqueue(`doc:${doc.id}`, () => processDocument(doc, file.buffer, file.mimetype, req.org.plan)).catch((err) =>
+        logEvent({ level: 'error', scope: 'upload', organizationId: req.org.id, message: `Lỗi xử lý tài liệu ${doc.filename}`, detail: { error: err.message } })
+      );
+    } catch (err) {
+      if (err instanceof QueueFullError) {
+        await supabase.from('documents').update({ status: 'failed', error_message: err.message }).eq('id', doc.id);
+        return res.status(503).json({ error: err.message });
+      }
+      throw err;
+    }
 
     res.json({ message: 'Đã nhận file, đang xử lý', document: doc });
   } catch (err) {
@@ -174,14 +184,15 @@ router.post('/:docId/reindex', requireOrgAdmin, async (req, res) => {
     if (!doc) return res.status(404).json({ error: 'Không tìm thấy tài liệu' });
 
     const { downloadFromR2 } = await import('../storage.js');
-    await supabase.from('documents').update({ status: 'processing', error_message: null }).eq('id', doc.id);
+    await supabase.from('documents').update({ status: 'processing', error_message: null, ocr_pages: 0 }).eq('id', doc.id);
     await supabase.from('document_chunks').delete().eq('document_id', doc.id);
 
-    downloadFromR2(doc.storage_key)
-      .then((buffer) => processDocument(doc, buffer, doc.mime_type))
-      .catch((err) =>
-        logEvent({ level: 'error', scope: 'upload', organizationId: req.org.id, message: `Reindex thất bại: ${doc.filename}`, detail: { error: err.message } })
-      );
+    enqueue(`reindex:${doc.id}`, async () => {
+      const buffer = await downloadFromR2(doc.storage_key);
+      return processDocument(doc, buffer, doc.mime_type, req.org.plan);
+    }).catch((err) =>
+      logEvent({ level: 'error', scope: 'upload', organizationId: req.org.id, message: `Xử lý lại thất bại: ${doc.filename}`, detail: { error: err.message } })
+    );
 
     res.json({ message: 'Đang xử lý lại tài liệu' });
   } catch (err) {
@@ -192,20 +203,75 @@ router.post('/:docId/reindex', requireOrgAdmin, async (req, res) => {
 // ---------------------------------------------------------------------
 // Pipeline xử lý tài liệu
 // ---------------------------------------------------------------------
-async function processDocument(doc, buffer, mimeType) {
-  try {
-    const text = await extractText(buffer, mimeType);
-    const chunks = chunkText(text);
+async function markFailed(docId, message) {
+  await supabase
+    .from('documents')
+    .update({ status: 'failed', error_message: String(message).slice(0, 500) })
+    .eq('id', docId);
+}
 
+async function processDocument(doc, buffer, mimeType, plan) {
+  let extractionMethod = 'text';
+  let ocrPages = 0;
+  let pageCount = 0;
+
+  try {
+    // 1. Thử đọc text thật trước — nhanh và không tốn phí.
+    let { text, pages } = await extractText(buffer, mimeType);
+    pageCount = pages;
+
+    // 2. PDF không có text thật => là bản scan, chuyển sang nhận dạng ký tự.
+    if (mimeType === 'application/pdf' && needsOcr(text, pages)) {
+      if (!isOcrEnabled()) {
+        await markFailed(doc.id, 'Đây là PDF dạng scan/ảnh. Hệ thống chưa bật nhận dạng ký tự (thiếu GEMINI_API_KEY).');
+        return;
+      }
+
+      const ocrPageCount = pages || (await countPdfPages(buffer));
+
+      if (ocrPageCount > OCR_MAX_PAGES) {
+        await markFailed(doc.id, `Tài liệu scan có ${ocrPageCount} trang, vượt giới hạn ${OCR_MAX_PAGES} trang mỗi file. Vui lòng tách nhỏ rồi tải lại.`);
+        return;
+      }
+
+      const quota = await checkQuota(doc.organization_id, plan, 'ocr', ocrPageCount);
+      if (!quota.ok) {
+        await markFailed(doc.id, quota.error);
+        await logEvent({ level: 'warn', scope: 'upload', organizationId: doc.organization_id, message: `Chặn OCR do hết hạn mức: ${doc.filename}`, detail: { pages: ocrPageCount } });
+        return;
+      }
+
+      await supabase.from('documents').update({ status: 'ocr_processing' }).eq('id', doc.id);
+      await logEvent({ scope: 'upload', organizationId: doc.organization_id, message: `Bắt đầu nhận dạng ${ocrPageCount} trang: ${doc.filename}` });
+
+      const result = await ocrPdf(buffer, { maxPages: OCR_MAX_PAGES });
+      text = result.text;
+      ocrPages = result.pages;
+      pageCount = result.pages;
+      extractionMethod = 'ocr';
+
+      if (result.truncated) {
+        await logEvent({ level: 'warn', scope: 'upload', organizationId: doc.organization_id, message: `Kết quả nhận dạng có thể bị cắt do tài liệu quá dài: ${doc.filename}` });
+      }
+    }
+
+    // 3. Chia đoạn
+    const chunks = chunkText(text);
     if (chunks.length === 0) {
-      await supabase
-        .from('documents')
-        .update({ status: 'failed', error_message: 'Không trích xuất được nội dung (có thể là PDF scan/ảnh, cần OCR)' })
-        .eq('id', doc.id);
-      await logEvent({ level: 'warn', scope: 'upload', organizationId: doc.organization_id, message: `Tài liệu rỗng sau khi trích xuất: ${doc.filename}` });
+      await markFailed(
+        doc.id,
+        extractionMethod === 'ocr'
+          ? 'Nhận dạng xong nhưng không thu được nội dung dùng được (ảnh có thể quá mờ).'
+          : 'Không trích xuất được nội dung từ tài liệu.'
+      );
       return;
     }
 
+    if (extractionMethod !== 'ocr') {
+      await supabase.from('documents').update({ status: 'processing' }).eq('id', doc.id);
+    }
+
+    // 4. Tạo embedding theo lô
     const BATCH = 50;
     for (let i = 0; i < chunks.length; i += BATCH) {
       const batchChunks = chunks.slice(i, i + BATCH);
@@ -226,16 +292,30 @@ async function processDocument(doc, buffer, mimeType) {
 
     await supabase
       .from('documents')
-      .update({ status: 'ready', chunk_count: chunks.length, error_message: null })
+      .update({
+        status: 'ready',
+        chunk_count: chunks.length,
+        extraction_method: extractionMethod,
+        ocr_pages: ocrPages,
+        page_count: pageCount,
+        error_message: null,
+      })
       .eq('id', doc.id);
 
-    await logEvent({ scope: 'upload', organizationId: doc.organization_id, message: `Đã index xong ${doc.filename} (${chunks.length} đoạn)` });
+    await logEvent({
+      scope: 'upload',
+      organizationId: doc.organization_id,
+      message: `Đã index xong ${doc.filename} (${chunks.length} đoạn${extractionMethod === 'ocr' ? `, nhận dạng ${ocrPages} trang` : ''})`,
+    });
   } catch (err) {
-    await supabase
-      .from('documents')
-      .update({ status: 'failed', error_message: String(err.message).slice(0, 500) })
-      .eq('id', doc.id);
-    await logEvent({ level: 'error', scope: 'upload', organizationId: doc.organization_id, message: `Xử lý tài liệu thất bại: ${doc.filename}`, detail: { error: err.message } });
+    await markFailed(doc.id, err.message);
+    await logEvent({
+      level: 'error',
+      scope: 'upload',
+      organizationId: doc.organization_id,
+      message: `Xử lý tài liệu thất bại: ${doc.filename}`,
+      detail: { error: err.message, method: extractionMethod },
+    });
   }
 }
 

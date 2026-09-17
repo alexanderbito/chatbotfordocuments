@@ -95,7 +95,8 @@ export function initials(nameOrEmail = '?') {
 
 /* ---------- Nhãn tiếng Việt ---------- */
 export const LABEL = {
-  status: { ready: 'Sẵn sàng', processing: 'Đang xử lý', failed: 'Lỗi', active: 'Hoạt động', suspended: 'Tạm khoá', invited: 'Chờ nhận lời mời', disabled: 'Đã khoá' },
+  status: { ready: 'Sẵn sàng', processing: 'Đang xử lý', ocr_processing: 'Đang nhận dạng', failed: 'Lỗi', active: 'Hoạt động', suspended: 'Tạm khoá', invited: 'Chờ nhận lời mời', disabled: 'Đã khoá' },
+  method: { text: 'Text', ocr: 'OCR', mixed: 'Hỗn hợp' },
   role: { admin: 'Quản trị', member: 'Thành viên' },
   billing: { trial: 'Dùng thử', paid: 'Đã thanh toán', overdue: 'Quá hạn' },
   payment: { paid: 'Đã thu', pending: 'Chờ thu', failed: 'Thất bại', refunded: 'Hoàn tiền' },
@@ -135,6 +136,7 @@ export const icon = {
   key: I('<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9"/><path d="M17 6l2 2M15 8l2 2"/>'),
   pulse: I('<path d="M3 12h4l3-8 4 16 3-8h4"/>'),
   db: I('<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>'),
+  scan: I('<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M3 12h18"/>'),
 };
 
 /* ---------- Thông báo nhanh ---------- */
