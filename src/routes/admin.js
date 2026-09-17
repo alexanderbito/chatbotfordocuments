@@ -5,7 +5,7 @@ import { getUsage } from '../limits.js';
 import { logEvent } from '../logger.js';
 import { decodeFilename } from '../utils/filename.js';
 import { queueStats } from '../queue.js';
-import { isOcrEnabled } from '../ocr.js';
+import { isOcrEnabled, ocrModels } from '../ocr.js';
 
 const router = express.Router();
 router.use(requireAuth, requireSystemAdmin);
@@ -519,22 +519,29 @@ router.get('/health', async (req, res) => {
       detail: 'Chưa cấu hình GEMINI_API_KEY — PDF dạng scan sẽ báo lỗi khi tải lên',
     });
   } else {
-    try {
-      const model = process.env.GEMINI_OCR_MODEL || 'gemini-3.5-flash';
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}`, {
-        headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY },
-        signal: AbortSignal.timeout(15000),
-      });
-      const body = await r.json().catch(() => ({}));
-      checks.push({
-        name: 'Gemini (nhận dạng PDF scan)',
-        ok: r.ok,
-        ms: Date.now() - t4,
-        detail: r.ok ? `Sẵn sàng với mô hình ${model}` : (body?.error?.message || `HTTP ${r.status}`),
-      });
-    } catch (e) {
-      checks.push({ name: 'Gemini (nhận dạng PDF scan)', ok: false, ms: Date.now() - t4, detail: e.message });
+    const models = ocrModels();
+    const results = [];
+    for (const model of models) {
+      try {
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}`, {
+          headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY },
+          signal: AbortSignal.timeout(15000),
+        });
+        const body = await r.json().catch(() => ({}));
+        results.push({ model, ok: r.ok, detail: r.ok ? 'sẵn sàng' : (body?.error?.message || `HTTP ${r.status}`) });
+      } catch (e) {
+        results.push({ model, ok: false, detail: e.message });
+      }
     }
+    const anyOk = results.some((r) => r.ok);
+    checks.push({
+      name: 'Gemini (nhận dạng PDF scan)',
+      ok: anyOk,
+      ms: Date.now() - t4,
+      detail: anyOk
+        ? `Chuỗi dự phòng: ${results.map((r) => `${r.model} (${r.ok ? 'OK' : 'lỗi'})`).join(' → ')}`
+        : results.map((r) => `${r.model}: ${r.detail}`).join(' | '),
+    });
   }
 
   res.json({ checked_at: new Date().toISOString(), checks, queue: queueStats() });

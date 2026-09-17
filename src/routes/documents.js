@@ -10,7 +10,7 @@ import { requireAuth, requireOrgMember, requireOrgAdmin } from '../auth.js';
 import { checkQuota } from '../limits.js';
 import { logEvent } from '../logger.js';
 import { decodeFilename, toStorageSafeName } from '../utils/filename.js';
-import { needsOcr, ocrPdf, isOcrEnabled, countPdfPages, OCR_MAX_PAGES } from '../ocr.js';
+import { needsOcr, ocrPdf, isOcrEnabled, countPdfPages, isTransient, OCR_MAX_PAGES } from '../ocr.js';
 import { enqueue, QueueFullError } from '../queue.js';
 
 const router = express.Router({ mergeParams: true });
@@ -26,7 +26,7 @@ router.get('/', requireOrgAdmin, async (req, res) => {
   try {
     let query = supabase
       .from('documents')
-      .select('id, filename, status, folder_id, size_bytes, mime_type, chunk_count, error_message, created_at, uploaded_by, extraction_method, ocr_pages, page_count')
+      .select('id, filename, status, folder_id, size_bytes, mime_type, chunk_count, error_message, created_at, uploaded_by, extraction_method, ocr_pages, page_count, ocr_attempts, next_retry_at')
       .eq('organization_id', req.org.id)
       .order('created_at', { ascending: false });
 
@@ -184,7 +184,7 @@ router.post('/:docId/reindex', requireOrgAdmin, async (req, res) => {
     if (!doc) return res.status(404).json({ error: 'Không tìm thấy tài liệu' });
 
     const { downloadFromR2 } = await import('../storage.js');
-    await supabase.from('documents').update({ status: 'processing', error_message: null, ocr_pages: 0 }).eq('id', doc.id);
+    await supabase.from('documents').update({ status: 'processing', error_message: null, ocr_pages: 0, ocr_attempts: 0, next_retry_at: null }).eq('id', doc.id);
     await supabase.from('document_chunks').delete().eq('document_id', doc.id);
 
     enqueue(`reindex:${doc.id}`, async () => {
@@ -241,15 +241,34 @@ async function processDocument(doc, buffer, mimeType, plan) {
         return;
       }
 
-      await supabase.from('documents').update({ status: 'ocr_processing' }).eq('id', doc.id);
+      await supabase.from('documents').update({ status: 'ocr_processing', next_retry_at: null }).eq('id', doc.id);
       await logEvent({ scope: 'upload', organizationId: doc.organization_id, message: `Bắt đầu nhận dạng ${ocrPageCount} trang: ${doc.filename}` });
 
-      const result = await ocrPdf(buffer, { maxPages: OCR_MAX_PAGES });
+      // Lấy các lô đã nhận dạng xong ở lần chạy trước để không gọi lại Gemini
+      const cached = await loadCachedBatches(doc.id);
+
+      const result = await ocrPdf(buffer, {
+        maxPages: OCR_MAX_PAGES,
+        cached,
+        onBatch: (b) => saveBatch(doc.id, b),
+        onNotice: (n) =>
+          logEvent({
+            level: 'warn',
+            scope: 'upload',
+            organizationId: doc.organization_id,
+            message: `Gemini ${n.model} chưa nhận được (vòng ${n.round + 1}): ${doc.filename}`,
+            detail: { error: n.message },
+          }),
+      });
+
       text = result.text;
       ocrPages = result.pages;
       pageCount = result.pages;
       extractionMethod = 'ocr';
 
+      if (result.fromCache) {
+        await logEvent({ scope: 'upload', organizationId: doc.organization_id, message: `Dùng lại ${result.fromCache} lô đã nhận dạng trước đó: ${doc.filename}` });
+      }
       if (result.truncated) {
         await logEvent({ level: 'warn', scope: 'upload', organizationId: doc.organization_id, message: `Kết quả nhận dạng có thể bị cắt do tài liệu quá dài: ${doc.filename}` });
       }
@@ -299,8 +318,14 @@ async function processDocument(doc, buffer, mimeType, plan) {
         ocr_pages: ocrPages,
         page_count: pageCount,
         error_message: null,
+        next_retry_at: null,
       })
       .eq('id', doc.id);
+
+    // Xong rồi thì không cần giữ bản nhận dạng tạm nữa
+    if (extractionMethod === 'ocr') {
+      await supabase.from('document_ocr_batches').delete().eq('document_id', doc.id);
+    }
 
     await logEvent({
       scope: 'upload',
@@ -308,6 +333,13 @@ async function processDocument(doc, buffer, mimeType, plan) {
       message: `Đã index xong ${doc.filename} (${chunks.length} đoạn${extractionMethod === 'ocr' ? `, nhận dạng ${ocrPages} trang` : ''})`,
     });
   } catch (err) {
+    // Lỗi tạm thời (Gemini quá tải, mạng chập chờn) thì tự hẹn giờ thử lại,
+    // không bắt admin phải ngồi bấm "Xử lý lại".
+    if ((err.transient || isTransient(err)) && plan !== undefined) {
+      const scheduled = await scheduleRetry(doc, mimeType, plan, err);
+      if (scheduled) return;
+    }
+
     await markFailed(doc.id, err.message);
     await logEvent({
       level: 'error',
@@ -317,6 +349,114 @@ async function processDocument(doc, buffer, mimeType, plan) {
       detail: { error: err.message, method: extractionMethod },
     });
   }
+}
+
+// ---------------------------------------------------------------------
+// Lưu tạm kết quả nhận dạng theo lô
+// ---------------------------------------------------------------------
+async function loadCachedBatches(docId) {
+  const map = new Map();
+  try {
+    const { data } = await supabase
+      .from('document_ocr_batches')
+      .select('from_page, to_page, content')
+      .eq('document_id', docId);
+    for (const b of data || []) map.set(`${b.from_page}-${b.to_page}`, b.content);
+  } catch (err) {
+    console.error('Không đọc được lô OCR đã lưu:', err.message);
+  }
+  return map;
+}
+
+async function saveBatch(docId, batch) {
+  try {
+    await supabase.from('document_ocr_batches').upsert(
+      {
+        document_id: docId,
+        from_page: batch.fromPage,
+        to_page: batch.toPage,
+        content: batch.text,
+        model: batch.model,
+      },
+      { onConflict: 'document_id,from_page,to_page' }
+    );
+  } catch (err) {
+    // Không lưu được thì lần sau phải nhận dạng lại lô đó, nhưng không làm hỏng luồng chính
+    console.error('Không lưu được lô OCR:', err.message);
+  }
+}
+
+// ---------------------------------------------------------------------
+// Tự hẹn giờ thử lại khi gặp lỗi tạm thời
+// ---------------------------------------------------------------------
+const MAX_DOC_RETRIES = Number(process.env.OCR_DOC_RETRIES || 3);
+// Giãn cách ngắn vì Render Free ngủ sau 15 phút không có traffic
+const RETRY_DELAYS_MS = [2 * 60 * 1000, 5 * 60 * 1000, 10 * 60 * 1000];
+
+async function scheduleRetry(doc, mimeType, plan, err) {
+  const { data: current } = await supabase
+    .from('documents')
+    .select('ocr_attempts')
+    .eq('id', doc.id)
+    .maybeSingle();
+
+  const attempts = (current?.ocr_attempts || 0) + 1;
+
+  if (attempts > MAX_DOC_RETRIES) {
+    await supabase.from('documents').update({ ocr_attempts: attempts }).eq('id', doc.id);
+    await markFailed(
+      doc.id,
+      `Gemini quá tải kéo dài, đã tự thử lại ${MAX_DOC_RETRIES} lần không thành công. ` +
+      `Bấm "Xử lý lại" để chạy tiếp — những trang đã nhận dạng xong sẽ không phải làm lại.`
+    );
+    await logEvent({
+      level: 'error',
+      scope: 'upload',
+      organizationId: doc.organization_id,
+      message: `Hết lượt tự thử lại OCR: ${doc.filename}`,
+      detail: { attempts, error: err.message },
+    });
+    return true;
+  }
+
+  const delay = RETRY_DELAYS_MS[attempts - 1] || RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1];
+  const nextAt = new Date(Date.now() + delay);
+  const minutes = Math.round(delay / 60000);
+
+  await supabase
+    .from('documents')
+    .update({
+      status: 'ocr_retry',
+      ocr_attempts: attempts,
+      next_retry_at: nextAt.toISOString(),
+      error_message: `Gemini đang quá tải. Sẽ tự thử lại sau ${minutes} phút (lần ${attempts}/${MAX_DOC_RETRIES}).`,
+    })
+    .eq('id', doc.id);
+
+  await logEvent({
+    level: 'warn',
+    scope: 'upload',
+    organizationId: doc.organization_id,
+    message: `Hẹn thử lại OCR sau ${minutes} phút: ${doc.filename}`,
+    detail: { attempts, error: err.message },
+  });
+
+  setTimeout(() => {
+    enqueue(`retry:${doc.id}`, async () => {
+      // Tài liệu có thể đã bị xoá hoặc đã xử lý xong trong lúc chờ
+      const { data: still } = await supabase
+        .from('documents')
+        .select('id, status, organization_id, folder_id, filename, storage_key, mime_type')
+        .eq('id', doc.id)
+        .maybeSingle();
+      if (!still || still.status !== 'ocr_retry') return;
+
+      const buffer = await downloadFromR2(still.storage_key);
+      return processDocument(still, buffer, mimeType, plan);
+    }).catch((e) => console.error('Thử lại OCR thất bại:', e.message));
+  }, delay).unref?.();
+
+  return true;
 }
 
 export default router;

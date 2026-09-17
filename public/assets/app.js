@@ -67,6 +67,13 @@ export const fmt = {
     if (!d) return '—';
     return new Date(d).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   },
+  until(d) {
+    if (!d) return '';
+    const s = (new Date(d) - Date.now()) / 1000;
+    if (s <= 0) return 'sắp chạy';
+    if (s < 60) return `sau ${Math.ceil(s)} giây`;
+    return `sau ${Math.ceil(s / 60)} phút`;
+  },
   ago(d) {
     if (!d) return '—';
     const s = (Date.now() - new Date(d)) / 1000;
@@ -95,7 +102,7 @@ export function initials(nameOrEmail = '?') {
 
 /* ---------- Nhãn tiếng Việt ---------- */
 export const LABEL = {
-  status: { ready: 'Sẵn sàng', processing: 'Đang xử lý', ocr_processing: 'Đang nhận dạng', failed: 'Lỗi', active: 'Hoạt động', suspended: 'Tạm khoá', invited: 'Chờ nhận lời mời', disabled: 'Đã khoá' },
+  status: { ready: 'Sẵn sàng', processing: 'Đang xử lý', ocr_processing: 'Đang nhận dạng', ocr_retry: 'Chờ thử lại', failed: 'Lỗi', active: 'Hoạt động', suspended: 'Tạm khoá', invited: 'Chờ nhận lời mời', disabled: 'Đã khoá' },
   method: { text: 'Text', ocr: 'OCR', mixed: 'Hỗn hợp' },
   role: { admin: 'Quản trị', member: 'Thành viên' },
   billing: { trial: 'Dùng thử', paid: 'Đã thanh toán', overdue: 'Quá hạn' },

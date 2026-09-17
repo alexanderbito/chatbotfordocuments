@@ -263,12 +263,13 @@ async function loadDocs(q = '') {
         <td class="num small">${esc(fmt.bytes(d.size_bytes))}</td>
         <td class="num small">${fmt.num(d.chunk_count)}</td>
         <td>${badge(d.status, LABEL.status)}
-            ${d.extraction_method === 'ocr' ? `<div class="cell-sub">${icon.scan} OCR ${fmt.num(d.ocr_pages)} trang</div>` : ''}</td>
+            ${d.status === 'ocr_retry' && d.next_retry_at ? `<div class="cell-sub">Tự chạy lại ${esc(fmt.until(d.next_retry_at))}</div>` : ''}
+            ${d.extraction_method === 'ocr' && d.ocr_pages ? `<div class="cell-sub">${icon.scan} OCR ${fmt.num(d.ocr_pages)} trang</div>` : ''}</td>
         <td class="small nowrap">${esc(fmt.ago(d.created_at))}</td>
         <td class="nowrap" style="width:1%">
           <button class="icon-btn" data-dl="${esc(d.id)}" title="Tải xuống">${icon.download}</button>
           <button class="icon-btn" data-mv="${esc(d.id)}" title="Chuyển thư mục">${icon.folder}</button>
-          ${d.status === 'failed' ? `<button class="icon-btn" data-re="${esc(d.id)}" title="Xử lý lại">${icon.refresh}</button>` : ''}
+          ${d.status === 'failed' || d.status === 'ocr_retry' ? `<button class="icon-btn" data-re="${esc(d.id)}" title="Chạy lại ngay">${icon.refresh}</button>` : ''}
           <button class="icon-btn" data-rm="${esc(d.id)}" title="Xoá">${icon.trash}</button>
         </td>
       </tr>`).join('')}</tbody></table></div>`;
@@ -309,12 +310,13 @@ async function loadDocs(q = '') {
     };
   });
 
-  const busy = docs.filter((d) => d.status === 'processing' || d.status === 'ocr_processing');
-  if (busy.length) {
-    // OCR mất lâu hơn nhiều nên hỏi lại thưa hơn
-    const delay = busy.some((d) => d.status === 'ocr_processing') ? 8000 : 4000;
-    docTimer = setTimeout(() => loadDocs(q), delay);
-  }
+  // Nhịp làm mới theo việc đang chạy: đang xử lý thì hỏi dày, chờ thử lại thì hỏi thưa
+  const has = (st) => docs.some((d) => d.status === st);
+  let delay = 0;
+  if (has('processing')) delay = 4000;
+  else if (has('ocr_processing')) delay = 8000;
+  else if (has('ocr_retry')) delay = 30000;
+  if (delay) docTimer = setTimeout(() => loadDocs(q), delay);
 }
 
 /* =================== THÀNH VIÊN =================== */

@@ -43,6 +43,7 @@ Trong **Supabase Dashboard → SQL Editor → New query**, chạy lần lượt:
 1. `supabase_schema.sql` — chỉ cần chạy nếu đây là project mới (tạo `organizations`, `documents`, `document_chunks`, bật pgvector).
 2. `migration_v2_auth.sql` — **bắt buộc**, tạo phần auth/phân quyền/thư mục/gói cước/nhật ký và cập nhật hàm tìm kiếm.
 3. `migration_v3_ocr.sql` — **bắt buộc**, thêm hạn mức và cột theo dõi OCR.
+4. `migration_v4_ocr_retry.sql` — **bắt buộc**, thêm bộ đếm lần thử và bảng lưu tạm kết quả OCR.
 
 File `migration_v2_auth.sql` chạy lại nhiều lần vẫn an toàn (dùng `if not exists`).
 
@@ -60,7 +61,9 @@ So với bản gốc có **thêm các biến**:
 |---|---|---|
 | `SUPABASE_ANON_KEY` | Nên có | Supabase → Project Settings → API → `anon public` |
 | `GEMINI_API_KEY` | Chỉ khi cần OCR | Lấy tại https://aistudio.google.com/apikey |
-| `GEMINI_OCR_MODEL` | Không | Mặc định `gemini-3.5-flash`. Dùng `gemini-3.5-flash-lite` nếu muốn rẻ hơn |
+| `GEMINI_OCR_MODELS` | Không | Chuỗi model dự phòng, mặc định `gemini-3.5-flash,gemini-3.5-flash-lite` |
+| `OCR_RETRY_ROUNDS` | Không | Số vòng thử lại mỗi lô trang, mặc định 5 |
+| `OCR_DOC_RETRIES` | Không | Số lần tự hẹn chạy lại cả tài liệu, mặc định 3 |
 | `OCR_MAX_PAGES` | Không | Mặc định 30 trang/file |
 | `WORKER_CONCURRENCY` | Không | Mặc định 1 — giữ nguyên trên Render Free |
 
@@ -188,9 +191,33 @@ Cách hoạt động:
 2. Mỗi lô gửi thẳng dưới dạng PDF tới `generativelanguage.googleapis.com` — **không cần**
    bước render trang thành ảnh, nên deploy Render giữ nguyên, không cần Docker.
 3. Text nhận được ghép lại rồi đi tiếp vào pipeline chia đoạn và tạo embedding như bình thường.
-4. Gặp lỗi 429/5xx sẽ tự thử lại 3 lần với thời gian chờ tăng dần.
+4. Gặp lỗi tạm thời sẽ thử lại theo ba tầng (xem bên dưới).
 
-Tài liệu đang OCR hiển thị trạng thái **Đang nhận dạng** trên giao diện admin tổ chức,
+### Chống lỗi "model is overloaded"
+
+Gemini hay trả 503 *"This model is currently experiencing high demand"* vào giờ cao điểm.
+Hệ thống xử lý ở ba tầng:
+
+**Tầng 1 — đổi model.** Khi model chính báo quá tải, thử ngay model kế tiếp trong
+`GEMINI_OCR_MODELS`. Quá tải thường xảy ra trên từng model riêng lẻ, nên model nhẹ hơn
+vẫn chạy được — tầng này thường giải quyết xong mà không phải chờ giây nào.
+
+**Tầng 2 — backoff luỹ thừa có jitter.** Nếu cả chuỗi model đều bận, chờ 1s → 2s → 4s → 8s…
+(trần 60s, dao động ngẫu nhiên ±30% để nhiều tiến trình không cùng gọi lại một lúc),
+tối đa `OCR_RETRY_ROUNDS` vòng. Đây đúng khuyến nghị chính thức của Google.
+
+**Tầng 3 — hẹn giờ chạy lại cả tài liệu.** Quá tải kéo dài thì tài liệu chuyển sang trạng thái
+**Chờ thử lại** và tự chạy lại sau 2 → 5 → 10 phút, tối đa `OCR_DOC_RETRIES` lần.
+Giao diện hiển thị thời điểm sẽ chạy lại; admin vẫn có thể bấm "Chạy lại ngay".
+
+**Không nhận dạng lại phần đã xong.** Mỗi lô trang OCR thành công được lưu vào
+`document_ocr_batches`. Lần thử lại chỉ gọi Gemini cho những lô còn thiếu — tiết kiệm cả
+thời gian lẫn hạn mức. Bảng tạm được xoá khi tài liệu hoàn tất.
+
+Lỗi *không* tạm thời (sai API key, request hỏng, tài liệu bị chặn) báo hỏng ngay,
+không thử lại vô ích.
+
+Tài liệu đang OCR hiển thị trạng thái **Đang nhận dạng** (hoặc **Chờ thử lại**) trên giao diện admin tổ chức,
 và số trang đã nhận dạng được ghi vào cột `documents.ocr_pages` để tính hạn mức.
 
 **Hạn mức theo gói** (`plans.max_ocr_pages_per_month`, sửa được trong `/sysadmin.html`):

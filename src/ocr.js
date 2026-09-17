@@ -7,22 +7,43 @@ import 'dotenv/config';
  * Vì sao chọn Gemini: nó nhận thẳng file PDF nên không cần thư viện native
  * (poppler/pdftoppm) để render trang thành ảnh — giữ được deploy Render đơn giản.
  *
- * Cách làm: tách PDF thành từng lô nhỏ vài trang (pdf-lib, thuần JS) rồi gửi
- * tuần tự. Lô nhỏ tránh hai vấn đề: request quá lớn và câu trả lời bị cắt do
- * giới hạn token đầu ra.
+ * Chống quá tải (lỗi 503 "model is overloaded" rất hay gặp ở giờ cao điểm):
+ *  - Backoff luỹ thừa có jitter, theo đúng khuyến nghị của Google.
+ *  - Thử lần lượt nhiều model: khi model chính quá tải, model nhẹ hơn thường vẫn rảnh.
+ *  - Tách PDF thành lô nhỏ và cho phép phía gọi lưu tạm từng lô, để lần thử lại
+ *    chỉ làm phần còn thiếu.
  */
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-const MODEL = process.env.GEMINI_OCR_MODEL || 'gemini-3.5-flash';
+
+/**
+ * Danh sách model thử lần lượt. Model đầu là chính, các model sau là dự phòng
+ * khi model chính báo quá tải. Cấu hình qua GEMINI_OCR_MODELS (ngăn cách bằng dấu phẩy).
+ */
+const MODELS = (process.env.GEMINI_OCR_MODELS ||
+  [process.env.GEMINI_OCR_MODEL || 'gemini-3.5-flash', 'gemini-3.5-flash-lite'].join(','))
+  .split(',')
+  .map((m) => m.trim())
+  .filter(Boolean);
+
 const PAGES_PER_BATCH = Number(process.env.OCR_PAGES_PER_BATCH || 5);
 const MAX_OUTPUT_TOKENS = Number(process.env.OCR_MAX_OUTPUT_TOKENS || 32768);
 const REQUEST_TIMEOUT_MS = Number(process.env.OCR_TIMEOUT_MS || 120000);
+
+/** Số vòng thử lại cho mỗi lô (mỗi vòng đi qua tất cả model trong danh sách). */
+const MAX_ROUNDS = Number(process.env.OCR_RETRY_ROUNDS || 5);
+const BASE_DELAY_MS = Number(process.env.OCR_RETRY_BASE_MS || 1000);
+const MAX_DELAY_MS = Number(process.env.OCR_RETRY_MAX_MS || 60000);
 
 /** Số trang tối đa cho một tài liệu (chặn cứng để không bị hoá đơn bất ngờ). */
 export const OCR_MAX_PAGES = Number(process.env.OCR_MAX_PAGES || 30);
 
 export function isOcrEnabled() {
   return !!process.env.GEMINI_API_KEY;
+}
+
+export function ocrModels() {
+  return [...MODELS];
 }
 
 const PROMPT = `Bạn là công cụ OCR. Hãy trích xuất TOÀN BỘ văn bản có trong tài liệu này.
@@ -36,6 +57,15 @@ QUY TẮC BẮT BUỘC:
 - Mỗi trang bắt đầu bằng một dòng đúng định dạng: --- Trang {số} ---
 - Chỉ trả về nội dung văn bản. Không thêm lời mở đầu hay ghi chú của riêng bạn.`;
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Backoff luỹ thừa có jitter: 1s, 2s, 4s, 8s… trần 60s, dao động ±30%. */
+function backoffDelay(round) {
+  const base = Math.min(BASE_DELAY_MS * Math.pow(2, round), MAX_DELAY_MS);
+  const jitter = base * 0.3 * (Math.random() * 2 - 1);
+  return Math.max(500, Math.round(base + jitter));
+}
+
 /**
  * Quyết định một PDF có cần OCR hay không.
  * PDF có text thật cho ra nhiều ký tự; bản scan gần như không có gì.
@@ -47,7 +77,17 @@ export function needsOcr(text, pageCount) {
   return clean.length / pageCount < 60;
 }
 
-/** Tách PDF thành các lô trang nhỏ, trả về mảng Buffer. */
+/** Lỗi tạm thời — nên thử lại thay vì báo hỏng. */
+export function isTransient(err) {
+  if (!err) return false;
+  if (err.status === 429 || err.status === 500 || err.status === 502 || err.status === 503 || err.status === 504) return true;
+  if (err.name === 'TimeoutError' || err.name === 'AbortError') return true;
+  // Lỗi mạng của fetch (ECONNRESET, socket hang up…)
+  if (err instanceof TypeError && /fetch|network|socket/i.test(err.message)) return true;
+  return false;
+}
+
+/** Tách PDF thành các lô trang nhỏ. */
 async function splitPdf(buffer, pagesPerBatch) {
   const src = await PDFDocument.load(buffer, { ignoreEncryption: true });
   const total = src.getPageCount();
@@ -67,9 +107,9 @@ async function splitPdf(buffer, pagesPerBatch) {
   return { batches, totalPages: total };
 }
 
-/** Gọi Gemini một lần cho một lô trang. */
-async function callGemini(pdfBuffer, fromPage) {
-  const res = await fetch(`${API_BASE}/${MODEL}:generateContent`, {
+/** Gọi Gemini một lần cho một lô trang, với một model cụ thể. */
+async function callGemini(pdfBuffer, fromPage, model) {
+  const res = await fetch(`${API_BASE}/${model}:generateContent`, {
     method: 'POST',
     headers: {
       'x-goog-api-key': process.env.GEMINI_API_KEY,
@@ -84,10 +124,7 @@ async function callGemini(pdfBuffer, fromPage) {
           ],
         },
       ],
-      generationConfig: {
-        temperature: 0,
-        maxOutputTokens: MAX_OUTPUT_TOKENS,
-      },
+      generationConfig: { temperature: 0, maxOutputTokens: MAX_OUTPUT_TOKENS },
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
@@ -98,10 +135,14 @@ async function callGemini(pdfBuffer, fromPage) {
     let msg = `Gemini trả về lỗi ${res.status}`;
     try {
       const j = JSON.parse(bodyText);
-      if (j?.error?.message) msg = `Gemini: ${j.error.message}`;
+      if (j?.error?.message) msg = j.error.message;
     } catch { /* giữ thông báo mặc định */ }
     const err = new Error(msg);
     err.status = res.status;
+    err.model = model;
+    // Một số phản hồi có Retry-After (giây) — tôn trọng nếu có
+    const ra = Number(res.headers.get('retry-after'));
+    if (ra > 0) err.retryAfterMs = ra * 1000;
     throw err;
   }
 
@@ -114,30 +155,53 @@ async function callGemini(pdfBuffer, fromPage) {
   }
 
   const text = (candidate.content?.parts || []).map((p) => p.text || '').join('');
-  return { text, truncated: candidate.finishReason === 'MAX_TOKENS' };
+  return { text, truncated: candidate.finishReason === 'MAX_TOKENS', model };
 }
 
-/** Gọi lại khi gặp lỗi tạm thời (429 quá tải, 5xx). */
-async function callWithRetry(pdfBuffer, fromPage, attempts = 3) {
+/**
+ * Thử một lô trang: mỗi vòng đi qua lần lượt các model, hết vòng thì chờ rồi thử lại.
+ * Lỗi không thể khắc phục (sai API key, tài liệu bị chặn…) ném ra ngay.
+ */
+async function callWithRetry(pdfBuffer, fromPage, onNotice) {
   let lastErr;
-  for (let i = 0; i < attempts; i++) {
-    try {
-      return await callGemini(pdfBuffer, fromPage);
-    } catch (err) {
-      lastErr = err;
-      const retriable = err.status === 429 || (err.status >= 500 && err.status < 600) || err.name === 'TimeoutError';
-      if (!retriable || i === attempts - 1) throw err;
-      await new Promise((r) => setTimeout(r, 2000 * Math.pow(2, i)));
+
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    for (const model of MODELS) {
+      try {
+        return await callGemini(pdfBuffer, fromPage, model);
+      } catch (err) {
+        if (!isTransient(err)) throw err;
+        lastErr = err;
+        if (onNotice) onNotice({ model, round, message: err.message });
+      }
+    }
+
+    if (round < MAX_ROUNDS - 1) {
+      await sleep(lastErr?.retryAfterMs || backoffDelay(round));
     }
   }
-  throw lastErr;
+
+  const err = new Error(
+    `Gemini đang quá tải, đã thử ${MAX_ROUNDS} vòng với ${MODELS.length} model. Chi tiết: ${lastErr?.message || 'không rõ'}`
+  );
+  err.status = lastErr?.status;
+  err.transient = true;
+  throw err;
 }
 
 /**
  * OCR toàn bộ file PDF.
- * Trả về { text, pages, truncated } — pages là số trang đã thực sự OCR.
+ *
+ * @param {Buffer} buffer
+ * @param {object} opts
+ * @param {number} opts.maxPages      giới hạn số trang
+ * @param {Map}    opts.cached        Map('from-to' -> text) của các lô đã nhận dạng trước đó
+ * @param {Function} opts.onBatch     gọi sau mỗi lô xong, để phía gọi lưu tạm
+ * @param {Function} opts.onNotice    gọi khi một lần thử thất bại (để ghi nhật ký)
+ *
+ * Trả về { text, pages, truncated, fromCache }
  */
-export async function ocrPdf(buffer, { maxPages = OCR_MAX_PAGES } = {}) {
+export async function ocrPdf(buffer, { maxPages = OCR_MAX_PAGES, cached = new Map(), onBatch, onNotice } = {}) {
   if (!isOcrEnabled()) {
     throw new Error('Chưa cấu hình GEMINI_API_KEY nên không thể nhận dạng PDF scan');
   }
@@ -153,11 +217,27 @@ export async function ocrPdf(buffer, { maxPages = OCR_MAX_PAGES } = {}) {
 
   const parts = [];
   let truncated = false;
+  let fromCache = 0;
 
   for (const batch of batches) {
-    const out = await callWithRetry(batch.buffer, batch.fromPage);
+    const key = `${batch.fromPage}-${batch.toPage}`;
+
+    // Lô này đã nhận dạng xong ở lần chạy trước — dùng lại, không gọi Gemini nữa.
+    if (cached.has(key)) {
+      parts.push(cached.get(key));
+      fromCache++;
+      continue;
+    }
+
+    const out = await callWithRetry(batch.buffer, batch.fromPage, onNotice);
     if (out.truncated) truncated = true;
-    if (out.text.trim()) parts.push(out.text.trim());
+
+    const text = (out.text || '').trim();
+    if (text) parts.push(text);
+
+    if (onBatch) {
+      await onBatch({ fromPage: batch.fromPage, toPage: batch.toPage, text, model: out.model });
+    }
   }
 
   const text = parts.join('\n\n');
@@ -165,7 +245,7 @@ export async function ocrPdf(buffer, { maxPages = OCR_MAX_PAGES } = {}) {
     throw new Error('Không nhận dạng được chữ nào trong tài liệu (có thể ảnh quá mờ hoặc trang trắng)');
   }
 
-  return { text, pages: totalPages, truncated };
+  return { text, pages: totalPages, truncated, fromCache };
 }
 
 /** Đếm số trang của PDF mà không cần OCR — dùng để kiểm tra hạn mức trước. */
