@@ -4,6 +4,17 @@
 -- An toàn khi chạy lại nhiều lần. Yêu cầu đã chạy migration_v3_ocr.sql.
 -- =====================================================================
 
+-- ---------------------------------------------------------------------
+-- KIỂM TRA ĐIỀU KIỆN: dừng sớm với thông báo rõ ràng nếu chạy sai thứ tự
+-- ---------------------------------------------------------------------
+do $guard$
+begin
+  if to_regclass('public.documents') is null then
+    raise exception E'Thieu bang "documents".\n=> Ban chua chay supabase_schema.sql va migration_v2_auth.sql.';
+  end if;
+end
+$guard$;
+
 -- 1. Đếm số lần đã thử OCR một tài liệu và thời điểm dự kiến thử lại
 alter table documents add column if not exists ocr_attempts int not null default 0;
 alter table documents add column if not exists next_retry_at timestamptz;

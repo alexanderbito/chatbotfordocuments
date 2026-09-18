@@ -4,6 +4,20 @@
 -- An toàn khi chạy lại nhiều lần. Yêu cầu đã chạy migration_v4_ocr_retry.sql.
 -- =====================================================================
 
+-- ---------------------------------------------------------------------
+-- KIỂM TRA ĐIỀU KIỆN: dừng sớm với thông báo rõ ràng nếu chạy sai thứ tự
+-- ---------------------------------------------------------------------
+do $guard$
+begin
+  if to_regclass('public.folders') is null then
+    raise exception E'Thieu bang "folders".\n=> Bang nay duoc tao boi migration_v2_auth.sql. Hay chay file do truoc, roi moi chay file nay.\n=> Neu ung dung tren Render dang chay binh thuong voi thu muc, thi rat co the SQL Editor dang mo NHAM project Supabase. Kiem tra o goc tren ben trai dashboard.\n=> Chay file kiem_tra_migration.sql de xem database dang o giai doan nao.';
+  end if;
+  if to_regclass('public.organization_members') is null then
+    raise exception E'Thieu bang "organization_members".\n=> Ban chua chay migration_v2_auth.sql.';
+  end if;
+end
+$guard$;
+
 -- 1. Chế độ hiển thị của thư mục
 --    public  : mọi thành viên trong tổ chức đều hỏi được tài liệu bên trong
 --    private : chỉ những email được cấp quyền (và admin tổ chức) mới đọc được

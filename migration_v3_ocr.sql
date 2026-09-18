@@ -5,6 +5,20 @@
 -- Yêu cầu: đã chạy migration_v2_auth.sql trước đó.
 -- =====================================================================
 
+-- ---------------------------------------------------------------------
+-- KIỂM TRA ĐIỀU KIỆN: dừng sớm với thông báo rõ ràng nếu chạy sai thứ tự
+-- ---------------------------------------------------------------------
+do $guard$
+begin
+  if to_regclass('public.plans') is null then
+    raise exception E'Thieu bang "plans".\n=> Ban chua chay migration_v2_auth.sql. Hay chay file do truoc, roi quay lai file nay.\n=> Neu chac chan da chay roi: kiem tra xem SQL Editor co dang mo dung project Supabase ma Render dang dung khong.';
+  end if;
+  if to_regclass('public.documents') is null then
+    raise exception E'Thieu bang "documents".\n=> Ban chua chay supabase_schema.sql. Hay chay file do truoc.';
+  end if;
+end
+$guard$;
+
 -- 1. Hạn mức số trang OCR mỗi tháng theo gói cước
 alter table plans add column if not exists max_ocr_pages_per_month int not null default 50;
 

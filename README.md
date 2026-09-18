@@ -46,6 +46,17 @@ Trong **Supabase Dashboard → SQL Editor → New query**, chạy lần lượt:
 4. `migration_v4_ocr_retry.sql` — **bắt buộc**, thêm bộ đếm lần thử và bảng lưu tạm kết quả OCR.
 5. `migration_v5_folder_acl.sql` — **bắt buộc**, thêm chế độ thư mục công khai/riêng tư và phân quyền theo email.
 
+**Chạy đúng thứ tự.** Mỗi file từ v3 trở đi có bước kiểm tra điều kiện ở đầu và sẽ dừng
+kèm thông báo nếu file trước chưa chạy.
+
+Nếu gặp lỗi `relation "..." does not exist`, chạy `kiem_tra_migration.sql` — file này liệt kê
+database đang ở giai đoạn nào và những bảng hiện có. Nguyên nhân thường gặp:
+
+- Chưa chạy file migration trước đó.
+- **SQL Editor đang mở nhầm project Supabase.** Nếu ứng dụng trên Render vẫn chạy bình thường
+  mà SQL Editor báo thiếu bảng, gần như chắc chắn là trường hợp này — đối chiếu `SUPABASE_URL`
+  trong tab Environment của Render với project đang mở trên dashboard.
+
 File `migration_v2_auth.sql` chạy lại nhiều lần vẫn an toàn (dùng `if not exists`).
 
 > Nếu project đang dùng embedding 1536 chiều (OpenAI cũ), chạy `migration_to_voyage.sql` trước.
