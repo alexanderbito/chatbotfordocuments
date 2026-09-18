@@ -124,9 +124,9 @@ async function loadFolders() {
     const res = await api(`/orgs/${orgId}/folders`);
     folders = res.folders;
     const sel = document.getElementById('folderScope');
-    sel.innerHTML = '<option value="">Tất cả thư mục</option>' +
-      folders.map((f) => `<option value="${esc(f.id)}">${esc(f.name)} (${f.document_count})</option>`).join('');
-  } catch { /* thành viên thường vẫn xem được thư mục */ }
+    sel.innerHTML = '<option value="">Tất cả tài liệu tôi được xem</option>' +
+      folders.map((f) => `<option value="${esc(f.id)}">${f.visibility === 'private' ? '🔒 ' : ''}${esc(f.name)} (${f.document_count})</option>`).join('');
+  } catch { /* thư mục không lấy được thì vẫn hỏi trên toàn bộ phạm vi được phép */ }
 }
 
 function bubble(role, html) {

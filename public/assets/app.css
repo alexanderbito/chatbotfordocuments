@@ -247,6 +247,15 @@ textarea { resize: vertical; min-height: 78px; }
 .tree-item svg { width: 15px; height: 15px; flex: none; }
 .tree-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree-item .count { font-size: 11.5px; color: var(--muted); }
+.tree-item .lock { color: var(--warn); display: inline-flex; }
+.tree-item .lock svg { width: 13px; height: 13px; }
+.perm-list { max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 4px; }
+.perm-row { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 7px; font-size: 13.5px; }
+.perm-row:hover { background: var(--surface-2); }
+.perm-row input { width: auto; flex: none; }
+.perm-row .who { flex: 1; min-width: 0; }
+.perm-row .who b { display: block; font-weight: 550; }
+.perm-row .who span { color: var(--muted); font-size: 12px; }
 .tree-item .row-act { opacity: 0; display: flex; gap: 2px; }
 .tree-item:hover .row-act { opacity: 1; }
 .icon-btn {

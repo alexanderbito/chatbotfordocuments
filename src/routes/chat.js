@@ -5,6 +5,7 @@ import { supabase } from '../supabaseClient.js';
 import { requireAuth, requireOrgMember, requireOrgAdmin } from '../auth.js';
 import { checkQuota } from '../limits.js';
 import { logEvent } from '../logger.js';
+import { getFolderAccess } from '../access.js';
 
 const router = express.Router({ mergeParams: true });
 router.use(requireAuth, requireOrgMember);
@@ -22,29 +23,46 @@ router.post('/', async (req, res) => {
     const quota = await checkQuota(req.org.id, req.org.plan, 'chat');
     if (!quota.ok) return res.status(402).json({ error: quota.error });
 
-    const folderIds = Array.isArray(req.body?.folder_ids) && req.body.folder_ids.length
-      ? req.body.folder_ids
-      : null;
+    // 1. Tính danh sách thư mục người hỏi ĐƯỢC PHÉP đọc.
+    //    Thư mục riêng tư mà họ không được cấp quyền sẽ không nằm trong danh sách,
+    //    nên chatbot không thể lấy nội dung bên trong để trả lời.
+    const access = await getFolderAccess(req.org.id, req.user, req.membership);
+    let allowedIds = access.allowedIds;
 
-    // 1. Embedding câu hỏi
+    // Nếu người dùng tự chọn phạm vi thư mục thì giao với danh sách được phép
+    const requested = Array.isArray(req.body?.folder_ids) ? req.body.folder_ids.filter(Boolean) : null;
+    let includeUnfiled = true;
+    if (requested && requested.length) {
+      const allowedSet = new Set(allowedIds);
+      const denied = requested.filter((id) => !allowedSet.has(id));
+      if (denied.length) {
+        return res.status(403).json({ error: 'Bạn không có quyền hỏi trong thư mục đã chọn' });
+      }
+      allowedIds = requested;
+      includeUnfiled = false;
+    }
+
+    // 2. Embedding câu hỏi
     const queryEmbedding = await embedText(question);
 
-    // 2. Semantic search — LUÔN lọc theo organization_id để cách ly dữ liệu giữa các tổ chức
-    const { data: matches, error } = await supabase.rpc('match_document_chunks_scoped', {
+    // 3. Tìm kiếm ngữ nghĩa — lọc theo organization_id để cách ly giữa các tổ chức,
+    //    và lọc theo allowed_folder_ids để cách ly trong nội bộ tổ chức.
+    const { data: matches, error } = await supabase.rpc('match_document_chunks_acl', {
       query_embedding: queryEmbedding,
       match_org_id: req.org.id,
       match_count: 5,
-      filter_folder_ids: folderIds,
+      allowed_folder_ids: allowedIds,
+      include_unfiled: includeUnfiled,
     });
     if (error) throw error;
 
     if (!matches || matches.length === 0) {
-      const answer = 'Không tìm thấy thông tin liên quan trong tài liệu của doanh nghiệp bạn.';
+      const answer = 'Không tìm thấy thông tin liên quan trong những tài liệu bạn được phép truy cập.';
       await saveMessage(req, question, answer, [], 0, Date.now() - startedAt);
       return res.json({ answer, sources: [] });
     }
 
-    // 3. Lấy tên file để hiển thị nguồn
+    // 4. Lấy tên file để hiển thị nguồn
     const docIds = [...new Set(matches.map((m) => m.document_id))];
     const { data: docs } = await supabase.from('documents').select('id, filename').in('id', docIds);
     const docMap = Object.fromEntries((docs || []).map((d) => [d.id, d.filename]));
@@ -54,7 +72,7 @@ router.post('/', async (req, res) => {
       filename: docMap[m.document_id] || 'Không rõ',
     }));
 
-    // 4. Sinh câu trả lời
+    // 5. Sinh câu trả lời
     const answer = await generateAnswer(question, contextChunks);
     const sources = [...new Set(contextChunks.map((c) => c.filename))];
 

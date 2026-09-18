@@ -15,7 +15,7 @@ DeepSeek (LLM) · Render/Railway (hosting). Giao diện là HTML/CSS/JS thuần,
 |---|---|---|
 | **Admin hệ thống** (super admin) | `/sysadmin.html` | Quản lý toàn bộ doanh nghiệp, gói cước, thanh toán, người dùng, nhật ký, sức khoẻ hệ thống |
 | **Admin tổ chức** | `/admin.html` | Tải lên / xoá / tải xuống tài liệu, quản lý thư mục, mời & phân quyền thành viên, xem lịch sử hỏi đáp, xem hạn mức gói |
-| **Thành viên** | `/chat.html` | Chỉ trò chuyện với chatbot và xem lịch sử của chính mình |
+| **Thành viên** | `/chat.html` | Chỉ trò chuyện với chatbot **trong phạm vi thư mục được cấp quyền**, và xem lịch sử của chính mình |
 
 Toàn bộ API đều kiểm tra quyền ở backend, không chỉ ẩn nút trên giao diện.
 
@@ -44,6 +44,7 @@ Trong **Supabase Dashboard → SQL Editor → New query**, chạy lần lượt:
 2. `migration_v2_auth.sql` — **bắt buộc**, tạo phần auth/phân quyền/thư mục/gói cước/nhật ký và cập nhật hàm tìm kiếm.
 3. `migration_v3_ocr.sql` — **bắt buộc**, thêm hạn mức và cột theo dõi OCR.
 4. `migration_v4_ocr_retry.sql` — **bắt buộc**, thêm bộ đếm lần thử và bảng lưu tạm kết quả OCR.
+5. `migration_v5_folder_acl.sql` — **bắt buộc**, thêm chế độ thư mục công khai/riêng tư và phân quyền theo email.
 
 File `migration_v2_auth.sql` chạy lại nhiều lần vẫn an toàn (dùng `if not exists`).
 
@@ -121,8 +122,10 @@ PATCH  /orgs/:orgId                           sửa hồ sơ doanh nghiệp     
 GET    /orgs/:orgId/overview                  số liệu dashboard               (admin tổ chức)
 GET    /orgs/:orgId/billing                   gói cước + lịch sử thanh toán   (admin tổ chức)
 
-GET    /orgs/:orgId/folders                   cây thư mục
+GET    /orgs/:orgId/folders                   cây thư mục (đã lọc theo quyền của người gọi)
 POST   | PATCH | DELETE  /orgs/:orgId/folders quản lý thư mục                 (admin tổ chức)
+GET    /orgs/:orgId/folders/:id/permissions   email đang được đọc thư mục     (admin tổ chức)
+PUT    /orgs/:orgId/folders/:id/permissions   đặt lại danh sách email         (admin tổ chức)
 
 GET    /orgs/:orgId/documents                 danh sách tài liệu              (admin tổ chức)
 POST   /orgs/:orgId/documents                 tải lên (multipart: file, folder_id)
@@ -180,7 +183,42 @@ Tài liệu đã tải lên **trước** bản vá vẫn giữ tên sai trong CS
 rồi "Sửa tên tài liệu". (Tương đương `POST /admin/maintenance/fix-filenames`,
 thêm `?dry_run=1` để chỉ xem trước.)
 
-## 8. OCR cho PDF scan
+## 8. Thư mục công khai và riêng tư
+
+Mỗi thư mục có một chế độ truy cập:
+
+- **Công khai** (mặc định): mọi thành viên trong tổ chức đều hỏi chatbot được về tài liệu bên trong.
+- **Riêng tư**: chỉ những email được admin cấp quyền mới đọc được.
+
+### Bốn quy tắc cần nhớ
+
+**1. Kế thừa hạn chế từ thư mục cha.** Muốn đọc một thư mục thì phải có quyền ở *tất cả*
+thư mục cha riêng tư nằm trên đường đi tới nó. Một thư mục công khai đặt bên trong thư mục
+riêng tư vẫn bị hạn chế — nhờ vậy không thể vô tình lộ dữ liệu bằng cách tạo thư mục con.
+
+**2. Ẩn hoàn toàn.** Thành viên không có quyền sẽ không thấy tên thư mục ở bất kỳ đâu,
+kể cả trong ô chọn phạm vi khi chat. Bản thân tên thư mục ("Lương ban giám đốc") cũng là
+thông tin nhạy cảm.
+
+**3. Chatbot không đọc được nội dung không được phép.** Backend tính danh sách thư mục
+người hỏi được đọc, rồi truyền vào hàm tìm kiếm `match_document_chunks_acl`. Cách này
+"fail closed": nếu việc tính quyền có sai sót thì người dùng không thấy gì, thay vì thấy
+nhầm tài liệu mật. Nếu người dùng tự chỉ định `folder_ids` ngoài phạm vi, API trả `403`.
+
+**4. Admin tổ chức đọc được tất cả.** Họ vốn đã quản lý toàn bộ tài liệu nên không cần
+cấp quyền riêng.
+
+### Vài điểm vận hành
+
+- Chỉ cấp quyền được cho email **đã là thành viên** của tổ chức. Email lạ bị bỏ qua và
+  giao diện báo lại, tránh trường hợp gõ nhầm rồi tưởng đã cấp quyền.
+- Gỡ một thành viên khỏi tổ chức sẽ thu hồi luôn quyền đọc các thư mục riêng tư của họ.
+- Chuyển một thư mục từ riêng tư về công khai sẽ xoá danh sách quyền cũ.
+- Xoá một thư mục riêng tư còn tài liệu bên trong: API trả `409` bắt xác nhận, vì tài liệu
+  sẽ rơi về mục "Chưa phân loại" và cả tổ chức đọc được.
+- Tài liệu chưa phân loại (`folder_id = null`) được coi là công khai trong tổ chức.
+
+## 9. OCR cho PDF scan
 
 Khi tải lên một PDF, hệ thống đọc text thật trước. Nếu thu được dưới ~60 ký tự mỗi trang
 thì coi đó là bản scan và chuyển sang nhận dạng bằng Gemini.
@@ -228,7 +266,7 @@ Nhiều file tải lên cùng lúc sẽ xếp hàng chứ không chạy song son
 xem được ở trang Sức khoẻ hệ thống. Khi có khách hàng thật nên tách thành
 Background Worker riêng trên Render.
 
-## 9. Giới hạn đã biết
+## 10. Giới hạn đã biết
 
 - **Xử lý tài liệu đồng bộ trong tiến trình web**: file rất lớn có thể timeout trên Render Free.
   Khi có khách hàng thật nên tách thành worker riêng.

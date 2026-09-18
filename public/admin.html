@@ -149,9 +149,10 @@ async function loadFolders() {
   const row = (f, depth) => `
     <div class="tree-item ${state.folder === f.id ? 'active' : ''}" data-folder="${esc(f.id)}" style="padding-left:${10 + depth * 14}px">
       ${icon.folder}<span class="name">${esc(f.name)}</span>
+      ${f.visibility === 'private' ? `<span class="lock" title="Riêng tư — ${f.permission_count} người được đọc">${icon.lock}</span>` : ''}
       <span class="count">${f.document_count}</span>
       <span class="row-act">
-        <button class="icon-btn" data-edit="${esc(f.id)}" title="Đổi tên">${icon.edit}</button>
+        <button class="icon-btn" data-edit="${esc(f.id)}" title="Sửa thư mục và quyền">${icon.edit}</button>
         <button class="icon-btn" data-del="${esc(f.id)}" title="Xoá">${icon.trash}</button>
       </span>
     </div>
@@ -178,32 +179,129 @@ async function loadFolders() {
     b.onclick = async () => {
       const f = state.folders.find((x) => x.id === b.dataset.del);
       if (!(await confirmDialog('Xoá thư mục', `Xoá "${f.name}"? Tài liệu bên trong sẽ chuyển về mục Chưa phân loại, không bị mất.`))) return;
-      await api(`/orgs/${orgId}/folders/${f.id}`, { method: 'DELETE' });
+      try {
+        await api(`/orgs/${orgId}/folders/${f.id}`, { method: 'DELETE' });
+      } catch (err) {
+        // Thư mục riêng tư còn tài liệu -> backend bắt xác nhận lần nữa
+        if (!/needs_confirmation/.test(err.message)) throw err;
+        const ok = await confirmDialog(
+          'Cảnh báo: tài liệu sẽ thành công khai',
+          `"${f.name}" đang ở chế độ riêng tư. Xoá thư mục sẽ đẩy tài liệu bên trong về mục Chưa phân loại, ` +
+          `và MỌI thành viên trong tổ chức sẽ hỏi được nội dung đó. Vẫn tiếp tục?`,
+          'Vẫn xoá'
+        );
+        if (!ok) return;
+        await api(`/orgs/${orgId}/folders/${f.id}?confirm=move-to-public`, { method: 'DELETE' });
+      }
       toast('Đã xoá thư mục', 'ok');
       state.folder = null; loadFolders(); loadDocs();
     };
   });
 }
 
-function folderModal(folder) {
+async function folderModal(folder) {
+  // Lấy danh sách thành viên và quyền hiện tại của thư mục
+  let members = [];
+  let granted = [];
+  try {
+    if (folder) {
+      const d = await api(`/orgs/${orgId}/folders/${folder.id}/permissions`);
+      members = d.members; granted = d.emails;
+    } else {
+      members = await api(`/orgs/${orgId}/members`);
+    }
+  } catch (err) { toast(err.message, 'err'); return; }
+
+  const grantedSet = new Set(granted);
   const opts = state.folders.filter((f) => f.id !== folder?.id)
-    .map((f) => `<option value="${esc(f.id)}" ${folder?.parent_id === f.id ? 'selected' : ''}>${esc(f.name)}</option>`).join('');
+    .map((f) => `<option value="${esc(f.id)}" ${folder?.parent_id === f.id ? 'selected' : ''}>${esc(f.name)}${f.visibility === 'private' ? ' (riêng tư)' : ''}</option>`).join('');
+
+  const memberRows = members
+    .filter((m) => m.role !== 'admin')
+    .map((m) => `
+      <label class="perm-row">
+        <input type="checkbox" class="perm-check" value="${esc(String(m.email).toLowerCase())}" ${grantedSet.has(String(m.email).toLowerCase()) ? 'checked' : ''} />
+        <span class="who"><b>${esc(m.full_name || String(m.email).split('@')[0])}</b><span>${esc(m.email)}</span></span>
+        ${m.status === 'invited' ? '<span class="badge tiny warn">chờ nhận lời mời</span>' : ''}
+      </label>`).join('');
+
+  const adminCount = members.filter((m) => m.role === 'admin').length;
+
   modal({
-    title: folder ? 'Đổi tên thư mục' : 'Thư mục mới',
+    title: folder ? `Thư mục: ${folder.name}` : 'Thư mục mới',
+    wide: true,
+    okText: folder ? 'Lưu thay đổi' : 'Tạo thư mục',
     body: `
-      <div class="field"><label>Tên thư mục</label><input id="fname" value="${esc(folder?.name || '')}" placeholder="Ví dụ: Quy trình nhân sự" /></div>
-      <div class="field"><label>Thư mục cha</label><select id="fparent"><option value="">— Không có —</option>${opts}</select></div>`,
-    okText: folder ? 'Lưu' : 'Tạo thư mục',
+      <div class="form-grid">
+        <div class="field"><label>Tên thư mục</label><input id="fname" value="${esc(folder?.name || '')}" placeholder="Ví dụ: Quy trình nhân sự" /></div>
+        <div class="field"><label>Thư mục cha</label><select id="fparent"><option value="">— Không có —</option>${opts}</select></div>
+      </div>
+
+      <div class="field">
+        <label>Chế độ truy cập</label>
+        <label class="perm-row"><input type="radio" name="fvis" value="public" ${folder?.visibility !== 'private' ? 'checked' : ''} />
+          <span class="who"><b>Công khai trong tổ chức</b><span>Mọi thành viên đều hỏi chatbot được về tài liệu trong thư mục này</span></span></label>
+        <label class="perm-row"><input type="radio" name="fvis" value="private" ${folder?.visibility === 'private' ? 'checked' : ''} />
+          <span class="who"><b>Riêng tư</b><span>Chỉ những người được chọn bên dưới mới hỏi được. Người khác không thấy thư mục và chatbot không đọc tài liệu bên trong.</span></span></label>
+      </div>
+
+      <div class="field ${folder?.visibility === 'private' ? '' : 'hidden'}" id="permBlock">
+        <label>Ai được hỏi về tài liệu trong thư mục này?</label>
+        <div class="perm-list">${memberRows || '<div class="empty" style="padding:20px"><b>Chưa có thành viên thường</b><div>Hãy mời thành viên trước khi phân quyền.</div></div>'}</div>
+        <div class="hint">${adminCount} quản trị viên của tổ chức luôn đọc được mọi thư mục nên không cần chọn ở đây.</div>
+        <div class="row mt-1" style="gap:8px">
+          <button type="button" class="btn sm" id="permAll">Chọn tất cả</button>
+          <button type="button" class="btn sm" id="permNone">Bỏ chọn tất cả</button>
+        </div>
+      </div>
+
+      <div class="alert info show" id="inheritNote" style="display:none">
+        Thư mục con nằm trong thư mục riêng tư cũng bị hạn chế theo — muốn đọc thư mục con thì phải có quyền ở tất cả thư mục cha riêng tư.
+      </div>`,
     onOk: async (box) => {
       const name = box.querySelector('#fname').value.trim();
       if (!name) { toast('Chưa nhập tên thư mục', 'err'); return false; }
-      const body = { name, parent_id: box.querySelector('#fparent').value || null };
-      if (folder) await api(`/orgs/${orgId}/folders/${folder.id}`, { method: 'PATCH', body });
-      else await api(`/orgs/${orgId}/folders`, { method: 'POST', body });
+
+      const visibility = box.querySelector('input[name="fvis"]:checked').value;
+      const emails = [...box.querySelectorAll('.perm-check:checked')].map((c) => c.value);
+
+      if (visibility === 'private' && emails.length === 0) {
+        const ok = await confirmDialog(
+          'Thư mục riêng tư chưa có ai',
+          'Bạn chưa chọn thành viên nào. Thư mục sẽ chỉ quản trị viên đọc được, thành viên thường không hỏi được gì trong đó. Tiếp tục?',
+          'Vẫn lưu'
+        );
+        if (!ok) return false;
+      }
+
+      const body = { name, parent_id: box.querySelector('#fparent').value || null, visibility, emails };
+      const res = folder
+        ? await api(`/orgs/${orgId}/folders/${folder.id}`, { method: 'PATCH', body })
+        : await api(`/orgs/${orgId}/folders`, { method: 'POST', body });
+
+      if (res.permissions?.rejected?.length) {
+        toast(`Bỏ qua ${res.permissions.rejected.length} email không thuộc tổ chức`, 'err');
+      }
       toast('Đã lưu thư mục', 'ok');
       loadFolders();
     },
   });
+
+  // Hiện/ẩn danh sách phân quyền theo chế độ đang chọn
+  const sync = () => {
+    const isPrivate = document.querySelector('input[name="fvis"]:checked')?.value === 'private';
+    document.getElementById('permBlock')?.classList.toggle('hidden', !isPrivate);
+    const note = document.getElementById('inheritNote');
+    if (note) note.style.display = isPrivate ? 'block' : 'none';
+  };
+  document.querySelectorAll('input[name="fvis"]').forEach((r) => (r.onchange = sync));
+  sync();
+
+  const setAll = (v) => document.querySelectorAll('.perm-check').forEach((c) => (c.checked = v));
+  const allBtn = document.getElementById('permAll');
+  const noneBtn = document.getElementById('permNone');
+  if (allBtn) allBtn.onclick = () => setAll(true);
+  if (noneBtn) noneBtn.onclick = () => setAll(false);
 }
 
 function uploadModal() {
@@ -251,7 +349,11 @@ async function loadDocs(q = '') {
     return;
   }
 
-  const folderName = (id) => state.folders.find((f) => f.id === id)?.name || 'Chưa phân loại';
+  const folderCell = (id) => {
+    const f = state.folders.find((x) => x.id === id);
+    if (!f) return '<span class="muted">Chưa phân loại</span>';
+    return `${esc(f.name)}${f.visibility === 'private' ? ` <span class="lock" title="Thư mục riêng tư">${icon.lock}</span>` : ''}`;
+  };
   box.innerHTML = `<div class="table-wrap"><table class="tbl">
     <thead><tr><th>Tài liệu</th><th>Thư mục</th><th class="num">Dung lượng</th><th class="num">Số đoạn</th><th>Trạng thái</th><th>Tải lên</th><th></th></tr></thead>
     <tbody>${docs.map((d) => `
@@ -259,7 +361,7 @@ async function loadDocs(q = '') {
         <td><div class="cell-main truncate" style="max-width:280px" title="${esc(d.filename)}">${esc(d.filename)}</div>
             <div class="cell-sub">${esc(d.uploader)}</div>
             ${d.error_message ? `<div class="cell-sub" style="color:var(--danger)">${esc(d.error_message)}</div>` : ''}</td>
-        <td class="small">${esc(folderName(d.folder_id))}</td>
+        <td class="small">${folderCell(d.folder_id)}</td>
         <td class="num small">${esc(fmt.bytes(d.size_bytes))}</td>
         <td class="num small">${fmt.num(d.chunk_count)}</td>
         <td>${badge(d.status, LABEL.status)}
@@ -287,7 +389,8 @@ async function loadDocs(q = '') {
         title: 'Chuyển thư mục',
         body: `<div class="field"><label>Thư mục đích cho "${esc(d.filename)}"</label>
           <select id="mvf"><option value="">Chưa phân loại</option>
-          ${state.folders.map((f) => `<option value="${esc(f.id)}" ${d.folder_id === f.id ? 'selected' : ''}>${esc(f.name)}</option>`).join('')}</select></div>`,
+          ${state.folders.map((f) => `<option value="${esc(f.id)}" ${d.folder_id === f.id ? 'selected' : ''}>${esc(f.name)}${f.visibility === 'private' ? ' (riêng tư)' : ''}</option>`).join('')}</select></div>
+          <div class="hint">Chuyển vào "Chưa phân loại" nghĩa là mọi thành viên trong tổ chức đều hỏi được tài liệu này.</div>`,
         onOk: async (box2) => {
           await api(`/orgs/${orgId}/documents/${d.id}`, { method: 'PATCH', body: { folder_id: box2.querySelector('#mvf').value || null } });
           toast('Đã chuyển thư mục', 'ok'); loadFolders(); loadDocs();

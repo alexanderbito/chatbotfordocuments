@@ -145,7 +145,16 @@ router.delete('/:memberId', async (req, res) => {
     }
 
     await supabase.from('organization_members').delete().eq('id', req.params.memberId);
-    await logEvent({ scope: 'auth', organizationId: req.org.id, userId: req.user.id, message: `Gỡ thành viên ${member.email}` });
+
+    // Gỡ luôn quyền đọc các thư mục riêng tư, tránh để lại quyền "mồ côi"
+    // sẽ sống lại nếu sau này mời cùng email đó vào tổ chức.
+    await supabase
+      .from('folder_permissions')
+      .delete()
+      .eq('organization_id', req.org.id)
+      .eq('email', String(member.email).toLowerCase());
+
+    await logEvent({ scope: 'auth', organizationId: req.org.id, userId: req.user.id, message: `Gỡ thành viên ${member.email} và thu hồi quyền thư mục riêng tư` });
     res.json({ message: 'Đã gỡ thành viên khỏi tổ chức' });
   } catch (err) {
     res.status(500).json({ error: err.message });
