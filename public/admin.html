@@ -233,7 +233,7 @@ async function folderModal(folder) {
     okText: folder ? 'Lưu thay đổi' : 'Tạo thư mục',
     body: `
       <div class="form-grid">
-        <div class="field"><label>Tên thư mục</label><input id="fname" value="${esc(folder?.name || '')}" placeholder="Ví dụ: Quy trình nhân sự" /></div>
+        <div class="field"><label>Tên thư mục</label><input type="text" id="fname" value="${esc(folder?.name || '')}" placeholder="Ví dụ: Quy trình nhân sự" /></div>
         <div class="field"><label>Thư mục cha</label><select id="fparent"><option value="">— Không có —</option>${opts}</select></div>
       </div>
 
@@ -644,18 +644,18 @@ async function viewSettings() {
       <div class="card">
         <div class="card-head"><h2>Hồ sơ doanh nghiệp</h2></div>
         <div class="card-body">
-          <div class="field"><label>Tên doanh nghiệp</label><input id="oname" value="${esc(org.name)}" /></div>
-          <div class="field"><label>Email liên hệ</label><input id="omail" value="${esc(org.contact_email || '')}" placeholder="ketoan@congty.vn" /></div>
-          <div class="field"><label>Mã số thuế</label><input id="otax" value="${esc(org.tax_code || '')}" /></div>
-          <div class="field"><label>Mã tổ chức</label><input class="mono" value="${esc(org.id)}" readonly /></div>
+          <div class="field"><label>Tên doanh nghiệp</label><input type="text" id="oname" value="${esc(org.name)}" /></div>
+          <div class="field"><label>Email liên hệ</label><input type="text" id="omail" value="${esc(org.contact_email || '')}" placeholder="ketoan@congty.vn" /></div>
+          <div class="field"><label>Mã số thuế</label><input type="text" id="otax" value="${esc(org.tax_code || '')}" /></div>
+          <div class="field"><label>Mã tổ chức</label><input type="text" class="mono" value="${esc(org.id)}" readonly /></div>
           <button class="btn primary" id="saveOrg">Lưu thay đổi</button>
         </div>
       </div>
       <div class="card">
         <div class="card-head"><h2>Tài khoản của bạn</h2></div>
         <div class="card-body">
-          <div class="field"><label>Họ và tên</label><input id="uname" value="${esc(me.user.full_name || '')}" /></div>
-          <div class="field"><label>Email</label><input value="${esc(me.user.email)}" readonly /></div>
+          <div class="field"><label>Họ và tên</label><input type="text" id="uname" value="${esc(me.user.full_name || '')}" /></div>
+          <div class="field"><label>Email</label><input type="text" value="${esc(me.user.email)}" readonly /></div>
           <button class="btn" id="saveUser">Lưu hồ sơ</button>
           <hr style="border:none;border-top:1px solid var(--border);margin:20px 0" />
           <h3 class="mb-1">Đổi mật khẩu</h3>

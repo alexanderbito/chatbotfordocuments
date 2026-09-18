@@ -206,8 +206,8 @@ function orgEdit(o) {
     title: `Sửa tổ chức: ${o.name}`, wide: true,
     body: `
       <div class="form-grid">
-        <div class="field"><label>Tên doanh nghiệp</label><input id="e_name" value="${esc(o.name)}" /></div>
-        <div class="field"><label>Email liên hệ</label><input id="e_mail" value="${esc(o.contact_email || '')}" /></div>
+        <div class="field"><label>Tên doanh nghiệp</label><input type="text" id="e_name" value="${esc(o.name)}" /></div>
+        <div class="field"><label>Email liên hệ</label><input type="text" id="e_mail" value="${esc(o.contact_email || '')}" /></div>
         <div class="field"><label>Gói cước</label><select id="e_plan">${planOpts}</select></div>
         <div class="field"><label>Trạng thái</label><select id="e_status">
           <option value="active" ${o.status === 'active' ? 'selected' : ''}>Hoạt động</option>
@@ -374,7 +374,7 @@ function paymentModal() {
         <div class="field"><label>Từ ngày</label><input type="date" id="y_start" value="${today.toISOString().slice(0, 10)}" /></div>
         <div class="field"><label>Đến ngày</label><input type="date" id="y_end" value="${nextMonth.toISOString().slice(0, 10)}" /></div>
         <div class="field"><label>Trạng thái</label><select id="y_status"><option value="paid">Đã thu</option><option value="pending">Chờ thu</option></select></div>
-        <div class="field"><label>Mã tham chiếu</label><input id="y_ref" placeholder="Mã giao dịch ngân hàng" /></div>
+        <div class="field"><label>Mã tham chiếu</label><input type="text" id="y_ref" placeholder="Mã giao dịch ngân hàng" /></div>
       </div>
       <div class="field"><label>Ghi chú</label><textarea id="y_note"></textarea></div>
       <div class="alert info show">Khi trạng thái là "Đã thu", gói cước và hạn dùng của doanh nghiệp sẽ được cập nhật ngay.</div>`,

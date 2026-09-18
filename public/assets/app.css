@@ -209,8 +209,11 @@ table.tbl td.num, table.tbl th.num { text-align: right; font-variant-numeric: ta
 .field { margin-bottom: 14px; }
 .field label { display: block; font-size: 13px; font-weight: 550; margin-bottom: 6px; color: var(--text-2); }
 .field .hint { font-size: 12px; color: var(--muted); margin-top: 5px; }
-input[type=text], input[type=email], input[type=password], input[type=number], input[type=date],
-input[type=search], select, textarea {
+/* Dùng :not(...) thay vì liệt kê từng type, vì input KHÔNG khai báo type
+   sẽ không khớp với selector input[type=text] — đây từng là nguyên nhân
+   khiến vài ô nhập bị co hẹp thay vì rộng hết khung. */
+input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=submit]):not([type=button]):not([type=range]):not([type=color]),
+select, textarea {
   width: 100%; font-family: var(--font); font-size: 13.5px; color: var(--text);
   padding: 9px 11px; border: 1px solid var(--border-strong); border-radius: 8px;
   background: var(--surface); outline: none; transition: border-color .12s, box-shadow .12s;
@@ -220,8 +223,11 @@ input[type=file] { width: 100%; font-size: 13px; padding: 8px; border: 1px dashe
 textarea { resize: vertical; min-height: 78px; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 14px; }
 .inline-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.inline-form input, .inline-form select { width: auto; flex: 1; min-width: 150px; }
-.check { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.inline-form input:not([type=checkbox]):not([type=radio]), .inline-form select { width: auto; flex: 1; min-width: 150px; }
+/* Viết là "label.check" chứ không phải ".check": các nhãn này nằm trong .field,
+   mà quy tắc ".field label { display:block }" có độ ưu tiên cao hơn ".check"
+   nên sẽ đè mất display:flex và làm ô tick rớt xuống dòng riêng. */
+label.check { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 400; margin-bottom: 0; color: var(--text); }
 .check input { width: auto; }
 
 /* ---------- Thanh công cụ / bộ lọc ---------- */
@@ -250,11 +256,11 @@ textarea { resize: vertical; min-height: 78px; }
 .tree-item .lock { color: var(--warn); display: inline-flex; }
 .tree-item .lock svg { width: 13px; height: 13px; }
 .perm-list { max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 4px; }
-.perm-row { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 7px; font-size: 13.5px; }
+label.perm-row { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 7px; font-size: 13.5px; font-weight: 400; margin-bottom: 0; color: var(--text); }
 .perm-row:hover { background: var(--surface-2); }
 .perm-row input { width: auto; flex: none; }
 .perm-row .who { flex: 1; min-width: 0; }
-.perm-row .who b { display: block; font-weight: 550; }
+.perm-row .who b { display: block; font-weight: 550; color: var(--text); }
 .perm-row .who span { color: var(--muted); font-size: 12px; }
 .tree-item .row-act { opacity: 0; display: flex; gap: 2px; }
 .tree-item:hover .row-act { opacity: 1; }
