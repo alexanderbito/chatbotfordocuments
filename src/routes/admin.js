@@ -309,7 +309,7 @@ router.delete('/plans/:id', async (req, res) => {
 function sanitizePlan(body = {}) {
   const out = {};
   const strs = ['code', 'name', 'description'];
-  const nums = ['price_vnd', 'max_documents', 'max_members', 'max_storage_mb', 'max_questions_per_month', 'max_ocr_pages_per_month', 'sort_order'];
+  const nums = ['price_vnd', 'price_usd', 'max_documents', 'max_members', 'max_storage_mb', 'max_questions_per_month', 'max_ocr_pages_per_month', 'sort_order'];
   for (const f of strs) if (body[f] !== undefined) out[f] = body[f];
   for (const f of nums) if (body[f] !== undefined) out[f] = Number(body[f]) || 0;
   if (body.is_active !== undefined) out.is_active = !!body.is_active;

@@ -247,11 +247,12 @@ async function viewPlans() {
 async function loadPlans() {
   cache.plans = await api('/admin/plans');
   document.getElementById('planTable').innerHTML = `<div class="table-wrap"><table class="tbl">
-    <thead><tr><th>Gói</th><th class="num">Giá/tháng</th><th class="num">Tài liệu</th><th class="num">Thành viên</th><th class="num">Dung lượng</th><th class="num">Lượt hỏi/tháng</th><th class="num">Trang OCR/tháng</th><th class="num">Đang dùng</th><th>Trạng thái</th><th></th></tr></thead>
+    <thead><tr><th>Gói</th><th class="num">Giá VNĐ</th><th class="num">Giá USD</th><th class="num">Tài liệu</th><th class="num">Thành viên</th><th class="num">Dung lượng</th><th class="num">Lượt hỏi/tháng</th><th class="num">Trang OCR/tháng</th><th class="num">Đang dùng</th><th>Trạng thái</th><th></th></tr></thead>
     <tbody>${cache.plans.map((p) => `
       <tr>
         <td><div class="cell-main">${esc(p.name)}</div><div class="cell-sub mono">${esc(p.code)}</div></td>
         <td class="num">${esc(fmt.money(p.price_vnd))}</td>
+        <td class="num">${p.price_usd ? '$' + Number(p.price_usd).toFixed(0) : '—'}</td>
         <td class="num">${fmt.num(p.max_documents)}</td>
         <td class="num">${fmt.num(p.max_members)}</td>
         <td class="num">${fmt.num(p.max_storage_mb)} MB</td>
@@ -284,7 +285,8 @@ function planModal(p) {
       <div class="form-grid">
         ${f('p_code', 'Mã gói (không dấu)', p?.code)}
         ${f('p_name', 'Tên hiển thị', p?.name)}
-        ${f('p_price', 'Giá mỗi tháng (đ)', p?.price_vnd ?? 0, 'number')}
+        ${f('p_price', 'Giá mỗi tháng (đ) — khách VN', p?.price_vnd ?? 0, 'number')}
+        ${f('p_usd', 'Giá mỗi tháng (USD) — khách ngoài VN', p?.price_usd ?? 0, 'number')}
         ${f('p_sort', 'Thứ tự hiển thị', p?.sort_order ?? 0, 'number')}
         ${f('p_docs', 'Số tài liệu tối đa', p?.max_documents ?? 20, 'number')}
         ${f('p_members', 'Số thành viên tối đa', p?.max_members ?? 5, 'number')}
@@ -298,7 +300,7 @@ function planModal(p) {
       const g = (id) => box.querySelector('#' + id).value;
       const body = {
         code: g('p_code').trim(), name: g('p_name').trim(), description: g('p_desc').trim(),
-        price_vnd: g('p_price'), sort_order: g('p_sort'),
+        price_vnd: g('p_price'), price_usd: g('p_usd'), sort_order: g('p_sort'),
         max_documents: g('p_docs'), max_members: g('p_members'),
         max_storage_mb: g('p_storage'), max_questions_per_month: g('p_questions'),
         max_ocr_pages_per_month: g('p_ocr'),

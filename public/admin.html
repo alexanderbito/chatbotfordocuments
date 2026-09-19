@@ -54,6 +54,7 @@ function shell() {
     <div class="main">
       <div class="topbar">
         <div class="title"><h1 id="ttl">Tổng quan</h1><p id="dsc"></p></div>
+        <a class="btn" href="/pricing.html">${icon.card} Bảng giá</a>
         <a class="btn" href="/chat.html">${icon.chat} Mở chatbot</a>
       </div>
       <div class="page">
@@ -571,6 +572,7 @@ async function viewBilling() {
   el.innerHTML = '<div class="loading-line"></div>';
   const b = await api(`/orgs/${orgId}/billing`);
   const u = b.usage, L = u.limits;
+  const intl = b.billing_country && b.billing_country !== 'VN';
 
   const line = (label, used, limit, unit = '') => `
     <div class="mb-2">
@@ -623,14 +625,60 @@ async function viewBilling() {
           <div class="card-body">
             ${b.available_plans.filter((p) => p.id !== b.plan?.id).map((p) => `
               <div class="mb-2" style="padding-bottom:12px;border-bottom:1px solid var(--border)">
-                <div class="row between"><b>${esc(p.name)}</b><span>${esc(fmt.money(p.price_vnd))}/tháng</span></div>
-                <div class="small muted">${fmt.num(p.max_documents)} tài liệu · ${fmt.num(p.max_members)} thành viên · ${fmt.num(p.max_questions_per_month)} lượt hỏi/tháng · ${fmt.num(p.max_ocr_pages_per_month || 0)} trang OCR/tháng</div>
+                <div class="row between"><b>${esc(p.name)}</b><span>${esc(intl ? '$' + Number(p.price_usd || 0).toFixed(0) : fmt.money(p.price_vnd))}/tháng</span></div>
+                <div class="small muted mb-1">${fmt.num(p.max_documents)} tài liệu · ${fmt.num(p.max_members)} thành viên · ${fmt.num(p.max_questions_per_month)} lượt hỏi/tháng · ${fmt.num(p.max_ocr_pages_per_month || 0)} trang OCR/tháng</div>
+                ${Number(intl ? p.price_usd : p.price_vnd) > 0 && b.providers?.length
+                  ? `<button class="btn sm primary" data-buy="${esc(p.id)}">Nâng cấp lên gói này</button>` : ''}
               </div>`).join('') || '<span class="muted small">Không có gói khác</span>'}
-            <p class="small muted mb-0">Để đổi gói, liên hệ quản trị hệ thống. Việc nâng cấp có hiệu lực ngay sau khi được ghi nhận thanh toán.</p>
+            ${b.providers?.length
+              ? '<p class="small muted mb-0">Gói có hiệu lực ngay sau khi hệ thống nhận được tiền.</p>'
+              : '<p class="small muted mb-0">Máy chủ chưa bật cổng thanh toán nào. Liên hệ quản trị hệ thống để đổi gói.</p>'}
           </div>
         </div>
       </div>
     </div>`;
+
+  el.querySelectorAll('[data-buy]').forEach((btn) => {
+    btn.onclick = () => startCheckout(b, btn.dataset.buy, intl);
+  });
+}
+
+/** Mở hộp thoại chọn phương thức rồi chuyển sang trang thanh toán của cổng. */
+function startCheckout(billing, planId, intl) {
+  const plan = billing.available_plans.find((p) => p.id === planId);
+  const providers = billing.providers || [];
+  const amount = intl ? `$${Number(plan.price_usd).toFixed(2)}` : fmt.money(plan.price_vnd);
+
+  modal({
+    title: `Nâng cấp lên gói ${plan.name}`,
+    okText: 'Tiếp tục thanh toán',
+    body: `
+      <div class="field">
+        <label>Phương thức thanh toán</label>
+        ${providers.map((p, i) => `
+          <label class="pay-method ${i === 0 ? 'sel' : ''}">
+            <input type="radio" name="prov" value="${esc(p.id)}" ${i === 0 ? 'checked' : ''} />
+            <span class="who"><b>${esc(p.name)}</b><span>${esc(p.description)}</span></span>
+          </label>`).join('')}
+      </div>
+      <div class="row between" style="padding-top:10px;border-top:1px solid var(--border)">
+        <b>Tổng thanh toán</b><b style="font-size:18px">${esc(amount)}</b>
+      </div>
+      <p class="small muted mt-1 mb-0">Nếu gói hiện tại còn hạn, thời gian còn lại được cộng dồn thêm 1 tháng.</p>`,
+    onOk: async (box) => {
+      const provider = box.querySelector('input[name="prov"]:checked').value;
+      const res = await api(`/orgs/${orgId}/billing/checkout`, { method: 'POST', body: { plan_id: planId, provider } });
+      location.href = res.checkout_url;
+      return false;
+    },
+  });
+
+  document.querySelectorAll('.pay-method').forEach((el2) => {
+    el2.onclick = () => {
+      document.querySelectorAll('.pay-method').forEach((x) => x.classList.remove('sel'));
+      el2.classList.add('sel');
+    };
+  });
 }
 
 /* =================== THIẾT LẬP =================== */

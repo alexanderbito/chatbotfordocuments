@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kết quả thanh toán — DocBot</title>
+<link rel="stylesheet" href="/assets/app.css" />
+</head>
+<body>
+<div style="min-height:100vh;display:grid;place-items:center;padding:24px">
+  <div class="card" style="max-width:460px;width:100%;margin:0">
+    <div class="card-body" id="box" style="text-align:center;padding:36px 28px">
+      <div class="loading-line"></div>
+      <p class="muted mt-2 mb-0">Đang kiểm tra kết quả thanh toán…</p>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { api, Session, requireSession, fmt, esc, icon } from '/assets/app.js';
+
+const params = new URLSearchParams(location.search);
+const paymentId = params.get('payment');
+const cancelled = params.get('cancelled') === '1';
+const box = document.getElementById('box');
+
+const me = await requireSession();
+const orgIds = me.organizations.map((o) => o.id);
+
+function show(kind, title, detail, actions) {
+  const color = kind === 'ok' ? 'var(--success)' : kind === 'err' ? 'var(--danger)' : 'var(--warn)';
+  const bg = kind === 'ok' ? 'var(--success-soft)' : kind === 'err' ? 'var(--danger-soft)' : 'var(--warn-soft)';
+  box.innerHTML = `
+    <div style="width:52px;height:52px;border-radius:50%;background:${bg};color:${color};display:grid;place-items:center;margin:0 auto 16px">
+      <span style="width:26px;height:26px;display:block">${kind === 'ok' ? icon.check : kind === 'err' ? icon.alert : icon.info}</span>
+    </div>
+    <h2>${esc(title)}</h2>
+    <p class="muted mt-1">${detail}</p>
+    <div class="btn-row mt-2" style="justify-content:center">${actions}</div>`;
+}
+
+const backBtns = '<a class="btn primary" href="/admin.html#billing">Về trang gói cước</a><a class="btn" href="/pricing.html">Xem bảng giá</a>';
+
+if (!paymentId) {
+  show('err', 'Thiếu thông tin giao dịch', 'Đường dẫn không hợp lệ.', backBtns);
+} else if (cancelled) {
+  show('warn', 'Bạn đã huỷ thanh toán', 'Không có khoản tiền nào bị trừ. Bạn có thể chọn lại gói bất kỳ lúc nào.', backBtns);
+} else {
+  // Tìm tổ chức chứa giao dịch này
+  let orgId = null, payment = null;
+  for (const id of orgIds) {
+    try {
+      payment = await api(`/orgs/${id}/billing/payments/${paymentId}`);
+      orgId = id; break;
+    } catch { /* thử tổ chức tiếp theo */ }
+  }
+
+  if (!payment) {
+    show('err', 'Không tìm thấy giao dịch', 'Giao dịch không tồn tại hoặc không thuộc doanh nghiệp của bạn.', backBtns);
+  } else {
+    // PayPal cần gọi thu tiền sau khi khách bấm đồng ý
+    if (payment.provider === 'paypal' && payment.status !== 'paid') {
+      try { await api(`/orgs/${orgId}/billing/payments/${paymentId}/capture`, { method: 'POST' }); }
+      catch (err) { console.error('capture:', err.message); }
+    }
+
+    // payOS báo qua webhook nên có độ trễ — hỏi lại vài lần
+    let tries = 0;
+    const poll = async () => {
+      tries++;
+      try { payment = await api(`/orgs/${orgId}/billing/payments/${paymentId}`); } catch { /* giữ dữ liệu cũ */ }
+
+      if (payment.status === 'paid') {
+        const amount = payment.currency === 'VND' ? fmt.money(payment.amount) : `$${Number(payment.amount).toFixed(2)}`;
+        show('ok', 'Thanh toán thành công',
+          `Gói <b>${esc(payment.plan?.name || '')}</b> đã được kích hoạt.<br>Số tiền: <b>${esc(amount)}</b>`,
+          backBtns);
+        return;
+      }
+      if (['failed', 'expired', 'cancelled'].includes(payment.status)) {
+        show('err', 'Thanh toán chưa hoàn tất', 'Giao dịch không thành công. Bạn có thể thử lại.', backBtns);
+        return;
+      }
+      if (tries >= 12) {
+        show('warn', 'Chưa nhận được xác nhận',
+          'Nếu bạn đã chuyển tiền, hệ thống sẽ tự cập nhật trong vài phút. Tải lại trang này để kiểm tra.',
+          `<button class="btn primary" onclick="location.reload()">Kiểm tra lại</button>` + backBtns);
+        return;
+      }
+      setTimeout(poll, 2500);
+    };
+    poll();
+  }
+}
+</script>
+</body>
+</html>

@@ -30,6 +30,8 @@ Toàn bộ API đều kiểm tra quyền ở backend, không chỉ ẩn nút tr�
 | `/chat.html` | Không gian hỏi đáp cho mọi thành viên |
 | `/admin.html` | Console admin tổ chức: Tổng quan · Tài liệu & thư mục · Thành viên · Lịch sử hỏi đáp · Gói cước · Thiết lập |
 | `/sysadmin.html` | Console admin hệ thống: Bảng điều khiển · Tổ chức · Gói cước · Thanh toán · Người dùng · Nhật ký · Sức khoẻ hệ thống |
+| `/pricing.html` | Bảng giá công khai, có nút chọn Việt Nam / ngoài Việt Nam |
+| `/billing-return.html` | Trang kết quả sau khi khách thanh toán xong |
 | `/` | Tự chuyển hướng theo vai trò của người đang đăng nhập |
 
 ---
@@ -45,6 +47,7 @@ Trong **Supabase Dashboard → SQL Editor → New query**, chạy lần lượt:
 3. `migration_v3_ocr.sql` — **bắt buộc**, thêm hạn mức và cột theo dõi OCR.
 4. `migration_v4_ocr_retry.sql` — **bắt buộc**, thêm bộ đếm lần thử và bảng lưu tạm kết quả OCR.
 5. `migration_v5_folder_acl.sql` — **bắt buộc**, thêm chế độ thư mục công khai/riêng tư và phân quyền theo email.
+6. `migration_v6_payments.sql` — **bắt buộc**, thêm giá USD và thanh toán qua cổng.
 
 **Chạy đúng thứ tự.** Mỗi file từ v3 trở đi có bước kiểm tra điều kiện ở đầu và sẽ dừng
 kèm thông báo nếu file trước chưa chạy.
@@ -78,6 +81,9 @@ So với bản gốc có **thêm các biến**:
 | `OCR_DOC_RETRIES` | Không | Số lần tự hẹn chạy lại cả tài liệu, mặc định 3 |
 | `OCR_MAX_PAGES` | Không | Mặc định 30 trang/file |
 | `WORKER_CONCURRENCY` | Không | Mặc định 1 — giữ nguyên trên Render Free |
+| `PAYOS_CLIENT_ID` / `PAYOS_API_KEY` / `PAYOS_CHECKSUM_KEY` | Nếu bán cho khách VN | Lấy tại payos.vn |
+| `PAYPAL_CLIENT_ID` / `PAYPAL_SECRET` / `PAYPAL_WEBHOOK_ID` | Nếu bán cho khách nước ngoài | Lấy tại developer.paypal.com |
+| `APP_BASE_URL` | Không | URL công khai; trên Render tự đọc `RENDER_EXTERNAL_URL` |
 
 Bucket R2 giờ **không cần để public**: hệ thống tạo link tải có chữ ký, hết hạn sau 5 phút,
 và chỉ admin tổ chức mới lấy được link.
@@ -132,6 +138,13 @@ GET    /orgs/:orgId                           thông tin tổ chức + vai trò
 PATCH  /orgs/:orgId                           sửa hồ sơ doanh nghiệp          (admin tổ chức)
 GET    /orgs/:orgId/overview                  số liệu dashboard               (admin tổ chức)
 GET    /orgs/:orgId/billing                   gói cước + lịch sử thanh toán   (admin tổ chức)
+POST   /orgs/:orgId/billing/checkout          tạo phiên thanh toán            (admin tổ chức)
+GET    /orgs/:orgId/billing/payments/:id      trạng thái giao dịch            (admin tổ chức)
+POST   /orgs/:orgId/billing/payments/:id/capture  thu tiền PayPal             (admin tổ chức)
+
+GET    /public/billing/plans?country=VN       bảng giá công khai
+POST   /webhooks/payos                        webhook payOS  (xác thực bằng chữ ký)
+POST   /webhooks/paypal                       webhook PayPal (xác thực bằng chữ ký)
 
 GET    /orgs/:orgId/folders                   cây thư mục (đã lọc theo quyền của người gọi)
 POST   | PATCH | DELETE  /orgs/:orgId/folders quản lý thư mục                 (admin tổ chức)
@@ -229,7 +242,61 @@ cấp quyền riêng.
   sẽ rơi về mục "Chưa phân loại" và cả tổ chức đọc được.
 - Tài liệu chưa phân loại (`folder_id = null`) được coi là công khai trong tổ chức.
 
-## 9. OCR cho PDF scan
+## 9. Thanh toán
+
+Khách chọn quốc gia ở `/pricing.html`; trang tự đoán theo múi giờ trình duyệt và
+người dùng đổi lại được.
+
+| Khách | Tiền tệ | Cổng | Vì sao |
+|---|---|---|---|
+| Việt Nam | VNĐ | **payOS** (VietQR) | Miễn phí giao dịch, quét mã bằng app ngân hàng bất kỳ |
+| Ngoài Việt Nam | USD | **PayPal** | Stripe không hỗ trợ doanh nghiệp đặt tại Việt Nam |
+
+Giá mỗi gói lưu hai cột: `plans.price_vnd` và `plans.price_usd`, sửa được trong
+`/sysadmin.html → Gói cước`.
+
+### Luồng
+
+1. Admin tổ chức chọn gói → `POST /orgs/:orgId/billing/checkout {plan_id, provider}`
+2. Máy chủ tạo bản ghi `payments` trạng thái `pending` rồi gọi cổng tạo link
+3. Khách thanh toán trên trang của cổng
+4. Cổng gọi webhook → hệ thống xác thực chữ ký → gọi `activate_paid_plan()` → gói có hiệu lực ngay
+5. Khách quay về `/billing-return.html`, trang này hỏi lại trạng thái vài lần rồi báo kết quả
+
+Với PayPal còn một bước thu tiền (`capture`) gọi khi khách quay lại; webhook là
+đường dự phòng nếu khách đóng tab giữa chừng.
+
+### Bốn chốt chặn an toàn
+
+**1. Số tiền luôn tính ở máy chủ.** Trình duyệt chỉ gửi `plan_id` và `provider`.
+Gửi kèm `amount` cũng bị bỏ qua.
+
+**2. Xác thực chữ ký webhook.** payOS dùng SDK chính thức `@payos/node`
+(thuật toán HMAC của họ có vài chi tiết dễ sai, tự ký là rủi ro không cần thiết).
+PayPal xác thực qua chính API `verify-webhook-signature` của họ — vì vậy tuyến
+webhook PayPal phải nằm **trước** `express.json()` trong `src/index.js` và dùng
+`express.raw()`, do PayPal yêu cầu gửi lại thân request nguyên văn.
+
+**3. Đối chiếu số tiền.** Webhook báo số tiền khác với đơn đã tạo thì bị bỏ qua
+và ghi nhật ký mức `error`.
+
+**4. Chống cộng gói hai lần.** Cổng thanh toán hay gọi webhook lặp khi mạng lỗi.
+Có ba lớp: chốt chặn ở ứng dụng (`payments.paid_at`), chốt chặn trong hàm SQL
+`activate_paid_plan()` (khoá dòng bằng `for update`), và ràng buộc `unique` trên
+`order_code` cùng `(provider, provider_ref)`. Mốc duy nhất xác định "đã xử lý" là
+`paid_at`, vì cột này chỉ được ghi bên trong hàm SQL đó.
+
+Nếu gói hiện tại còn hạn, thời gian còn lại được **cộng dồn** chứ không mất.
+
+### Chưa làm
+
+- **Chưa tự động trừ tiền định kỳ.** Mỗi kỳ khách phải chủ động thanh toán lại.
+- **Chưa xuất hoá đơn VAT.** payOS đăng ký bằng CCCD nghĩa là tiền vào tài khoản
+  cá nhân. Bán thật cho doanh nghiệp cần pháp nhân và kết nối hoá đơn điện tử —
+  payOS có sẵn API hoá đơn (`invoices`) để nối sau.
+- **Chưa hoàn tiền trong giao diện**; phải xử lý bên trang của cổng thanh toán.
+
+## 10. OCR cho PDF scan
 
 Khi tải lên một PDF, hệ thống đọc text thật trước. Nếu thu được dưới ~60 ký tự mỗi trang
 thì coi đó là bản scan và chuyển sang nhận dạng bằng Gemini.
@@ -277,7 +344,7 @@ Nhiều file tải lên cùng lúc sẽ xếp hàng chứ không chạy song son
 xem được ở trang Sức khoẻ hệ thống. Khi có khách hàng thật nên tách thành
 Background Worker riêng trên Render.
 
-## 10. Giới hạn đã biết
+## 11. Giới hạn đã biết
 
 - **Xử lý tài liệu đồng bộ trong tiến trình web**: file rất lớn có thể timeout trên Render Free.
   Khi có khách hàng thật nên tách thành worker riêng.

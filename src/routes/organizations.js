@@ -2,10 +2,12 @@ import express from 'express';
 import { supabase } from '../supabaseClient.js';
 import { requireAuth, requireOrgMember, requireOrgAdmin } from '../auth.js';
 import { getUsage } from '../limits.js';
+import { availableProviders } from '../payments/index.js';
 import foldersRouter from './folders.js';
 import documentsRouter from './documents.js';
 import membersRouter from './members.js';
 import chatRouter from './chat.js';
+import billingRouter from './billing.js';
 
 const router = express.Router();
 
@@ -14,6 +16,7 @@ router.use('/:orgId/folders', foldersRouter);
 router.use('/:orgId/documents', documentsRouter);
 router.use('/:orgId/members', membersRouter);
 router.use('/:orgId/chat', chatRouter);
+router.use('/:orgId/billing', billingRouter);
 
 /** GET /orgs/:orgId — thông tin tổ chức + vai trò của người đang đăng nhập */
 router.get('/:orgId', requireAuth, requireOrgMember, async (req, res) => {
@@ -129,9 +132,11 @@ router.get('/:orgId/billing', requireAuth, requireOrgMember, requireOrgAdmin, as
       plan: req.org.plan,
       billing_status: req.org.billing_status,
       plan_expires_at: req.org.plan_expires_at,
+      billing_country: req.org.billing_country || 'VN',
       usage,
       payments: payments || [],
       available_plans: plans || [],
+      providers: availableProviders(req.org.billing_country),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
