@@ -90,15 +90,15 @@ async function viewOverview() {
 
   el.innerHTML = `
     <div class="stat-grid">
-      ${stat('Tài liệu', `${fmt.num(u.documents)} <small>/ ${fmt.num(L.max_documents)}</small>`, 'file', `${d.documents_by_status.ready || 0} sẵn sàng · ${d.documents_by_status.failed || 0} lỗi`, u.documents, L.max_documents)}
+      ${stat('Tài liệu', `${fmt.num(u.documents)} <small>/ ${fmt.num(L.max_documents)}</small>`, 'file', t('{ready} sẵn sàng · {failed} lỗi', { ready: d.documents_by_status.ready || 0, failed: d.documents_by_status.failed || 0 }), u.documents, L.max_documents)}
       ${stat('Thành viên', `${fmt.num(u.members)} <small>/ ${fmt.num(L.max_members)}</small>`, 'users', '', u.members, L.max_members)}
       ${stat('Lượt hỏi tháng này', `${fmt.num(u.questions_this_month)} <small>/ ${fmt.num(L.max_questions_per_month)}</small>`, 'chat', '', u.questions_this_month, L.max_questions_per_month)}
-      ${stat('Dung lượng', `${fmt.mb(u.storage_mb)} <small>/ ${fmt.num(L.max_storage_mb)} MB</small>`, 'db', `${fmt.num(u.chunks)} đoạn đã lập chỉ mục`, u.storage_mb, L.max_storage_mb)}
+      ${stat('Dung lượng', `${fmt.mb(u.storage_mb)} <small>/ ${fmt.num(L.max_storage_mb)} MB</small>`, 'db', t('{n} đoạn đã lập chỉ mục', { n: fmt.num(u.chunks) }), u.storage_mb, L.max_storage_mb)}
       ${stat('Trang nhận dạng (OCR)', `${fmt.num(u.ocr_pages_this_month)} <small>/ ${fmt.num(L.max_ocr_pages_per_month)}</small>`, 'scan', 'trong tháng này', u.ocr_pages_this_month, L.max_ocr_pages_per_month)}
     </div>
 
     <div class="card">
-      <div class="card-head"><h2>Lượt hỏi 30 ngày gần nhất</h2><span class="sub">Tổng ${fmt.num(d.questions_series.reduce((s, x) => s + x.questions, 0))} câu hỏi</span></div>
+      <div class="card-head"><h2>${esc(t('Lượt hỏi 30 ngày gần nhất'))}</h2><span class="sub">${esc(t('Tổng {n} câu hỏi', { n: fmt.num(d.questions_series.reduce((s, x) => s + x.questions, 0)) }))}</span></div>
       <div class="card-body"><div id="chart"></div></div>
     </div>
 
@@ -107,13 +107,13 @@ async function viewOverview() {
         <div class="card-head"><h3>Tài liệu mới nhất</h3><a href="#documents" class="small">Xem tất cả</a></div>
         <div class="card-body flush">${d.recent_documents.length ? `<div class="table-wrap"><table class="tbl"><tbody>
           ${d.recent_documents.map((x) => `<tr><td><div class="cell-main truncate">${esc(x.filename)}</div><div class="cell-sub">${esc(fmt.ago(x.created_at))}</div></td><td style="width:1%">${badge(x.status, LABEL.status)}</td></tr>`).join('')}
-        </tbody></table></div>` : emptyState('Chưa có tài liệu nào')}</div>
+        </tbody></table></div>` : emptyState(t('Chưa có tài liệu nào'))}</div>
       </div>
       <div class="card">
         <div class="card-head"><h3>Câu hỏi gần đây</h3><a href="#history" class="small">Xem tất cả</a></div>
         <div class="card-body flush">${d.recent_chats.length ? `<div class="table-wrap"><table class="tbl"><tbody>
           ${d.recent_chats.map((x) => `<tr><td><div class="cell-main truncate">${esc(x.question)}</div><div class="cell-sub">${esc(x.user_email || '')} · ${esc(fmt.ago(x.created_at))}</div></td></tr>`).join('')}
-        </tbody></table></div>` : emptyState('Chưa có câu hỏi nào')}</div>
+        </tbody></table></div>` : emptyState(t('Chưa có câu hỏi nào'))}</div>
       </div>
     </div>`;
 
@@ -126,7 +126,7 @@ async function viewDocuments() {
   el.innerHTML = `
     <div class="split">
       <div class="card" style="margin:0">
-        <div class="card-head"><h3>Thư mục</h3><button class="icon-btn" id="addFolder" title="Thêm thư mục">${icon.plus}</button></div>
+        <div class="card-head"><h3>Thư mục</h3><button class="icon-btn" id="addFolder" title="${esc(t('Thêm thư mục'))}">${icon.plus}</button></div>
         <div class="card-body" id="tree" data-no-i18n>Đang tải…</div>
       </div>
       <div>
@@ -156,7 +156,7 @@ async function loadFolders() {
   const row = (f, depth) => `
     <div class="tree-item ${state.folder === f.id ? 'active' : ''}" data-folder="${esc(f.id)}" style="padding-left:${10 + depth * 14}px">
       ${icon.folder}<span class="name">${esc(f.name)}</span>
-      ${f.visibility === 'private' ? `<span class="lock" title="Riêng tư — ${f.permission_count} người được đọc">${icon.lock}</span>` : ''}
+      ${f.visibility === 'private' ? `<span class="lock" title="${esc(t('Riêng tư — {n} người được đọc', { n: f.permission_count }))}">${icon.lock}</span>` : ''}
       <span class="count">${f.document_count}</span>
       <span class="row-act">
         <button class="icon-btn" data-edit="${esc(f.id)}" title="Sửa thư mục và quyền">${icon.edit}</button>
@@ -185,22 +185,21 @@ async function loadFolders() {
   document.querySelectorAll('[data-del]').forEach((b) => {
     b.onclick = async () => {
       const f = state.folders.find((x) => x.id === b.dataset.del);
-      if (!(await confirmDialog('Xoá thư mục', `Xoá "${f.name}"? Tài liệu bên trong sẽ chuyển về mục Chưa phân loại, không bị mất.`))) return;
+      if (!(await confirmDialog(t('Xoá thư mục'), t('Xoá "{name}"? Tài liệu bên trong sẽ chuyển về mục Chưa phân loại, không bị mất.', { name: f.name })))) return;
       try {
         await api(`/orgs/${orgId}/folders/${f.id}`, { method: 'DELETE' });
       } catch (err) {
         // Thư mục riêng tư còn tài liệu -> backend bắt xác nhận lần nữa
         if (!/needs_confirmation/.test(err.message)) throw err;
         const ok = await confirmDialog(
-          'Cảnh báo: tài liệu sẽ thành công khai',
-          `"${f.name}" đang ở chế độ riêng tư. Xoá thư mục sẽ đẩy tài liệu bên trong về mục Chưa phân loại, ` +
-          `và MỌI thành viên trong tổ chức sẽ hỏi được nội dung đó. Vẫn tiếp tục?`,
-          'Vẫn xoá'
+          t('Cảnh báo: tài liệu sẽ thành công khai'),
+          t('"{name}" đang ở chế độ riêng tư. Xoá thư mục sẽ đẩy tài liệu bên trong về mục Chưa phân loại, và MỌI thành viên trong tổ chức sẽ hỏi được nội dung đó. Vẫn tiếp tục?', { name: f.name }),
+          t('Vẫn xoá')
         );
         if (!ok) return;
         await api(`/orgs/${orgId}/folders/${f.id}?confirm=move-to-public`, { method: 'DELETE' });
       }
-      toast('Đã xoá thư mục', 'ok');
+      toast(t('Đã xoá thư mục'), 'ok');
       state.folder = null; loadFolders(); loadDocs();
     };
   });
@@ -229,18 +228,18 @@ async function folderModal(folder) {
       <label class="perm-row">
         <input type="checkbox" class="perm-check" value="${esc(String(m.email).toLowerCase())}" ${grantedSet.has(String(m.email).toLowerCase()) ? 'checked' : ''} />
         <span class="who"><b>${esc(m.full_name || String(m.email).split('@')[0])}</b><span>${esc(m.email)}</span></span>
-        ${m.status === 'invited' ? '<span class="badge tiny warn">chờ nhận lời mời</span>' : ''}
+        ${m.status === 'invited' ? `<span class="badge tiny warn">${esc(t('chờ nhận lời mời'))}</span>` : ''}
       </label>`).join('');
 
   const adminCount = members.filter((m) => m.role === 'admin').length;
 
   modal({
-    title: folder ? `Thư mục: ${folder.name}` : 'Thư mục mới',
+    title: folder ? t('Thư mục: {name}', { name: folder.name }) : t('Thư mục mới'),
     wide: true,
-    okText: folder ? 'Lưu thay đổi' : 'Tạo thư mục',
+    okText: folder ? t('Lưu thay đổi') : t('Tạo thư mục'),
     body: `
       <div class="form-grid">
-        <div class="field"><label>Tên thư mục</label><input type="text" id="fname" value="${esc(folder?.name || '')}" placeholder="Ví dụ: Quy trình nhân sự" /></div>
+        <div class="field"><label>Tên thư mục</label><input type="text" id="fname" value="${esc(folder?.name || '')}" placeholder="${esc(t('Ví dụ: Quy trình nhân sự'))}" /></div>
         <div class="field"><label>Thư mục cha</label><select id="fparent"><option value="">— Không có —</option>${opts}</select></div>
       </div>
 
@@ -254,8 +253,8 @@ async function folderModal(folder) {
 
       <div class="field ${folder?.visibility === 'private' ? '' : 'hidden'}" id="permBlock">
         <label>Ai được hỏi về tài liệu trong thư mục này?</label>
-        <div class="perm-list">${memberRows || '<div class="empty" style="padding:20px"><b>Chưa có thành viên thường</b><div>Hãy mời thành viên trước khi phân quyền.</div></div>'}</div>
-        <div class="hint">${adminCount} quản trị viên của tổ chức luôn đọc được mọi thư mục nên không cần chọn ở đây.</div>
+        <div class="perm-list">${memberRows || `<div class="empty" style="padding:20px"><b>${esc(t('Chưa có thành viên thường'))}</b><div>${esc(t('Hãy mời thành viên trước khi phân quyền.'))}</div></div>`}</div>
+        <div class="hint">${esc(t('{n} quản trị viên của tổ chức luôn đọc được mọi thư mục nên không cần chọn ở đây.', { n: adminCount }))}</div>
         <div class="row mt-1" style="gap:8px">
           <button type="button" class="btn sm" id="permAll">Chọn tất cả</button>
           <button type="button" class="btn sm" id="permNone">Bỏ chọn tất cả</button>
@@ -267,16 +266,16 @@ async function folderModal(folder) {
       </div>`,
     onOk: async (box) => {
       const name = box.querySelector('#fname').value.trim();
-      if (!name) { toast('Chưa nhập tên thư mục', 'err'); return false; }
+      if (!name) { toast(t('Chưa nhập tên thư mục'), 'err'); return false; }
 
       const visibility = box.querySelector('input[name="fvis"]:checked').value;
       const emails = [...box.querySelectorAll('.perm-check:checked')].map((c) => c.value);
 
       if (visibility === 'private' && emails.length === 0) {
         const ok = await confirmDialog(
-          'Thư mục riêng tư chưa có ai',
-          'Bạn chưa chọn thành viên nào. Thư mục sẽ chỉ quản trị viên đọc được, thành viên thường không hỏi được gì trong đó. Tiếp tục?',
-          'Vẫn lưu'
+          t('Thư mục riêng tư chưa có ai'),
+          t('Bạn chưa chọn thành viên nào. Thư mục sẽ chỉ quản trị viên đọc được, thành viên thường không hỏi được gì trong đó. Tiếp tục?'),
+          t('Vẫn lưu')
         );
         if (!ok) return false;
       }
@@ -287,9 +286,9 @@ async function folderModal(folder) {
         : await api(`/orgs/${orgId}/folders`, { method: 'POST', body });
 
       if (res.permissions?.rejected?.length) {
-        toast(`Bỏ qua ${res.permissions.rejected.length} email không thuộc tổ chức`, 'err');
+        toast(t('Bỏ qua {n} email không thuộc tổ chức', { n: res.permissions.rejected.length }), 'err');
       }
-      toast('Đã lưu thư mục', 'ok');
+      toast(t('Đã lưu thư mục'), 'ok');
       loadFolders();
     },
   });
@@ -314,28 +313,28 @@ async function folderModal(folder) {
 function uploadModal() {
   const opts = state.folders.map((f) => `<option value="${esc(f.id)}" ${state.folder === f.id ? 'selected' : ''}>${esc(f.name)}</option>`).join('');
   modal({
-    title: 'Tải tài liệu lên',
-    okText: 'Tải lên',
+    title: t('Tải tài liệu lên'),
+    okText: t('Tải lên'),
     body: `
       <div class="field"><label>Chọn thư mục</label><select id="ufolder"><option value="">Chưa phân loại</option>${opts}</select></div>
       <div class="field"><label>Tệp tài liệu</label><input type="file" id="ufile" multiple accept=".pdf,.docx,.txt" />
-        <div class="hint">Hỗ trợ PDF (kể cả bản scan — hệ thống tự nhận dạng chữ), DOCX và TXT. Tối đa 25 MB mỗi tệp.<br>PDF scan xử lý lâu hơn và tính vào hạn mức trang nhận dạng của gói.</div></div>
+        <div class="hint">${esc(t('Hỗ trợ PDF (kể cả bản scan — hệ thống tự nhận dạng chữ), DOCX và TXT. Tối đa 25 MB mỗi tệp.'))}<br>${esc(t('PDF scan xử lý lâu hơn và tính vào hạn mức trang nhận dạng của gói.'))}</div></div>
       <div id="uprogress" class="small muted"></div>`,
     onOk: async (box) => {
       const files = [...box.querySelector('#ufile').files];
-      if (!files.length) { toast('Chưa chọn tệp', 'err'); return false; }
+      if (!files.length) { toast(t('Chưa chọn tệp'), 'err'); return false; }
       const folderId = box.querySelector('#ufolder').value;
       const pg = box.querySelector('#uprogress');
       let ok = 0, fail = 0;
       for (const [i, file] of files.entries()) {
-        pg.textContent = `Đang tải ${i + 1}/${files.length}: ${file.name}…`;
+        pg.textContent = t('Đang tải {i}/{total}: {name}…', { i: i + 1, total: files.length, name: file.name });
         const fd = new FormData();
         fd.append('file', file);
         if (folderId) fd.append('folder_id', folderId);
         try { await api(`/orgs/${orgId}/documents`, { method: 'POST', form: fd }); ok++; }
         catch (err) { fail++; toast(`${file.name}: ${err.message}`, 'err'); }
       }
-      toast(`Đã tải lên ${ok} tệp${fail ? `, ${fail} tệp lỗi` : ''}`, fail ? 'err' : 'ok');
+      toast(t('Đã tải lên {ok} tệp', { ok }) + (fail ? t(', {n} tệp lỗi', { n: fail }) : ''), fail ? 'err' : 'ok');
       loadFolders(); loadDocs();
     },
   });
@@ -352,14 +351,14 @@ async function loadDocs(q = '') {
 
   const docs = await api(`/orgs/${orgId}/documents?${params}`);
   if (!docs.length) {
-    box.innerHTML = emptyState('Chưa có tài liệu', 'Bấm "Tải tài liệu lên" để đưa tài liệu đầu tiên vào chatbot.');
+    box.innerHTML = emptyState(t('Chưa có tài liệu'), t('Bấm "Tải tài liệu lên" để đưa tài liệu đầu tiên vào chatbot.'));
     return;
   }
 
   const folderCell = (id) => {
     const f = state.folders.find((x) => x.id === id);
-    if (!f) return '<span class="muted">Chưa phân loại</span>';
-    return `${esc(f.name)}${f.visibility === 'private' ? ` <span class="lock" title="Thư mục riêng tư">${icon.lock}</span>` : ''}`;
+    if (!f) return `<span class="muted">${esc(t('Chưa phân loại'))}</span>`;
+    return `${esc(f.name)}${f.visibility === 'private' ? ` <span class="lock" title="${esc(t('Thư mục riêng tư'))}">${icon.lock}</span>` : ''}`;
   };
   box.innerHTML = `<div class="table-wrap"><table class="tbl">
     <thead><tr><th>Tài liệu</th><th>Thư mục</th><th class="num">Dung lượng</th><th class="num">Số đoạn</th><th>Trạng thái</th><th>Tải lên</th><th></th></tr></thead>
@@ -372,8 +371,8 @@ async function loadDocs(q = '') {
         <td class="num small">${esc(fmt.bytes(d.size_bytes))}</td>
         <td class="num small">${fmt.num(d.chunk_count)}</td>
         <td>${badge(d.status, LABEL.status)}
-            ${d.status === 'ocr_retry' && d.next_retry_at ? `<div class="cell-sub">Tự chạy lại ${esc(fmt.until(d.next_retry_at))}</div>` : ''}
-            ${d.extraction_method === 'ocr' && d.ocr_pages ? `<div class="cell-sub">${icon.scan} OCR ${fmt.num(d.ocr_pages)} trang</div>` : ''}</td>
+            ${d.status === 'ocr_retry' && d.next_retry_at ? `<div class="cell-sub">${esc(t('Tự chạy lại {when}', { when: fmt.until(d.next_retry_at) }))}</div>` : ''}
+            ${d.extraction_method === 'ocr' && d.ocr_pages ? `<div class="cell-sub">${icon.scan} ${esc(t('OCR {n} trang', { n: fmt.num(d.ocr_pages) }))}</div>` : ''}</td>
         <td class="small nowrap">${esc(fmt.ago(d.created_at))}</td>
         <td class="nowrap" style="width:1%">
           <button class="icon-btn" data-dl="${esc(d.id)}" title="Tải xuống">${icon.download}</button>
@@ -393,14 +392,14 @@ async function loadDocs(q = '') {
     b.onclick = () => {
       const d = docs.find((x) => x.id === b.dataset.mv);
       modal({
-        title: 'Chuyển thư mục',
-        body: `<div class="field"><label>Thư mục đích cho "${esc(d.filename)}"</label>
+        title: t('Chuyển thư mục'),
+        body: `<div class="field"><label>${esc(t('Thư mục đích cho "{name}"', { name: d.filename }))}</label>
           <select id="mvf"><option value="">Chưa phân loại</option>
           ${state.folders.map((f) => `<option value="${esc(f.id)}" ${d.folder_id === f.id ? 'selected' : ''}>${esc(f.name)}${f.visibility === 'private' ? ' (riêng tư)' : ''}</option>`).join('')}</select></div>
-          <div class="hint">Chuyển vào "Chưa phân loại" nghĩa là mọi thành viên trong tổ chức đều hỏi được tài liệu này.</div>`,
+          <div class="hint">${esc(t('Chuyển vào "Chưa phân loại" nghĩa là mọi thành viên trong tổ chức đều hỏi được tài liệu này.'))}</div>`,
         onOk: async (box2) => {
           await api(`/orgs/${orgId}/documents/${d.id}`, { method: 'PATCH', body: { folder_id: box2.querySelector('#mvf').value || null } });
-          toast('Đã chuyển thư mục', 'ok'); loadFolders(); loadDocs();
+          toast(t('Đã chuyển thư mục'), 'ok'); loadFolders(); loadDocs();
         },
       });
     };
@@ -408,15 +407,15 @@ async function loadDocs(q = '') {
   box.querySelectorAll('[data-re]').forEach((b) => {
     b.onclick = async () => {
       await api(`/orgs/${orgId}/documents/${b.dataset.re}/reindex`, { method: 'POST' });
-      toast('Đang xử lý lại tài liệu', 'ok'); loadDocs();
+      toast(t('Đang xử lý lại tài liệu'), 'ok'); loadDocs();
     };
   });
   box.querySelectorAll('[data-rm]').forEach((b) => {
     b.onclick = async () => {
       const d = docs.find((x) => x.id === b.dataset.rm);
-      if (!(await confirmDialog('Xoá tài liệu', `Xoá vĩnh viễn "${d.filename}"? Chatbot sẽ không còn dùng tài liệu này.`))) return;
+      if (!(await confirmDialog(t('Xoá tài liệu'), t('Xoá vĩnh viễn "{name}"? Chatbot sẽ không còn dùng tài liệu này.', { name: d.filename })))) return;
       await api(`/orgs/${orgId}/documents/${d.id}`, { method: 'DELETE' });
-      toast('Đã xoá tài liệu', 'ok'); loadFolders(); loadDocs();
+      toast(t('Đã xoá tài liệu'), 'ok'); loadFolders(); loadDocs();
     };
   });
 
@@ -453,7 +452,7 @@ async function loadMembers() {
       <tr>
         <td><div class="row" style="gap:10px">
           <div class="avatar" style="background:var(--primary-soft);color:var(--primary)">${esc((m.full_name || m.email)[0].toUpperCase())}</div>
-          <div><div class="cell-main">${esc(m.full_name || m.email.split('@')[0])} ${m.is_owner ? '<span class="badge purple">Chủ sở hữu</span>' : ''}</div>
+          <div><div class="cell-main">${esc(m.full_name || m.email.split('@')[0])} ${m.is_owner ? `<span class="badge purple">${esc(t('Chủ sở hữu'))}</span>` : ''}</div>
           <div class="cell-sub">${esc(m.email)}</div></div></div></td>
         <td>${badge(m.role, LABEL.role)}</td>
         <td>${badge(m.status, LABEL.status)}${m.invite_token ? `<button class="btn sm mt-1" data-link="${esc(m.invite_token)}">Sao chép link mời</button>` : ''}</td>
@@ -467,20 +466,20 @@ async function loadMembers() {
   box.querySelectorAll('[data-link]').forEach((b) => {
     b.onclick = () => {
       const url = `${location.origin}/register.html?invite=${b.dataset.link}`;
-      navigator.clipboard.writeText(url).then(() => toast('Đã sao chép link mời', 'ok'), () => prompt('Sao chép link này:', url));
+      navigator.clipboard.writeText(url).then(() => toast(t('Đã sao chép link mời'), 'ok'), () => prompt(t('Sao chép link này:'), url));
     };
   });
   box.querySelectorAll('[data-edit]').forEach((b) => {
     b.onclick = () => {
       const m = members.find((x) => x.id === b.dataset.edit);
       modal({
-        title: 'Đổi vai trò',
-        body: `<div class="field"><label>Vai trò của ${esc(m.email)}</label>
+        title: t('Đổi vai trò'),
+        body: `<div class="field"><label>${esc(t('Vai trò của {email}', { email: m.email }))}</label>
           <select id="mrole"><option value="member" ${m.role === 'member' ? 'selected' : ''}>Thành viên — chỉ dùng chatbot</option>
           <option value="admin" ${m.role === 'admin' ? 'selected' : ''}>Quản trị — quản lý tài liệu và thành viên</option></select></div>`,
         onOk: async (box2) => {
           await api(`/orgs/${orgId}/members/${m.id}`, { method: 'PATCH', body: { role: box2.querySelector('#mrole').value } });
-          toast('Đã cập nhật vai trò', 'ok'); loadMembers();
+          toast(t('Đã cập nhật vai trò'), 'ok'); loadMembers();
         },
       });
     };
@@ -488,35 +487,35 @@ async function loadMembers() {
   box.querySelectorAll('[data-rm]').forEach((b) => {
     b.onclick = async () => {
       const m = members.find((x) => x.id === b.dataset.rm);
-      if (!(await confirmDialog('Gỡ thành viên', `Gỡ ${m.email} khỏi tổ chức? Họ sẽ không truy cập được chatbot nữa.`, 'Gỡ'))) return;
+      if (!(await confirmDialog(t('Gỡ thành viên'), t('Gỡ {email} khỏi tổ chức? Họ sẽ không truy cập được chatbot nữa.', { email: m.email }), t('Gỡ')))) return;
       await api(`/orgs/${orgId}/members/${m.id}`, { method: 'DELETE' });
-      toast('Đã gỡ thành viên', 'ok'); loadMembers();
+      toast(t('Đã gỡ thành viên'), 'ok'); loadMembers();
     };
   });
 }
 
 function inviteModal() {
   modal({
-    title: 'Mời thành viên',
-    okText: 'Gửi lời mời',
+    title: t('Mời thành viên'),
+    okText: t('Gửi lời mời'),
     body: `
-      <div class="field"><label>Email</label><input type="email" id="iemail" placeholder="nhanvien@congty.vn" /></div>
+      <div class="field"><label>Email</label><input type="email" id="iemail" placeholder="nhanvien@congty.vn" data-no-i18n /></div>
       <div class="field"><label>Vai trò</label>
         <select id="irole"><option value="member">Thành viên — chỉ dùng chatbot</option><option value="admin">Quản trị — quản lý tài liệu và thành viên</option></select></div>
-      <div class="alert info show">Nếu email chưa có tài khoản, hệ thống tạo một link mời để bạn gửi cho họ.</div>`,
+      <div class="alert info show">${esc(t('Nếu email chưa có tài khoản, hệ thống tạo một link mời để bạn gửi cho họ.'))}</div>`,
     onOk: async (box) => {
       const email = box.querySelector('#iemail').value.trim();
-      if (!email) { toast('Chưa nhập email', 'err'); return false; }
+      if (!email) { toast(t('Chưa nhập email'), 'err'); return false; }
       const res = await api(`/orgs/${orgId}/members`, { method: 'POST', body: { email, role: box.querySelector('#irole').value } });
       loadMembers();
       if (res.invite_link) {
         const url = location.origin + res.invite_link;
-        modal({ title: 'Link mời đã sẵn sàng', okText: 'Sao chép link', cancelText: 'Đóng',
-          body: `<p>Gửi link dưới đây cho <b>${esc(email)}</b> để họ tạo tài khoản và vào tổ chức:</p>
+        modal({ title: t('Link mời đã sẵn sàng'), okText: t('Sao chép link'), cancelText: t('Đóng'),
+          body: `<p>${esc(t('Gửi link dưới đây cho {email} để họ tạo tài khoản và vào tổ chức:', { email }))}</p>
                  <div class="field"><input type="text" readonly value="${esc(url)}" /></div>`,
-          onOk: () => navigator.clipboard.writeText(url).then(() => toast('Đã sao chép', 'ok')) });
+          onOk: () => navigator.clipboard.writeText(url).then(() => toast(t('Đã sao chép'), 'ok')) });
       } else {
-        toast('Đã thêm thành viên vào tổ chức', 'ok');
+        toast(t('Đã thêm thành viên vào tổ chức'), 'ok');
       }
     },
   });
@@ -537,7 +536,7 @@ async function loadHistory() {
   const q = document.getElementById('hq')?.value || '';
   const res = await api(`/orgs/${orgId}/chat/history?page=${state.historyPage}&size=25&q=${encodeURIComponent(q)}`);
 
-  if (!res.items.length) { box.innerHTML = emptyState('Chưa có câu hỏi nào'); document.getElementById('histPager').innerHTML = ''; return; }
+  if (!res.items.length) { box.innerHTML = emptyState(t('Chưa có câu hỏi nào')); document.getElementById('histPager').innerHTML = ''; return; }
 
   box.innerHTML = `<div class="table-wrap"><table class="tbl">
     <thead><tr><th>Câu hỏi</th><th>Người hỏi</th><th class="num">Nguồn</th><th class="num">Thời gian xử lý</th><th>Lúc</th></tr></thead>
@@ -554,17 +553,17 @@ async function loadHistory() {
   box.querySelectorAll('[data-row]').forEach((tr) => {
     tr.onclick = () => {
       const m = res.items[+tr.dataset.row];
-      modal({ title: 'Chi tiết hỏi đáp', wide: true, okText: 'Đóng', cancelText: 'Đóng',
+      modal({ title: t('Chi tiết hỏi đáp'), wide: true, okText: t('Đóng'), cancelText: t('Đóng'),
         body: `<div class="field"><label>Câu hỏi</label><div>${esc(m.question)}</div></div>
                <div class="field"><label>Trả lời</label><div style="white-space:pre-wrap">${esc(m.answer || '')}</div></div>
-               <div class="field"><label>Nguồn tham chiếu</label><div class="srcs">${(m.sources || []).map((s) => `<span class="src-chip">${icon.file}${esc(s)}</span>`).join('') || '<span class="muted">Không có</span>'}</div></div>
+               <div class="field"><label>Nguồn tham chiếu</label><div class="srcs">${(m.sources || []).map((s) => `<span class="src-chip">${icon.file}${esc(s)}</span>`).join('') || `<span class="muted">${esc(t('Không có'))}</span>`}</div></div>
                <div class="small muted">${esc(m.user_email || '')} · ${esc(fmt.dateTime(m.created_at))}</div>` });
     };
   });
 
   const pages = Math.ceil(res.total / res.size);
   document.getElementById('histPager').innerHTML = `
-    <span>${fmt.num(res.total)} câu hỏi · trang ${res.page}/${pages || 1}</span>
+    <span>${esc(t('{total} câu hỏi · trang {page}/{pages}', { total: fmt.num(res.total), page: res.page, pages: pages || 1 }))}</span>
     <button class="btn sm" id="prev" ${res.page <= 1 ? 'disabled' : ''}>Trước</button>
     <button class="btn sm" id="next" ${res.page >= pages ? 'disabled' : ''}>Sau</button>`;
   const prev = document.getElementById('prev'), next = document.getElementById('next');
@@ -591,7 +590,7 @@ async function viewBilling() {
     <div class="split" style="grid-template-columns:1fr 340px">
       <div>
         <div class="card">
-          <div class="card-head"><h2>Mức sử dụng</h2><span class="sub">Hạn mức theo gói ${esc(b.plan?.name || '—')}</span></div>
+          <div class="card-head"><h2>Mức sử dụng</h2><span class="sub">${esc(t('Hạn mức theo gói {name}', { name: b.plan?.name || '—' }))}</span></div>
           <div class="card-body">
             ${line('Tài liệu', u.documents, L.max_documents)}
             ${line('Thành viên', u.members, L.max_members)}
@@ -611,7 +610,7 @@ async function viewBilling() {
               <td class="num">${esc(fmt.money(p.amount_vnd))}</td>
               <td class="small">${esc(p.method || '—')}</td>
               <td>${badge(p.status, LABEL.payment)}</td></tr>`).join('')}</tbody></table></div>`
-            : emptyState('Chưa có giao dịch', 'Doanh nghiệp đang dùng gói miễn phí.')}</div>
+            : emptyState(t('Chưa có giao dịch'), t('Doanh nghiệp đang dùng gói miễn phí.'))}</div>
         </div>
       </div>
 
@@ -619,7 +618,7 @@ async function viewBilling() {
         <div class="card">
           <div class="card-head"><h3>Gói hiện tại</h3></div>
           <div class="card-body">
-            <div style="font-size:22px;font-weight:680">${esc(b.plan?.name || 'Chưa gán gói')}</div>
+            <div style="font-size:22px;font-weight:680">${esc(b.plan?.name || t('Chưa gán gói'))}</div>
             <div class="muted small">${esc(b.plan?.description || '')}</div>
             <div class="mt-2">${badge(b.billing_status, LABEL.billing)}</div>
             <div class="small muted mt-1">${esc(t('Hạn dùng'))}: ${esc(b.plan_expires_at ? fmt.date(b.plan_expires_at) : t('không giới hạn'))}</div>
@@ -642,10 +641,10 @@ async function viewBilling() {
                 <div class="small muted mb-1">${fmt.num(p.max_documents)} tài liệu · ${fmt.num(p.max_members)} thành viên · ${fmt.num(p.max_questions_per_month)} lượt hỏi/tháng · ${fmt.num(p.max_ocr_pages_per_month || 0)} trang OCR/tháng</div>
                 ${Number(intl ? p.price_usd : p.price_vnd) > 0 && b.providers?.length
                   ? `<button class="btn sm primary" data-buy="${esc(p.id)}">Nâng cấp lên gói này</button>` : ''}
-              </div>`).join('') || '<span class="muted small">Không có gói khác</span>'}
+              </div>`).join('') || `<span class="muted small">${esc(t('Không có gói khác'))}</span>`}
             ${b.providers?.length
-              ? '<p class="small muted mb-0">Gói có hiệu lực ngay sau khi hệ thống nhận được tiền.</p>'
-              : '<p class="small muted mb-0">Máy chủ chưa bật cổng thanh toán nào. Liên hệ quản trị hệ thống để đổi gói.</p>'}
+              ? `<p class="small muted mb-0">${esc(t('Gói có hiệu lực ngay sau khi hệ thống nhận được tiền.'))}</p>`
+              : `<p class="small muted mb-0">${esc(t('Máy chủ chưa bật cổng thanh toán nào. Liên hệ quản trị hệ thống để đổi gói.'))}</p>`}
           </div>
         </div>
       </div>
@@ -665,7 +664,7 @@ function startCheckout(billing, planId, intl) {
 
   modal({
     title: t('Nâng cấp lên gói {name}', { name: plan.name }),
-    okText: 'Tiếp tục thanh toán',
+    okText: t('Tiếp tục thanh toán'),
     body: `
       <div class="field">
         <label>Phương thức thanh toán</label>
@@ -676,9 +675,9 @@ function startCheckout(billing, planId, intl) {
           </label>`).join('')}
       </div>
       <div class="row between" style="padding-top:10px;border-top:1px solid var(--border)">
-        <b>Tổng thanh toán</b><b style="font-size:18px">${esc(amount)}</b>
+        <b>${esc(t('Tổng thanh toán'))}</b><b style="font-size:18px">${esc(amount)}</b>
       </div>
-      <p class="small muted mt-1 mb-0">Nếu gói hiện tại còn hạn, thời gian còn lại được cộng dồn thêm 1 tháng.</p>`,
+      <p class="small muted mt-1 mb-0">${esc(t('Nếu gói hiện tại còn hạn, thời gian còn lại được cộng dồn thêm 1 tháng.'))}</p>`,
     onOk: async (box) => {
       const provider = box.querySelector('input[name="prov"]:checked').value;
       const res = await api(`/orgs/${orgId}/billing/checkout`, { method: 'POST', body: { plan_id: planId, provider } });
@@ -707,7 +706,7 @@ async function viewSettings() {
         <div class="card-head"><h2>Hồ sơ doanh nghiệp</h2></div>
         <div class="card-body">
           <div class="field"><label>Tên doanh nghiệp</label><input type="text" id="oname" value="${esc(org.name)}" /></div>
-          <div class="field"><label>Email liên hệ</label><input type="text" id="omail" value="${esc(org.contact_email || '')}" placeholder="ketoan@congty.vn" /></div>
+          <div class="field"><label>Email liên hệ</label><input type="text" id="omail" value="${esc(org.contact_email || '')}" placeholder="ketoan@congty.vn" data-no-i18n /></div>
           <div class="field"><label>Mã số thuế</label><input type="text" id="otax" value="${esc(org.tax_code || '')}" /></div>
           <div class="field"><label>Mã tổ chức</label><input type="text" class="mono" value="${esc(org.id)}" readonly /></div>
           <button class="btn primary" id="saveOrg">Lưu thay đổi</button>
@@ -736,12 +735,12 @@ async function viewSettings() {
         contact_email: document.getElementById('omail').value.trim(),
         tax_code: document.getElementById('otax').value.trim(),
       }});
-      toast('Đã lưu hồ sơ doanh nghiệp', 'ok');
+      toast(t('Đã lưu hồ sơ doanh nghiệp'), 'ok');
       setTimeout(() => location.reload(), 700);
     } catch (err) { toast(err.message, 'err'); e.target.disabled = false; }
   };
   document.getElementById('saveUser').onclick = async () => {
-    try { await api('/auth/profile', { method: 'PATCH', body: { full_name: document.getElementById('uname').value.trim() } }); toast('Đã lưu hồ sơ', 'ok'); }
+    try { await api('/auth/profile', { method: 'PATCH', body: { full_name: document.getElementById('uname').value.trim() } }); toast(t('Đã lưu hồ sơ'), 'ok'); }
     catch (err) { toast(err.message, 'err'); }
   };
   document.getElementById('savePw').onclick = async () => {
@@ -750,7 +749,7 @@ async function viewSettings() {
         current_password: document.getElementById('pwOld').value,
         new_password: document.getElementById('pwNew').value,
       }});
-      toast('Đã đổi mật khẩu', 'ok');
+      toast(t('Đã đổi mật khẩu'), 'ok');
       document.getElementById('pwOld').value = ''; document.getElementById('pwNew').value = '';
     } catch (err) { toast(err.message, 'err'); }
   };

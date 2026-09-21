@@ -81,8 +81,11 @@
     document.getElementById('orgField').classList.add('hidden');
     api(`/auth/invite/${inviteToken}`)
       .then((info) => {
-        document.getElementById('heading').textContent = 'Tham gia doanh nghiệp';
-        document.getElementById('lead').textContent = `Bạn được mời vào "${info.organization_name}" với vai trò ${info.role === 'admin' ? 'quản trị' : 'thành viên'}.`;
+        document.getElementById('heading').textContent = t('Tham gia doanh nghiệp');
+        document.getElementById('lead').textContent = t('Bạn được mời vào "{org}" với vai trò {role}.', {
+          org: info.organization_name,
+          role: info.role === 'admin' ? t('quản trị') : t('thành viên'),
+        });
         const emailEl = document.getElementById('email');
         emailEl.value = info.email;
         emailEl.readOnly = true;
@@ -93,7 +96,7 @@
   document.getElementById('form').onsubmit = async (e) => {
     e.preventDefault();
     const btn = document.getElementById('submitBtn');
-    if (!inviteToken && !orgName.value.trim()) return show('Vui lòng nhập tên doanh nghiệp');
+    if (!inviteToken && !orgName.value.trim()) return show(t('Vui lòng nhập tên doanh nghiệp'));
 
     btn.disabled = true; btn.textContent = 'Đang tạo tài khoản…';
     try {

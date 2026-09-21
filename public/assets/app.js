@@ -27,12 +27,12 @@ export async function api(path, { method = 'GET', body, form, raw } = {}) {
   if (res.status === 401) {
     Session.clear();
     if (!location.pathname.includes('login')) location.href = '/login.html?expired=1';
-    throw new Error('Phiên đăng nhập đã hết hạn');
+    throw new Error(t('Phiên đăng nhập đã hết hạn'));
   }
   const text = await res.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
-  if (!res.ok) throw new Error(data?.error || `Lỗi ${res.status}`);
+  if (!res.ok) throw new Error(data?.error || t('Lỗi {code}', { code: res.status }));
   return raw ? text : data;
 }
 

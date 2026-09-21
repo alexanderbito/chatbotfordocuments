@@ -47,7 +47,7 @@ function render() {
       <div class="topbar">
         <div class="title">
           <h1 id="pageTitle">Hỏi đáp tài liệu</h1>
-          <p id="pageDesc">Chatbot chỉ trả lời dựa trên tài liệu đã được duyệt của ${esc(currentOrg.name)}.</p>
+          <p id="pageDesc">${esc(t('Chatbot chỉ trả lời dựa trên tài liệu đã được duyệt của {org}.', { org: currentOrg.name }))}</p>
         </div>
         ${isAdmin ? `<a class="btn" href="/admin.html">${icon.settings} Bảng quản trị</a>` : ''}
         ${me.user.is_system_admin ? `<a class="btn" href="/sysadmin.html">${icon.shield} Quản trị hệ thống</a>` : ''}
@@ -92,10 +92,10 @@ function render() {
       b.classList.add('active');
       document.querySelectorAll('.page-section').forEach((s) => s.classList.toggle('active', s.dataset.view === b.dataset.view));
       const isChat = b.dataset.view === 'chat';
-      document.getElementById('pageTitle').textContent = isChat ? 'Hỏi đáp tài liệu' : 'Lịch sử của tôi';
+      document.getElementById('pageTitle').textContent = isChat ? t('Hỏi đáp tài liệu') : t('Lịch sử của tôi');
       document.getElementById('pageDesc').textContent = isChat
-        ? `Chatbot chỉ trả lời dựa trên tài liệu đã được duyệt của ${currentOrg.name}.`
-        : '50 câu hỏi gần nhất bạn đã gửi.';
+        ? t('Chatbot chỉ trả lời dựa trên tài liệu đã được duyệt của {org}.', { org: currentOrg.name })
+        : t('50 câu hỏi gần nhất bạn đã gửi.');
       if (!isChat) loadHistory();
     };
   });
@@ -112,7 +112,7 @@ function render() {
 
 function greet() {
   document.getElementById('chatInner').innerHTML = `
-    <div style="text-align:center;padding:48px 10px">
+    <div style="text-align:center;padding:48px 10px" data-greet>
       <div class="brand-mark" style="margin:0 auto 14px;width:42px;height:42px;font-size:19px">D</div>
       <h2>${esc(t('Xin chào'))} <span data-no-i18n>${esc(me.user.full_name || me.user.email.split('@')[0])}</span></h2>
       <p class="muted mt-1">Hãy đặt câu hỏi về tài liệu nội bộ. Câu trả lời luôn kèm tên tài liệu nguồn.</p>
@@ -144,7 +144,7 @@ function bubble(role, html) {
   el.innerHTML = `
     <div class="bubble-avatar">${role === 'user' ? esc((me.user.full_name || me.user.email)[0].toUpperCase()) : 'D'}</div>
     <div class="body">
-      <div class="who">${role === 'user' ? esc(me.user.full_name || 'Bạn') : 'DocBot'}</div>
+      <div class="who" ${role === 'user' ? 'data-no-i18n' : ''}>${role === 'user' ? esc(me.user.full_name || t('Bạn')) : 'DocBot'}</div>
       <div class="text">${html}</div>
       <div class="srcs"></div>
     </div>`;

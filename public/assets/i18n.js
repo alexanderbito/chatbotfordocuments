@@ -222,6 +222,90 @@ const EN = {
     'If you have already paid, this will update within a few minutes. Reload to check.',
   'Giao dịch không tồn tại hoặc không thuộc doanh nghiệp của bạn.':
     'This transaction does not exist or does not belong to your organization.',
+  // --- Bổ sung: chuỗi ghép với số và các chỗ còn sót ---
+  '{ready} sẵn sàng · {failed} lỗi': '{ready} ready · {failed} failed',
+  '{n} đoạn đã lập chỉ mục': '{n} chunks indexed',
+  'Lượt hỏi 30 ngày gần nhất': 'Questions over the last 30 days',
+  'Tổng {n} câu hỏi': '{n} questions total',
+  'Hạn mức theo gói {name}': 'Limits on the {name} plan',
+  '{total} câu hỏi · trang {page}/{pages}': '{total} questions · page {page}/{pages}',
+  'OCR {n} trang': 'OCR {n} pages',
+  'Lỗi {code}': 'Error {code}',
+  'Phiên đăng nhập đã hết hạn': 'Your session has expired',
+
+  // Nhãn nhóm nhật ký và phương thức trích xuất
+  'Hỗn hợp': 'Mixed', 'Hỏi đáp': 'Chat', 'Thanh toán': 'Payments', 'Hệ thống': 'System',
+
+  // Thư mục
+  'Riêng tư — {n} người được đọc': 'Private — {n} people can read',
+  'Thêm thư mục': 'Add folder', 'Thư mục riêng tư': 'Private folder',
+  'Ví dụ: Quy trình nhân sự': 'e.g. HR procedures',
+  'Thư mục: {name}': 'Folder: {name}',
+  'Xoá "{name}"? Tài liệu bên trong sẽ chuyển về mục Chưa phân loại, không bị mất.':
+    'Delete "{name}"? Files inside move to Unfiled — nothing is lost.',
+  'Cảnh báo: tài liệu sẽ thành công khai': 'Warning: these documents will become public',
+  '"{name}" đang ở chế độ riêng tư. Xoá thư mục sẽ đẩy tài liệu bên trong về mục Chưa phân loại, và MỌI thành viên trong tổ chức sẽ hỏi được nội dung đó. Vẫn tiếp tục?':
+    '"{name}" is private. Deleting it moves its files to Unfiled, where EVERY member of the organization can ask about them. Continue?',
+  'Chưa có thành viên thường': 'No regular members yet',
+  'Hãy mời thành viên trước khi phân quyền.': 'Invite members before granting access.',
+  '{n} quản trị viên của tổ chức luôn đọc được mọi thư mục nên không cần chọn ở đây.':
+    'The {n} organization admins can always read every folder, so they are not listed here.',
+  'Bạn chưa chọn thành viên nào. Thư mục sẽ chỉ quản trị viên đọc được, thành viên thường không hỏi được gì trong đó. Tiếp tục?':
+    'You have not selected anyone. Only admins will be able to read this folder. Continue?',
+  'Bỏ qua {n} email không thuộc tổ chức': 'Skipped {n} email(s) not in this organization',
+
+  // Tài liệu
+  'Hỗ trợ PDF (kể cả bản scan — hệ thống tự nhận dạng chữ), DOCX và TXT. Tối đa 25 MB mỗi tệp.':
+    'Supports PDF (including scans — text is recognised automatically), DOCX and TXT. Max 25 MB per file.',
+  'PDF scan xử lý lâu hơn và tính vào hạn mức trang nhận dạng của gói.':
+    'Scanned PDFs take longer and count towards your plan\'s OCR page quota.',
+  'Đang tải {i}/{total}: {name}…': 'Uploading {i}/{total}: {name}…',
+  'Đã tải lên {ok} tệp': 'Uploaded {ok} file(s)', ', {n} tệp lỗi': ', {n} failed',
+  'Thư mục đích cho "{name}"': 'Destination folder for "{name}"',
+  'Chuyển vào "Chưa phân loại" nghĩa là mọi thành viên trong tổ chức đều hỏi được tài liệu này.':
+    'Moving to Unfiled means every member of the organization can ask about this document.',
+  'Xoá vĩnh viễn "{name}"? Chatbot sẽ không còn dùng tài liệu này.':
+    'Permanently delete "{name}"? The chatbot will no longer use it.',
+  'Tự chạy lại {when}': 'Retrying {when}',
+
+  // Thành viên
+  'chờ nhận lời mời': 'invited',
+  'Vai trò của {email}': 'Role for {email}',
+  'Gỡ {email} khỏi tổ chức? Họ sẽ không truy cập được chatbot nữa.':
+    'Remove {email} from the organization? They will lose access to the chatbot.',
+  'Sao chép link này:': 'Copy this link:',
+  'Nếu email chưa có tài khoản, hệ thống tạo một link mời để bạn gửi cho họ.':
+    'If the email has no account yet, an invite link is created for you to send them.',
+  'Gửi link dưới đây cho {email} để họ tạo tài khoản và vào tổ chức:':
+    'Send the link below to {email} so they can create an account and join:',
+
+  // Gói cước
+  'Doanh nghiệp đang dùng gói miễn phí.': 'This organization is on the free plan.',
+  'Chưa gán gói': 'No plan assigned',
+  'Gỡ thành viên': 'Remove member',
+  'Máy chủ chưa bật cổng thanh toán nào. Liên hệ quản trị hệ thống để đổi gói.':
+    'No payment gateway is enabled on the server. Contact the system administrator to change plan.',
+  'Công ty TNHH ABC': 'Acme Corporation',
+  'Nguyễn Văn A': 'Jane Smith',
+
+  // Đăng ký / đăng nhập
+  'Vui lòng nhập tên doanh nghiệp': 'Please enter your company name',
+  'Bạn được mời vào "{org}" với vai trò {role}.': 'You were invited to "{org}" as {role}.',
+  'quản trị': 'an admin', 'thành viên': 'a member',
+  'Dữ liệu mỗi doanh nghiệp được cách ly hoàn toàn': 'Each company\'s data is fully isolated',
+
+  // Chat
+  'Bạn': 'You',
+  'Chatbot chỉ trả lời dựa trên tài liệu đã được duyệt của {org}.':
+    'The chatbot answers only from documents approved for {org}.',
+  'Tóm tắt nội dung chính của tài liệu mới nhất': 'Summarise the main points of the latest document',
+  'Quy trình xin nghỉ phép được quy định thế nào?': 'How does the leave request process work?',
+  'Chính sách bảo mật thông tin gồm những điểm gì?': 'What does the information security policy cover?',
+
+  // Trang tĩnh
+  'Đang chuyển hướng…': 'Redirecting…',
+  'Không tìm thấy trang': 'Page not found',
+  'Đường dẫn bạn truy cập không tồn tại hoặc đã bị thay đổi.': 'That address does not exist or has changed.',
 };
 
 const STORAGE_KEY = 'docbot_lang';
