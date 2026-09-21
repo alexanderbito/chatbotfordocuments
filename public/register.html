@@ -96,9 +96,10 @@
   document.getElementById('form').onsubmit = async (e) => {
     e.preventDefault();
     const btn = document.getElementById('submitBtn');
-    if (!inviteToken && !orgName.value.trim()) return show(t('Vui lòng nhập tên doanh nghiệp'));
-
-    btn.disabled = true; btn.textContent = 'Đang tạo tài khoản…';
+    // Không chặn ở phía trình duyệt khi thiếu tên doanh nghiệp: email nằm trong
+    // SYSTEM_ADMIN_EMAILS là tài khoản quản trị hệ thống, đứng ngoài mọi doanh
+    // nghiệp nên được phép bỏ trống. Máy chủ mới đủ dữ liệu để quyết định.
+    btn.disabled = true; btn.textContent = t('Đang tạo tài khoản…');
     try {
       const data = await api('/auth/register', {
         method: 'POST',
@@ -115,7 +116,7 @@
       location.href = '/';
     } catch (err) {
       show(err.message);
-      btn.disabled = false; btn.textContent = 'Tạo tài khoản';
+      btn.disabled = false; btn.textContent = t('Tạo tài khoản');
     }
   };
 </script>
