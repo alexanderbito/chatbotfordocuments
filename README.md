@@ -30,7 +30,7 @@ Toàn bộ API đều kiểm tra quyền ở backend, không chỉ ẩn nút tr�
 | `/chat.html` | Không gian hỏi đáp cho mọi thành viên |
 | `/admin.html` | Console admin tổ chức: Tổng quan · Tài liệu & thư mục · Thành viên · Lịch sử hỏi đáp · Gói cước · Thiết lập |
 | `/sysadmin.html` | Console admin hệ thống: Bảng điều khiển · Tổ chức · Gói cước · Thanh toán · Người dùng · Nhật ký · Sức khoẻ hệ thống |
-| `/pricing.html` | Bảng giá công khai, có nút chọn Việt Nam / ngoài Việt Nam |
+| `/pricing.html` | Bảng giá công khai, tiền tệ đi theo ngôn ngữ đang chọn |
 | `/billing-return.html` | Trang kết quả sau khi khách thanh toán xong |
 | `/` | Tự chuyển hướng theo vai trò của người đang đăng nhập |
 
@@ -48,6 +48,7 @@ Trong **Supabase Dashboard → SQL Editor → New query**, chạy lần lượt:
 4. `migration_v4_ocr_retry.sql` — **bắt buộc**, thêm bộ đếm lần thử và bảng lưu tạm kết quả OCR.
 5. `migration_v5_folder_acl.sql` — **bắt buộc**, thêm chế độ thư mục công khai/riêng tư và phân quyền theo email.
 6. `migration_v6_payments.sql` — **bắt buộc**, thêm giá USD và thanh toán qua cổng.
+7. `migration_v7_trial.sql` — **bắt buộc**, đặt gói miễn phí thành dùng thử 3 ngày không có OCR.
 
 **Chạy đúng thứ tự.** Mỗi file từ v3 trở đi có bước kiểm tra điều kiện ở đầu và sẽ dừng
 kèm thông báo nếu file trước chưa chạy.
@@ -84,6 +85,8 @@ So với bản gốc có **thêm các biến**:
 | `PAYOS_CLIENT_ID` / `PAYOS_API_KEY` / `PAYOS_CHECKSUM_KEY` | Nếu bán cho khách VN | Lấy tại payos.vn |
 | `PAYPAL_CLIENT_ID` / `PAYPAL_SECRET` / `PAYPAL_WEBHOOK_ID` | Nếu bán cho khách nước ngoài | Lấy tại developer.paypal.com |
 | `APP_BASE_URL` | Không | URL công khai; trên Render tự đọc `RENDER_EXTERNAL_URL` |
+| `CRON_SECRET` | Nên có | Bảo vệ endpoint dọn dữ liệu hết hạn dùng thử |
+| `TRIAL_GRACE_HOURS` | Không | Số giờ ân hạn trước khi xoá, mặc định 0 |
 
 Bucket R2 giờ **không cần để public**: hệ thống tạo link tải có chữ ký, hết hạn sau 5 phút,
 và chỉ admin tổ chức mới lấy được link.
@@ -142,7 +145,9 @@ POST   /orgs/:orgId/billing/checkout          tạo phiên thanh toán          
 GET    /orgs/:orgId/billing/payments/:id      trạng thái giao dịch            (admin tổ chức)
 POST   /orgs/:orgId/billing/payments/:id/capture  thu tiền PayPal             (admin tổ chức)
 
-GET    /public/billing/plans?country=VN       bảng giá công khai
+GET    /public/billing/plans?currency=VND     bảng giá công khai (VND | USD)
+POST   /cron/purge-trials                     dọn dữ liệu hết hạn (header x-cron-secret)
+POST   /admin/maintenance/purge-trials        dọn thủ công        (admin hệ thống)
 POST   /webhooks/payos                        webhook payOS  (xác thực bằng chữ ký)
 POST   /webhooks/paypal                       webhook PayPal (xác thực bằng chữ ký)
 
@@ -242,7 +247,67 @@ cấp quyền riêng.
   sẽ rơi về mục "Chưa phân loại" và cả tổ chức đọc được.
 - Tài liệu chưa phân loại (`folder_id = null`) được coi là công khai trong tổ chức.
 
-## 9. Thanh toán
+## 9. Dùng thử 3 ngày
+
+Gói miễn phí nay là **bản dùng thử 3 ngày**: đủ mọi tính năng **trừ nhận dạng PDF scan**.
+Hết 3 ngày mà không nâng cấp thì tài liệu bị xoá.
+
+### Ba mốc
+
+**Trong 3 ngày.** Đồng hồ chạy từ lúc đăng ký (`organizations.plan_expires_at`).
+Giao diện hiện dải băng đếm ngược ở mọi trang, chuyển vàng khi còn dưới 24 giờ.
+
+**Hết hạn.** Chặn hỏi chatbot và tải tài liệu lên (trả mã `402`), nhưng **vẫn vào được
+trang gói cước và thiết lập** để nâng cấp. Cố ý không chặn ở tầng chung, vì chặn hết
+thì khách không còn đường trả tiền.
+
+**Sau khi hết hạn.** Dọn tài liệu, file trên R2, các đoạn đã lập chỉ mục, bản OCR tạm
+và lịch sử hỏi đáp. **Giữ lại** tài khoản, tổ chức, thành viên và cây thư mục — khách
+quay lại nâng cấp là dùng được ngay, không phải đăng ký từ đầu.
+
+### Việc dọn chạy khi nào
+
+Hai đường, để không phụ thuộc vào một thứ duy nhất:
+
+1. **Bám theo lưu lượng** — mỗi khi có request, nếu đã quá 6 giờ kể từ lần dọn trước
+   thì chạy một lượt ở chế độ nền. Không cần cấu hình gì.
+2. **Cron ngoài** — `POST /cron/purge-trials` kèm header `x-cron-secret`. Nên trỏ một
+   dịch vụ cron miễn phí vào đây chạy mỗi ngày, vì Render Free ngủ sau 15 phút không
+   có traffic nên đường (1) có thể không chạy với tổ chức bị bỏ hoang.
+
+Admin hệ thống cũng dọn thủ công được: `POST /admin/maintenance/purge-trials`
+(thêm `?dry_run=1` để chỉ xem danh sách).
+
+### Gói nào có OCR
+
+Cột `plans.ocr_enabled`, bật/tắt trong `/sysadmin.html → Gói cước`. Gói tắt OCR mà
+gặp PDF scan sẽ báo lỗi kèm gợi ý nâng cấp và **không gọi Gemini**, nên không phát
+sinh chi phí.
+
+## 10. Song ngữ Việt / Anh
+
+Nút **VI / EN** nằm ở thanh bên (trang nội bộ) và góc trên bên phải (trang công khai).
+Lựa chọn lưu trong trình duyệt; lần đầu vào thì đoán theo ngôn ngữ hệ điều hành.
+
+**Ngôn ngữ quyết định tiền tệ:** tiếng Việt xem giá VNĐ và thanh toán VietQR,
+tiếng Anh xem giá USD và thanh toán PayPal. Không còn nút chọn quốc gia riêng.
+
+### Cách dịch hoạt động
+
+`public/assets/i18n.js` dùng **chính chuỗi tiếng Việt làm khoá**. Thiếu bản dịch thì
+giao diện hiện tiếng Việt chứ không vỡ thành mã khoá.
+
+Có hai đường: `t('...')` gọi trực tiếp khi dựng chuỗi, và `translateDOM()` quét DOM
+sau mỗi lần render (cần thiết vì các trang dựng HTML bằng `innerHTML`). Phần quét chỉ
+dịch khi nội dung khớp **chính xác** một khoá, và bỏ qua mọi thứ nằm trong phần tử
+đánh dấu `data-no-i18n` — tên tài liệu, tên thư mục, email, nội dung chat.
+
+Tên và mô tả gói cước lấy từ CSDL nên có cột riêng `plans.name_en` và
+`plans.description_en`, sửa trong `/sysadmin.html`. Bỏ trống thì hiện bản tiếng Việt.
+
+Console admin hệ thống (`/sysadmin.html`) giữ nguyên tiếng Việt vì chỉ nội bộ dùng.
+
+## 11. Thanh toán
 
 Khách chọn quốc gia ở `/pricing.html`; trang tự đoán theo múi giờ trình duyệt và
 người dùng đổi lại được.
@@ -296,7 +361,7 @@ Nếu gói hiện tại còn hạn, thời gian còn lại được **cộng d�
   payOS có sẵn API hoá đơn (`invoices`) để nối sau.
 - **Chưa hoàn tiền trong giao diện**; phải xử lý bên trang của cổng thanh toán.
 
-## 10. OCR cho PDF scan
+## 12. OCR cho PDF scan
 
 Khi tải lên một PDF, hệ thống đọc text thật trước. Nếu thu được dưới ~60 ký tự mỗi trang
 thì coi đó là bản scan và chuyển sang nhận dạng bằng Gemini.
@@ -344,7 +409,7 @@ Nhiều file tải lên cùng lúc sẽ xếp hàng chứ không chạy song son
 xem được ở trang Sức khoẻ hệ thống. Khi có khách hàng thật nên tách thành
 Background Worker riêng trên Render.
 
-## 11. Giới hạn đã biết
+## 13. Giới hạn đã biết
 
 - **Xử lý tài liệu đồng bộ trong tiến trình web**: file rất lớn có thể timeout trên Render Free.
   Khi có khách hàng thật nên tách thành worker riêng.

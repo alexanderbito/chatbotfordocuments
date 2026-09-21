@@ -5,6 +5,7 @@ import { getUsage } from '../limits.js';
 import { logEvent } from '../logger.js';
 import { decodeFilename } from '../utils/filename.js';
 import { queueStats } from '../queue.js';
+import { purgeExpiredTrials, purgeOrganizationData } from '../trials.js';
 import { isOcrEnabled, ocrModels } from '../ocr.js';
 
 const router = express.Router();
@@ -308,11 +309,13 @@ router.delete('/plans/:id', async (req, res) => {
 
 function sanitizePlan(body = {}) {
   const out = {};
-  const strs = ['code', 'name', 'description'];
+  const strs = ['code', 'name', 'name_en', 'description', 'description_en'];
   const nums = ['price_vnd', 'price_usd', 'max_documents', 'max_members', 'max_storage_mb', 'max_questions_per_month', 'max_ocr_pages_per_month', 'sort_order'];
   for (const f of strs) if (body[f] !== undefined) out[f] = body[f];
   for (const f of nums) if (body[f] !== undefined) out[f] = Number(body[f]) || 0;
   if (body.is_active !== undefined) out.is_active = !!body.is_active;
+  if (body.ocr_enabled !== undefined) out.ocr_enabled = !!body.ocr_enabled;
+  if (body.trial_days !== undefined) out.trial_days = Number(body.trial_days) || 0;
   return out;
 }
 
@@ -460,6 +463,38 @@ router.post('/maintenance/fix-filenames', async (req, res) => {
     }
 
     res.json({ scanned: (docs || []).length, changed: changes.length, dry_run: dryRun, changes: changes.slice(0, 100) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /admin/maintenance/purge-trials
+ * Dọn dữ liệu của các tổ chức đã hết hạn dùng thử.
+ * ?dry_run=1 để chỉ xem danh sách sẽ bị dọn.
+ */
+router.post('/maintenance/purge-trials', async (req, res) => {
+  try {
+    const dryRun = req.query.dry_run === '1';
+
+    if (dryRun) {
+      const { data, error } = await supabase.rpc('list_expired_trials', { grace_hours: 0 });
+      if (error) throw error;
+      return res.json({ dry_run: true, organizations: data || [] });
+    }
+
+    const result = await purgeExpiredTrials();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** POST /admin/organizations/:id/purge-data — dọn dữ liệu một tổ chức cụ thể */
+router.post('/organizations/:id/purge-data', async (req, res) => {
+  try {
+    const result = await purgeOrganizationData(req.params.id, { reason: 'admin hệ thống yêu cầu' });
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

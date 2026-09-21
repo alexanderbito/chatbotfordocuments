@@ -247,7 +247,7 @@ async function viewPlans() {
 async function loadPlans() {
   cache.plans = await api('/admin/plans');
   document.getElementById('planTable').innerHTML = `<div class="table-wrap"><table class="tbl">
-    <thead><tr><th>Gói</th><th class="num">Giá VNĐ</th><th class="num">Giá USD</th><th class="num">Tài liệu</th><th class="num">Thành viên</th><th class="num">Dung lượng</th><th class="num">Lượt hỏi/tháng</th><th class="num">Trang OCR/tháng</th><th class="num">Đang dùng</th><th>Trạng thái</th><th></th></tr></thead>
+    <thead><tr><th>Gói</th><th class="num">Giá VNĐ</th><th class="num">Giá USD</th><th class="num">Tài liệu</th><th class="num">Thành viên</th><th class="num">Dung lượng</th><th class="num">Lượt hỏi/tháng</th><th class="num">Trang OCR/tháng</th><th>OCR</th><th class="num">Đang dùng</th><th>Trạng thái</th><th></th></tr></thead>
     <tbody>${cache.plans.map((p) => `
       <tr>
         <td><div class="cell-main">${esc(p.name)}</div><div class="cell-sub mono">${esc(p.code)}</div></td>
@@ -258,6 +258,7 @@ async function loadPlans() {
         <td class="num">${fmt.num(p.max_storage_mb)} MB</td>
         <td class="num">${fmt.num(p.max_questions_per_month)}</td>
         <td class="num">${fmt.num(p.max_ocr_pages_per_month || 0)}</td>
+        <td>${p.ocr_enabled === false ? '<span class="badge">Tắt</span>' : '<span class="badge ok">Bật</span>'}</td>
         <td class="num">${fmt.num(p.organization_count)}</td>
         <td>${p.is_active ? '<span class="badge ok">Đang bán</span>' : '<span class="badge">Ngừng bán</span>'}</td>
         <td class="nowrap" style="width:1%">
@@ -284,7 +285,9 @@ function planModal(p) {
     body: `
       <div class="form-grid">
         ${f('p_code', 'Mã gói (không dấu)', p?.code)}
-        ${f('p_name', 'Tên hiển thị', p?.name)}
+        ${f('p_name', 'Tên hiển thị (tiếng Việt)', p?.name)}
+        ${f('p_name_en', 'Tên hiển thị (tiếng Anh)', p?.name_en)}
+        ${f('p_trial', 'Số ngày dùng thử (0 = gói trả phí)', p?.trial_days ?? 0, 'number')}
         ${f('p_price', 'Giá mỗi tháng (đ) — khách VN', p?.price_vnd ?? 0, 'number')}
         ${f('p_usd', 'Giá mỗi tháng (USD) — khách ngoài VN', p?.price_usd ?? 0, 'number')}
         ${f('p_sort', 'Thứ tự hiển thị', p?.sort_order ?? 0, 'number')}
@@ -294,17 +297,22 @@ function planModal(p) {
         ${f('p_questions', 'Lượt hỏi mỗi tháng', p?.max_questions_per_month ?? 500, 'number')}
         ${f('p_ocr', 'Trang nhận dạng OCR mỗi tháng', p?.max_ocr_pages_per_month ?? 50, 'number')}
       </div>
-      <div class="field"><label>Mô tả</label><textarea id="p_desc">${esc(p?.description || '')}</textarea></div>
-      <label class="check"><input type="checkbox" id="p_active" ${p?.is_active !== false ? 'checked' : ''} /> Đang mở bán</label>`,
+      <div class="field"><label>Mô tả (tiếng Việt)</label><textarea id="p_desc">${esc(p?.description || '')}</textarea></div>
+      <div class="field"><label>Mô tả (tiếng Anh)</label><textarea id="p_desc_en">${esc(p?.description_en || '')}</textarea></div>
+      <label class="check"><input type="checkbox" id="p_active" ${p?.is_active !== false ? 'checked' : ''} /> Đang mở bán</label>
+      <label class="check"><input type="checkbox" id="p_ocr" ${p?.ocr_enabled !== false ? 'checked' : ''} /> Cho phép nhận dạng PDF scan (OCR)</label>`,
     onOk: async (box) => {
       const g = (id) => box.querySelector('#' + id).value;
       const body = {
-        code: g('p_code').trim(), name: g('p_name').trim(), description: g('p_desc').trim(),
+        code: g('p_code').trim(), name: g('p_name').trim(), name_en: g('p_name_en').trim(),
+        description: g('p_desc').trim(), description_en: g('p_desc_en').trim(),
+        trial_days: g('p_trial'),
         price_vnd: g('p_price'), price_usd: g('p_usd'), sort_order: g('p_sort'),
         max_documents: g('p_docs'), max_members: g('p_members'),
         max_storage_mb: g('p_storage'), max_questions_per_month: g('p_questions'),
         max_ocr_pages_per_month: g('p_ocr'),
         is_active: box.querySelector('#p_active').checked,
+        ocr_enabled: box.querySelector('#p_ocr').checked,
       };
       if (!body.code || !body.name) { toast('Thiếu mã hoặc tên gói', 'err'); return false; }
       if (p) await api(`/admin/plans/${p.id}`, { method: 'PATCH', body });

@@ -7,6 +7,7 @@ import authRouter from './routes/auth.js';
 import organizationsRouter from './routes/organizations.js';
 import adminRouter from './routes/admin.js';
 import { publicRouter as billingPublicRouter, webhookRouter } from './routes/billing.js';
+import { purgeExpiredTrials } from './trials.js';
 import { supabase } from './supabaseClient.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -43,9 +44,28 @@ app.get('/public/plans', async (req, res) => {
 
 app.get('/healthz', (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
+/**
+ * POST /cron/purge-trials
+ * Dành cho dịch vụ cron bên ngoài gọi định kỳ (mỗi ngày một lần là đủ).
+ * Bảo vệ bằng header x-cron-secret thay vì đăng nhập, vì cron không có tài khoản.
+ * Không đặt CRON_SECRET thì endpoint này tắt hẳn.
+ */
+app.post('/cron/purge-trials', async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return res.status(404).json({ error: 'Chưa bật (thiếu CRON_SECRET)' });
+  if (req.headers['x-cron-secret'] !== secret) return res.status(401).json({ error: 'Sai mã bảo vệ' });
+
+  try {
+    const result = await purgeExpiredTrials();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 404 cho API (các route khác trả về trang tĩnh)
 app.use((req, res) => {
-  if (req.path.startsWith('/auth') || req.path.startsWith('/orgs') || req.path.startsWith('/admin') || req.path.startsWith('/webhooks')) {
+  if (req.path.startsWith('/auth') || req.path.startsWith('/orgs') || req.path.startsWith('/admin') || req.path.startsWith('/webhooks') || req.path.startsWith('/cron')) {
     return res.status(404).json({ error: 'Không tìm thấy endpoint' });
   }
   res.status(404).sendFile(path.join(__dirname, '..', 'public', '404.html'), (err) => {

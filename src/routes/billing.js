@@ -17,23 +17,27 @@ export const publicRouter = express.Router();
 
 publicRouter.get('/plans', async (req, res) => {
   try {
-    const country = String(req.query.country || 'VN').toUpperCase();
-    const isVN = country === 'VN';
+    // Tiền tệ đi theo NGÔN NGỮ người dùng đang chọn: tiếng Việt -> VNĐ, tiếng Anh -> USD.
+    // Vẫn nhận tham số country cũ để không phá link đã lưu ở đâu đó.
+    const currency = String(req.query.currency || (String(req.query.country || 'VN').toUpperCase() === 'VN' ? 'VND' : 'USD')).toUpperCase();
+    const isVND = currency !== 'USD';
 
     const { data, error } = await supabase
       .from('plans')
-      .select('id, code, name, description, price_vnd, price_usd, max_documents, max_members, max_storage_mb, max_questions_per_month, max_ocr_pages_per_month')
+      .select('id, code, name, name_en, description, description_en, price_vnd, price_usd, trial_days, ocr_enabled, max_documents, max_members, max_storage_mb, max_questions_per_month, max_ocr_pages_per_month')
       .eq('is_active', true)
       .order('sort_order');
     if (error) throw error;
 
     res.json({
-      country,
-      currency: isVN ? 'VND' : 'USD',
-      providers: availableProviders(country),
+      currency: isVND ? 'VND' : 'USD',
+      providers: availableProviders(isVND ? 'VN' : 'INTERNATIONAL'),
       plans: (data || []).map((p) => ({
         ...p,
-        price: isVN ? Number(p.price_vnd) : Number(p.price_usd),
+        // Tiếng Anh dùng name_en nếu admin đã điền, không thì giữ tên tiếng Việt
+        name: isVND ? p.name : (p.name_en || p.name),
+        description: isVND ? p.description : (p.description_en || p.description),
+        price: isVND ? Number(p.price_vnd) : Number(p.price_usd),
       })),
     });
   } catch (err) {

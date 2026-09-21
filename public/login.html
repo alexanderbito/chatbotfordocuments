@@ -23,6 +23,7 @@
 
   <div class="auth-main">
     <div class="auth-card">
+      <div class="row" style="justify-content:flex-end;margin-bottom:12px" id="langBox"></div>
       <h1>Đăng nhập</h1>
       <p class="lead">Truy cập vào không gian làm việc của doanh nghiệp bạn.</p>
 
@@ -46,7 +47,7 @@
 </div>
 
 <script type="module">
-  import { api, Session, icon, esc } from '/assets/app.js';
+  import { api, Session, icon, esc, langSwitcherHtml, bindLangSwitcher, observeAndTranslate } from '/assets/app.js';
 
   document.getElementById('features').innerHTML = [
     ['shield', 'Phân quyền rõ ràng', 'Admin quản lý tài liệu, thành viên chỉ hỏi đáp'],
@@ -57,6 +58,10 @@
       <div class="ico">${icon[ic]}</div>
       <div><b>${esc(t)}</b><span>${esc(s)}</span></div>
     </div>`).join('');
+
+  document.getElementById('langBox').innerHTML = langSwitcherHtml().replace('lang-switch', 'lang-switch light');
+  bindLangSwitcher();
+  observeAndTranslate();
 
   const alertEl = document.getElementById('alert');
   const showError = (msg) => { alertEl.textContent = msg; alertEl.className = 'alert error show'; };

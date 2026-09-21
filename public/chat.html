@@ -7,10 +7,12 @@
 <link rel="stylesheet" href="/assets/app.css" />
 </head>
 <body>
+<div id="trialBar"></div>
 <div class="shell" id="shell"></div>
 
 <script type="module">
-import { api, Session, requireSession, buildSidebar, logout, icon, esc, fmt, toast, emptyState } from '/assets/app.js';
+import { api, Session, requireSession, buildSidebar, logout, icon, esc, fmt, toast, emptyState,
+  t, trialBanner, bindLangSwitcher, observeAndTranslate } from '/assets/app.js';
 
 const me = await requireSession();
 if (!me.organizations.length) {
@@ -24,6 +26,7 @@ if (!me.organizations.length) {
 let orgId = me.organizations.some((o) => o.id === Session.orgId) ? Session.orgId : me.organizations[0].id;
 Session.orgId = orgId;
 let currentOrg = me.organizations.find((o) => o.id === orgId);
+let trial = currentOrg?.trial || null;
 let folders = [];
 
 function render() {
@@ -52,7 +55,7 @@ function render() {
 
       <div class="page-section active" data-view="chat">
         <div class="chat-layout">
-          <div class="chat-scroll" id="chatScroll"><div class="chat-inner" id="chatInner"></div></div>
+          <div class="chat-scroll" id="chatScroll"><div class="chat-inner" id="chatInner" data-no-i18n></div></div>
           <div class="composer">
             <div class="composer-inner">
               <div class="composer-box">
@@ -63,7 +66,7 @@ function render() {
                 <span>Enter để gửi · Shift+Enter xuống dòng</span>
                 <span class="spacer"></span>
                 <label class="row" style="gap:6px">Phạm vi:
-                  <select id="folderScope" style="width:auto;padding:3px 8px;font-size:12px"><option value="">Tất cả thư mục</option></select>
+                  <select id="folderScope" data-no-i18n style="width:auto;padding:3px 8px;font-size:12px"></select>
                 </label>
               </div>
             </div>
@@ -72,9 +75,13 @@ function render() {
       </div>
 
       <div class="page-section" data-view="history">
-        <div class="page"><div class="card"><div class="card-body" id="historyBox">Đang tải…</div></div></div>
+        <div class="page"><div class="card"><div class="card-body" id="historyBox" data-no-i18n>Đang tải…</div></div></div>
       </div>
     </div>`;
+
+  document.getElementById('trialBar').innerHTML = trialBanner(trial);
+  bindLangSwitcher();
+  observeAndTranslate();
 
   document.getElementById('logoutBtn').onclick = logout;
   document.getElementById('orgSwitch').onchange = (e) => { Session.orgId = e.target.value; location.reload(); };
@@ -107,10 +114,10 @@ function greet() {
   document.getElementById('chatInner').innerHTML = `
     <div style="text-align:center;padding:48px 10px">
       <div class="brand-mark" style="margin:0 auto 14px;width:42px;height:42px;font-size:19px">D</div>
-      <h2>Xin chào ${esc(me.user.full_name || me.user.email.split('@')[0])}</h2>
+      <h2>${esc(t('Xin chào'))} <span data-no-i18n>${esc(me.user.full_name || me.user.email.split('@')[0])}</span></h2>
       <p class="muted mt-1">Hãy đặt câu hỏi về tài liệu nội bộ. Câu trả lời luôn kèm tên tài liệu nguồn.</p>
       <div class="row wrap mt-2" style="justify-content:center">
-        ${['Tóm tắt nội dung chính của tài liệu mới nhất', 'Quy trình xin nghỉ phép được quy định thế nào?', 'Chính sách bảo mật thông tin gồm những điểm gì?']
+        ${[t('Tóm tắt nội dung chính của tài liệu mới nhất'), t('Quy trình xin nghỉ phép được quy định thế nào?'), t('Chính sách bảo mật thông tin gồm những điểm gì?')]
           .map((s) => `<button class="btn sm" data-suggest="${esc(s)}">${esc(s)}</button>`).join('')}
       </div>
     </div>`;

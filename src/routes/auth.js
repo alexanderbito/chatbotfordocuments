@@ -1,6 +1,7 @@
 import express from 'express';
 import { supabase, supabaseAuth } from '../supabaseClient.js';
 import { requireAuth } from '../auth.js';
+import { trialStatus } from '../trials.js';
 import { logEvent } from '../logger.js';
 
 const router = express.Router();
@@ -66,7 +67,19 @@ router.post('/register', async (req, res) => {
         .eq('id', invite.id);
       await logEvent({ scope: 'auth', organizationId: invite.organization_id, userId, message: `Thành viên ${email} đã chấp nhận lời mời` });
     } else {
-      const { data: freePlan } = await supabase.from('plans').select('id').eq('code', 'free').maybeSingle();
+      const { data: freePlan } = await supabase
+        .from('plans')
+        .select('id, trial_days')
+        .eq('code', 'free')
+        .maybeSingle();
+
+      // Đồng hồ dùng thử bắt đầu chạy ngay khi đăng ký
+      const trialDays = Number(freePlan?.trial_days || 0);
+      const now = new Date();
+      const expiresAt = trialDays > 0
+        ? new Date(now.getTime() + trialDays * 24 * 60 * 60 * 1000).toISOString()
+        : null;
+
       const { data: org, error: orgErr } = await supabase
         .from('organizations')
         .insert({
@@ -76,6 +89,8 @@ router.post('/register', async (req, res) => {
           contact_email: email,
           status: 'active',
           billing_status: 'trial',
+          trial_started_at: now.toISOString(),
+          plan_expires_at: expiresAt,
         })
         .select()
         .single();
@@ -95,7 +110,7 @@ router.post('/register', async (req, res) => {
         created_by: userId,
       });
 
-      await logEvent({ scope: 'auth', organizationId: org.id, userId, message: `Doanh nghiệp mới đăng ký: ${organization_name}` });
+      await logEvent({ scope: 'auth', organizationId: org.id, userId, message: `Doanh nghiệp mới đăng ký: ${organization_name} (dùng thử ${trialDays} ngày)` });
     }
 
     // 4. Đăng nhập luôn để trả token về cho frontend
@@ -151,12 +166,12 @@ router.get('/me', requireAuth, async (req, res) => {
     } else {
       const { data } = await supabase
         .from('organization_members')
-        .select('role, status, organization:organizations(id, name, status, plan:plans(code, name))')
+        .select('role, status, organization:organizations(id, name, status, billing_status, plan_expires_at, trial_data_purged_at, plan:plans(code, name, trial_days, ocr_enabled))')
         .eq('user_id', req.user.id)
         .eq('status', 'active');
       organizations = (data || [])
         .filter((m) => m.organization)
-        .map((m) => ({ ...m.organization, role: m.role }));
+        .map((m) => ({ ...m.organization, role: m.role, trial: trialStatus(m.organization) }));
     }
 
     res.json({ user: req.user, organizations });

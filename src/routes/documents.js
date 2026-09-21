@@ -6,7 +6,7 @@ import { extractText } from '../textExtract.js';
 import { chunkText } from '../chunk.js';
 import { embedBatch } from '../embed.js';
 import { supabase } from '../supabaseClient.js';
-import { requireAuth, requireOrgMember, requireOrgAdmin } from '../auth.js';
+import { requireAuth, requireOrgMember, requireOrgAdmin, blockIfTrialExpired } from '../auth.js';
 import { checkQuota } from '../limits.js';
 import { logEvent } from '../logger.js';
 import { decodeFilename, toStorageSafeName } from '../utils/filename.js';
@@ -52,7 +52,7 @@ router.get('/', requireOrgAdmin, async (req, res) => {
 });
 
 /** POST /orgs/:orgId/documents  (form-data: file, folder_id) */
-router.post('/', requireOrgAdmin, upload.single('file'), async (req, res) => {
+router.post('/', requireOrgAdmin, blockIfTrialExpired, upload.single('file'), async (req, res) => {
   try {
     const file = req.file;
     if (!file) return res.status(400).json({ error: 'Chưa chọn file' });
@@ -173,7 +173,7 @@ router.delete('/:docId', requireOrgAdmin, async (req, res) => {
 });
 
 /** POST /orgs/:orgId/documents/:docId/reindex — xử lý lại tài liệu lỗi */
-router.post('/:docId/reindex', requireOrgAdmin, async (req, res) => {
+router.post('/:docId/reindex', requireOrgAdmin, blockIfTrialExpired, async (req, res) => {
   try {
     const { data: doc } = await supabase
       .from('documents')
@@ -222,6 +222,21 @@ async function processDocument(doc, buffer, mimeType, plan) {
 
     // 2. PDF không có text thật => là bản scan, chuyển sang nhận dạng ký tự.
     if (mimeType === 'application/pdf' && needsOcr(text, pages)) {
+      // Gói dùng thử không có OCR — báo rõ để khách biết đường nâng cấp,
+      // và quan trọng là KHÔNG gọi Gemini nên không phát sinh chi phí.
+      if (plan && plan.ocr_enabled === false) {
+        await markFailed(
+          doc.id,
+          `Gói "${plan.name}" không hỗ trợ nhận dạng PDF scan. Vui lòng nâng cấp gói, hoặc tải lên PDF có chữ thật, DOCX hay TXT.`
+        );
+        await logEvent({
+          scope: 'upload',
+          organizationId: doc.organization_id,
+          message: `Chặn OCR vì gói không hỗ trợ: ${doc.filename}`,
+        });
+        return;
+      }
+
       if (!isOcrEnabled()) {
         await markFailed(doc.id, 'Đây là PDF dạng scan/ảnh. Hệ thống chưa bật nhận dạng ký tự (thiếu GEMINI_API_KEY).');
         return;

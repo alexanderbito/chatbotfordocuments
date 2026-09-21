@@ -2,7 +2,7 @@ import express from 'express';
 import { embedText } from '../embed.js';
 import { generateAnswer } from '../llm.js';
 import { supabase } from '../supabaseClient.js';
-import { requireAuth, requireOrgMember, requireOrgAdmin } from '../auth.js';
+import { requireAuth, requireOrgMember, requireOrgAdmin, blockIfTrialExpired } from '../auth.js';
 import { checkQuota } from '../limits.js';
 import { logEvent } from '../logger.js';
 import { getFolderAccess } from '../access.js';
@@ -14,7 +14,7 @@ router.use(requireAuth, requireOrgMember);
  * POST /orgs/:orgId/chat  { question, folder_ids? }
  * Mọi thành viên (admin và user) đều dùng được.
  */
-router.post('/', async (req, res) => {
+router.post('/', blockIfTrialExpired, async (req, res) => {
   const startedAt = Date.now();
   try {
     const question = String(req.body?.question || '').trim();

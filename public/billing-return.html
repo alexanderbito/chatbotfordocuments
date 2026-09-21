@@ -17,7 +17,8 @@
 </div>
 
 <script type="module">
-import { api, Session, requireSession, fmt, esc, icon } from '/assets/app.js';
+import { api, Session, requireSession, fmt, esc, icon, t, money, observeAndTranslate } from '/assets/app.js';
+observeAndTranslate();
 
 const params = new URLSearchParams(location.search);
 const paymentId = params.get('payment');
@@ -71,7 +72,7 @@ if (!paymentId) {
       try { payment = await api(`/orgs/${orgId}/billing/payments/${paymentId}`); } catch { /* giữ dữ liệu cũ */ }
 
       if (payment.status === 'paid') {
-        const amount = payment.currency === 'VND' ? fmt.money(payment.amount) : `$${Number(payment.amount).toFixed(2)}`;
+        const amount = money(payment.amount, payment.currency);
         show('ok', 'Thanh toán thành công',
           `Gói <b>${esc(payment.plan?.name || '')}</b> đã được kích hoạt.<br>Số tiền: <b>${esc(amount)}</b>`,
           backBtns);

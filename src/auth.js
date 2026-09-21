@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient.js';
+import { trialStatus, EXPIRED_MESSAGE } from './trials.js';
 
 /**
  * Lấy access token từ header Authorization: Bearer <token>
@@ -89,6 +90,7 @@ export async function requireOrgMember(req, res, next) {
     if (req.user.is_system_admin) {
       req.org = org;
       req.membership = { role: 'admin', status: 'active', system: true };
+      req.trial = trialStatus(org);
       return next();
     }
 
@@ -109,11 +111,31 @@ export async function requireOrgMember(req, res, next) {
 
     req.org = org;
     req.membership = membership;
+    req.trial = trialStatus(org);
     next();
   } catch (err) {
     console.error('requireOrgMember error:', err);
     res.status(500).json({ error: err.message });
   }
+}
+
+/**
+ * Chặn các hành động chính khi gói dùng thử đã hết hạn.
+ *
+ * Cố ý KHÔNG chặn ở requireOrgMember: admin vẫn phải vào được trang gói cước
+ * và thiết lập để nâng cấp. Chỉ chặn những việc tiêu tốn tài nguyên:
+ * tải tài liệu lên và hỏi chatbot.
+ */
+export function blockIfTrialExpired(req, res, next) {
+  if (req.membership?.system) return next();      // admin hệ thống luôn qua
+  if (req.trial?.isTrial && req.trial.expired) {
+    return res.status(402).json({
+      error: EXPIRED_MESSAGE,
+      trial_expired: true,
+      data_purged: req.trial.purged,
+    });
+  }
+  next();
 }
 
 /**

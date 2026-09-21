@@ -15,14 +15,12 @@
     </a>
     <div class="btn-row" id="navBtns"></div>
   </div>
+  <div class="row" style="justify-content:flex-end;margin-bottom:8px" id="langBox"></div>
 
   <div class="pricing-head">
     <h1 id="ttl">Chọn gói phù hợp với doanh nghiệp bạn</h1>
     <p id="sub">Mọi gói đều dùng chung một hệ thống, khác nhau ở hạn mức. Đổi gói bất kỳ lúc nào.</p>
-    <div class="country-switch" id="countrySwitch">
-      <button data-country="VN">🇻🇳 Việt Nam</button>
-      <button data-country="INTERNATIONAL">🌏 Ngoài Việt Nam</button>
-    </div>
+    <p class="small muted mt-1" id="curNote"></p>
   </div>
 
   <div id="plans" class="plan-grid"><div class="loading-line"></div></div>
@@ -31,116 +29,104 @@
 </div>
 
 <script type="module">
-import { api, Session, fmt, esc, icon, toast, modal } from '/assets/app.js';
+import { api, Session, fmt, esc, icon, toast, modal,
+  t, currency, money, preferredProvider, langSwitcherHtml, bindLangSwitcher, observeAndTranslate } from '/assets/app.js';
 
-// Đoán quốc gia từ múi giờ trình duyệt, người dùng đổi lại được
-const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
-let country = localStorage.getItem('docbot_country') || (/Ho_Chi_Minh|Saigon|Bangkok/.test(tz) ? 'VN' : 'INTERNATIONAL');
+document.getElementById('langBox').innerHTML = langSwitcherHtml().replace('lang-switch', 'lang-switch light');
+bindLangSwitcher();
+observeAndTranslate();
 
 let me = null;
 try { if (Session.token) me = await api('/auth/me'); } catch { me = null; }
 
 document.getElementById('navBtns').innerHTML = me
-  ? `<a class="btn" href="/admin.html">Bảng quản trị</a>`
-  : `<a class="btn" href="/login.html">Đăng nhập</a><a class="btn primary" href="/register.html">Dùng thử miễn phí</a>`;
+  ? `<a class="btn" href="/admin.html">${esc(t('Bảng quản trị'))}</a>`
+  : `<a class="btn" href="/login.html">${esc(t('Đăng nhập'))}</a><a class="btn primary" href="/register.html">${esc(t('Dùng thử miễn phí'))}</a>`;
 
-const T = {
-  VN: { ttl: 'Chọn gói phù hợp với doanh nghiệp bạn',
-        sub: 'Giá đã bao gồm toàn bộ tính năng. Thanh toán bằng chuyển khoản, quét mã VietQR.',
-        note: 'Giá niêm yết bằng VNĐ, chưa bao gồm VAT. Cần hoá đơn đỏ, vui lòng liên hệ trước khi thanh toán.' },
-  INTERNATIONAL: { ttl: 'Simple pricing for every team',
-        sub: 'All plans include every feature — they differ only in limits. Pay securely with PayPal.',
-        note: 'Prices in USD, billed monthly. Contact us for annual billing or custom limits.' },
-};
-
-function renderCountry() {
-  document.querySelectorAll('#countrySwitch button').forEach((b) =>
-    b.classList.toggle('active', b.dataset.country === country));
-  const t = T[country];
-  document.getElementById('ttl').textContent = t.ttl;
-  document.getElementById('sub').textContent = t.sub;
-  document.getElementById('note').textContent = t.note;
-}
-
-document.querySelectorAll('#countrySwitch button').forEach((b) => {
-  b.onclick = () => { country = b.dataset.country; localStorage.setItem('docbot_country', country); load(); };
-});
-
-const price = (p, currency) =>
-  Number(p) === 0 ? 'Miễn phí' : currency === 'VND' ? fmt.money(p) : `$${Number(p).toFixed(0)}`;
+document.getElementById('ttl').textContent = t('Chọn gói phù hợp với doanh nghiệp bạn');
+document.getElementById('sub').textContent = t('Mọi gói đều dùng chung một hệ thống, khác nhau ở hạn mức. Đổi gói bất kỳ lúc nào.');
+document.getElementById('curNote').textContent = currency() === 'VND'
+  ? t('Giá hiển thị bằng VNĐ, thanh toán bằng chuyển khoản / VietQR. Đổi sang English để xem giá USD.')
+  : t('Prices shown in USD, paid by PayPal. Switch to Tiếng Việt for VND pricing and bank transfer.');
+document.getElementById('note').textContent = currency() === 'VND'
+  ? t('Giá chưa bao gồm VAT. Cần hoá đơn đỏ, vui lòng liên hệ trước khi thanh toán.')
+  : t('Billed monthly. Contact us for annual billing or custom limits.');
 
 let data = null;
 
 async function load() {
-  renderCountry();
   const box = document.getElementById('plans');
   box.innerHTML = '<div class="loading-line"></div>';
   try {
-    data = await api(`/public/billing/plans?country=${country}`);
+    data = await api(`/public/billing/plans?currency=${currency()}`);
   } catch (err) { box.innerHTML = `<div class="alert error show">${esc(err.message)}</div>`; return; }
-
-  const isVN = data.currency === 'VND';
-  const unit = isVN ? '/tháng' : '/month';
 
   box.innerHTML = data.plans.map((p, i) => {
     const featured = i === 1;
-    const free = Number(p.price) === 0;
+    const isTrial = Number(p.trial_days) > 0;
     const feats = [
-      `${fmt.num(p.max_documents)} ${isVN ? 'tài liệu' : 'documents'}`,
-      `${fmt.num(p.max_members)} ${isVN ? 'thành viên' : 'members'}`,
-      `${fmt.num(p.max_questions_per_month)} ${isVN ? 'lượt hỏi mỗi tháng' : 'questions / month'}`,
-      `${fmt.num(p.max_ocr_pages_per_month)} ${isVN ? 'trang nhận dạng PDF scan' : 'OCR pages / month'}`,
-      `${fmt.num(p.max_storage_mb)} MB ${isVN ? 'dung lượng' : 'storage'}`,
+      `${fmt.num(p.max_documents)} ${t('tài liệu')}`,
+      `${fmt.num(p.max_members)} ${t('thành viên')}`,
+      `${fmt.num(p.max_questions_per_month)} ${t('lượt hỏi/tháng')}`,
+      p.ocr_enabled
+        ? `${fmt.num(p.max_ocr_pages_per_month)} ${t('trang nhận dạng PDF scan')}`
+        : t('Không có nhận dạng PDF scan'),
+      `${fmt.num(p.max_storage_mb)} MB ${t('dung lượng')}`,
     ];
     return `
       <div class="plan-card ${featured ? 'featured' : ''}">
-        ${featured ? `<span class="tag">${isVN ? 'Phổ biến nhất' : 'Most popular'}</span>` : ''}
+        ${featured ? `<span class="tag">${esc(t('Phổ biến nhất'))}</span>` : ''}
         <h3>${esc(p.name)}</h3>
         <div class="blurb">${esc(p.description || '')}</div>
-        <div class="plan-price">${esc(price(p.price, data.currency))}${free ? '' : `<small> ${unit}</small>`}</div>
-        <ul class="plan-feats">${feats.map((f) => `<li>${icon.check}<span>${esc(f)}</span></li>`).join('')}</ul>
-        <button class="btn ${featured ? 'primary' : ''} block" data-plan="${esc(p.id)}" ${free ? 'data-free="1"' : ''}>
-          ${free ? (isVN ? 'Bắt đầu miễn phí' : 'Start free') : (isVN ? 'Chọn gói này' : 'Choose plan')}
+        <div class="plan-price">${isTrial ? esc(t('Miễn phí')) : esc(money(p.price, data.currency))}${isTrial ? '' : `<small> ${esc(t('/tháng'))}</small>`}</div>
+        ${isTrial ? `<div class="small" style="color:var(--warn);font-weight:600">${esc(t('{n} ngày, sau đó tài liệu bị xoá', { n: p.trial_days }))}</div>` : ''}
+        <ul class="plan-feats">${feats.map((f, idx) => { const off = idx === 3 && !p.ocr_enabled; return `<li class="${off ? 'off' : ''}">${off ? icon.close : icon.check}<span>${esc(f)}</span></li>`; }).join('')}</ul>
+        <button class="btn ${featured ? 'primary' : ''} block" data-plan="${esc(p.id)}" ${isTrial ? 'data-trial="1"' : ''}>
+          ${esc(isTrial ? t('Bắt đầu miễn phí') : t('Chọn gói này'))}
         </button>
       </div>`;
   }).join('');
 
-  box.querySelectorAll('[data-plan]').forEach((b) => (b.onclick = () => choose(b.dataset.plan, !!b.dataset.free)));
+  box.querySelectorAll('[data-plan]').forEach((b) => (b.onclick = () => choose(b.dataset.plan, !!b.dataset.trial)));
 }
 
-async function choose(planId, isFree) {
+async function choose(planId, isTrial) {
   if (!me) { location.href = '/register.html'; return; }
-  if (isFree) { location.href = '/admin.html#billing'; return; }
+  if (isTrial) { location.href = '/admin.html#billing'; return; }
 
   const orgs = me.organizations.filter((o) => o.role === 'admin');
-  if (!orgs.length) { toast('Chỉ quản trị viên doanh nghiệp mới đổi được gói', 'err'); return; }
+  if (!orgs.length) { toast(t('Chỉ quản trị viên doanh nghiệp mới đổi được gói'), 'err'); return; }
 
   const plan = data.plans.find((p) => p.id === planId);
   const providers = data.providers || [];
   if (!providers.length) {
-    toast('Máy chủ chưa bật cổng thanh toán nào. Liên hệ quản trị hệ thống.', 'err');
+    toast(t('Máy chủ chưa bật cổng thanh toán nào. Liên hệ quản trị hệ thống.'), 'err');
     return;
   }
 
+  // Ngôn ngữ quyết định cổng gợi ý: tiếng Việt -> VietQR, tiếng Anh -> PayPal
+  const wanted = preferredProvider();
+  const ordered = [...providers].sort((a, b) => Number(b.id === wanted) - Number(a.id === wanted));
+
   modal({
-    title: `Thanh toán gói ${plan.name}`,
-    okText: 'Tiếp tục thanh toán',
+    title: t('Thanh toán gói {name}', { name: plan.name }),
+    okText: t('Tiếp tục thanh toán'),
     body: `
-      ${orgs.length > 1 ? `<div class="field"><label>Doanh nghiệp</label>
-        <select id="pOrg">${orgs.map((o) => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('')}</select></div>` : ''}
+      ${orgs.length > 1 ? `<div class="field"><label>${esc(t('Doanh nghiệp'))}</label>
+        <select id="pOrg" data-no-i18n>${orgs.map((o) => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('')}</select></div>` : ''}
       <div class="field">
-        <label>Phương thức thanh toán</label>
-        ${providers.map((p, i) => `
+        <label>${esc(t('Phương thức thanh toán'))}</label>
+        ${ordered.map((p, i) => `
           <label class="pay-method ${i === 0 ? 'sel' : ''}">
             <input type="radio" name="prov" value="${esc(p.id)}" ${i === 0 ? 'checked' : ''} />
-            <span class="who"><b>${esc(p.name)}</b><span>${esc(p.description)}</span></span>
+            <span class="who"><b>${esc(t(p.name))}</b><span>${esc(t(p.description))}</span></span>
           </label>`).join('')}
       </div>
       <div class="row between" style="padding-top:10px;border-top:1px solid var(--border)">
-        <b>Tổng thanh toán</b>
-        <b style="font-size:18px">${esc(price(plan.price, data.currency))}</b>
+        <b>${esc(t('Tổng thanh toán'))}</b>
+        <b style="font-size:18px">${esc(money(plan.price, data.currency))}</b>
       </div>
-      <p class="small muted mt-1 mb-0">Gói có hiệu lực ngay sau khi hệ thống nhận được tiền.</p>`,
+      <p class="small muted mt-1 mb-0">${esc(t('Gói có hiệu lực ngay sau khi hệ thống nhận được tiền.'))}</p>`,
     onOk: async (box) => {
       const orgId = box.querySelector('#pOrg')?.value || orgs[0].id;
       const provider = box.querySelector('input[name="prov"]:checked').value;
@@ -149,7 +135,7 @@ async function choose(planId, isFree) {
         body: { plan_id: planId, provider },
       });
       location.href = res.checkout_url;
-      return false;   // giữ hộp thoại trong lúc chuyển trang
+      return false;
     },
   });
 

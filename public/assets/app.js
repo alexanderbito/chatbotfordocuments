@@ -2,6 +2,9 @@
    DocBot — thư viện dùng chung cho toàn bộ giao diện
    ===================================================================== */
 
+import { t, lang, isEnglish, currency, preferredProvider, money, locale, langSwitcherHtml, bindLangSwitcher, observeAndTranslate, translateDOM } from './i18n.js';
+export { t, lang, isEnglish, currency, preferredProvider, money, langSwitcherHtml, bindLangSwitcher, observeAndTranslate, translateDOM };
+
 /* ---------- Phiên đăng nhập ---------- */
 const TOKEN_KEY = 'docbot_token';
 export const Session = {
@@ -50,9 +53,9 @@ export function logout() { Session.clear(); location.href = '/login.html'; }
 
 /* ---------- Định dạng ---------- */
 export const fmt = {
-  num: (n) => Number(n || 0).toLocaleString('vi-VN'),
-  money: (n) => Number(n || 0).toLocaleString('vi-VN') + ' đ',
-  mb: (n) => `${Number(n || 0).toLocaleString('vi-VN', { maximumFractionDigits: 1 })} MB`,
+  num: (n) => Number(n || 0).toLocaleString(locale()),
+  money: (n) => money(n, 'VND'),
+  mb: (n) => `${Number(n || 0).toLocaleString(locale(), { maximumFractionDigits: 1 })} MB`,
   bytes(b) {
     b = Number(b || 0);
     if (b < 1024) return b + ' B';
@@ -61,26 +64,36 @@ export const fmt = {
   },
   date(d) {
     if (!d) return '—';
-    return new Date(d).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    return new Date(d).toLocaleDateString(locale(), { day: '2-digit', month: '2-digit', year: 'numeric' });
   },
   dateTime(d) {
     if (!d) return '—';
-    return new Date(d).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    return new Date(d).toLocaleString(locale(), { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   },
   until(d) {
     if (!d) return '';
     const s = (new Date(d) - Date.now()) / 1000;
-    if (s <= 0) return 'sắp chạy';
-    if (s < 60) return `sau ${Math.ceil(s)} giây`;
-    return `sau ${Math.ceil(s / 60)} phút`;
+    if (s <= 0) return t('sắp chạy');
+    if (s < 60) return t('sau {n} giây', { n: Math.ceil(s) });
+    return t('sau {n} phút', { n: Math.ceil(s / 60) });
+  },
+  /** Khoảng thời gian còn lại dạng "2 ngày 5 giờ" */
+  duration(ms) {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const d = Math.floor(total / 86400);
+    const h = Math.floor((total % 86400) / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    if (d > 0) return t('{d} ngày {h} giờ', { d, h });
+    if (h > 0) return t('{h} giờ {m} phút', { h, m });
+    return t('{m} phút', { m });
   },
   ago(d) {
     if (!d) return '—';
     const s = (Date.now() - new Date(d)) / 1000;
-    if (s < 60) return 'vừa xong';
-    if (s < 3600) return `${Math.floor(s / 60)} phút trước`;
-    if (s < 86400) return `${Math.floor(s / 3600)} giờ trước`;
-    if (s < 604800) return `${Math.floor(s / 86400)} ngày trước`;
+    if (s < 60) return t('vừa xong');
+    if (s < 3600) return t('{n} phút trước', { n: Math.floor(s / 60) });
+    if (s < 86400) return t('{n} giờ trước', { n: Math.floor(s / 3600) });
+    if (s < 604800) return t('{n} ngày trước', { n: Math.floor(s / 86400) });
     return fmt.date(d);
   },
 };
@@ -110,7 +123,7 @@ export const LABEL = {
   level: { info: 'Thông tin', warn: 'Cảnh báo', error: 'Lỗi' },
   scope: { auth: 'Tài khoản', upload: 'Tài liệu', chat: 'Hỏi đáp', billing: 'Thanh toán', system: 'Hệ thống' },
 };
-export const badge = (value, dict) => `<span class="badge ${esc(value)}">${esc(dict?.[value] || value || '—')}</span>`;
+export const badge = (value, dict) => `<span class="badge ${esc(value)}">${esc(t(dict?.[value] || value || '—'))}</span>`;
 
 /* ---------- Biểu tượng ---------- */
 const I = (p, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" ${extra}>${p}</svg>`;
@@ -221,7 +234,7 @@ export function buildSidebar({ brandSub, items, user, orgs, currentOrgId, onOrgC
   const orgBlock = orgs
     ? `<div class="org-switch">
          <label>Doanh nghiệp</label>
-         <select id="orgSwitch">${orgs.map((o) => `<option value="${esc(o.id)}" ${o.id === currentOrgId ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select>
+         <select id="orgSwitch" data-no-i18n>${orgs.map((o) => `<option value="${esc(o.id)}" ${o.id === currentOrgId ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select>
        </div>` : '';
 
   const nav = items
@@ -241,7 +254,8 @@ export function buildSidebar({ brandSub, items, user, orgs, currentOrgId, onOrgC
       ${orgBlock}
       <nav class="nav">${nav}</nav>
       <div class="sidebar-foot">
-        <div class="user-chip">
+        ${langSwitcherHtml()}
+        <div class="user-chip" data-no-i18n>
           <div class="avatar">${esc(initials(user.full_name || user.email))}</div>
           <div class="who"><b>${esc(user.full_name || user.email.split('@')[0])}</b><span>${esc(user.email)}</span></div>
         </div>
@@ -264,6 +278,34 @@ export function router(onChange, fallback) {
     if (b) location.hash = b.dataset.view;
   });
   go();
+}
+
+/**
+ * Dải băng nhắc thời gian dùng thử còn lại.
+ * Gắn vào đầu <body> của mọi trang người dùng. Tự ẩn nếu không phải gói dùng thử.
+ */
+export function trialBanner(trial, { upgradeHref = '/pricing.html' } = {}) {
+  if (!trial?.isTrial) return '';
+
+  if (trial.expired) {
+    return `
+      <div class="trial-bar danger">
+        <span>${icon.alert}</span>
+        <span><b>${esc(t('Hết hạn dùng thử'))}</b> — ${esc(trial.purged
+          ? t('Tài liệu đã bị xoá. Nâng cấp để bắt đầu lại.')
+          : t('Nâng cấp ngay để giữ lại tài liệu của bạn.'))}</span>
+        <a class="btn sm primary" href="${upgradeHref}">${esc(t('Nâng cấp ngay'))}</a>
+      </div>`;
+  }
+
+  const hoursLeft = trial.msLeft / 3600000;
+  const urgent = hoursLeft < 24;
+  return `
+    <div class="trial-bar ${urgent ? 'warn' : ''}">
+      <span>${icon.info}</span>
+      <span>${esc(t('Bản dùng thử còn {time}', { time: fmt.duration(trial.msLeft) }))} — ${esc(t('hết hạn sẽ xoá toàn bộ tài liệu'))}</span>
+      <a class="btn sm ${urgent ? 'primary' : ''}" href="${upgradeHref}">${esc(t('Nâng cấp ngay'))}</a>
+    </div>`;
 }
 
 export const emptyState = (text, sub = '') =>

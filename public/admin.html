@@ -7,12 +7,14 @@
 <link rel="stylesheet" href="/assets/app.css" />
 </head>
 <body>
+<div id="trialBar"></div>
 <div class="shell" id="shell"></div>
 
 <script type="module">
 import {
   api, Session, requireSession, buildSidebar, logout, icon, esc, fmt, toast,
   modal, confirmDialog, emptyState, badge, LABEL, meter, renderBars, debounce, router,
+  t, money, currency, preferredProvider, trialBanner, bindLangSwitcher, observeAndTranslate,
 } from '/assets/app.js';
 
 const me = await requireSession();
@@ -22,6 +24,7 @@ if (!adminOrgs.length) location.href = '/chat.html';
 let orgId = adminOrgs.some((o) => o.id === Session.orgId) ? Session.orgId : adminOrgs[0].id;
 Session.orgId = orgId;
 let org = null;
+let trial = adminOrgs.find((o) => o.id === orgId)?.trial || null;
 let state = { folder: null, folders: [], unfiled: 0, historyPage: 1 };
 
 const TITLES = {
@@ -62,6 +65,9 @@ function shell() {
           .map((v) => `<section class="page-section" data-view="${v}" id="view-${v}"></section>`).join('')}
       </div>
     </div>`;
+
+  bindLangSwitcher();
+  observeAndTranslate();
 
   document.getElementById('logoutBtn').onclick = logout;
   document.getElementById('orgSwitch').onchange = (e) => { Session.orgId = e.target.value; location.reload(); };
@@ -121,7 +127,7 @@ async function viewDocuments() {
     <div class="split">
       <div class="card" style="margin:0">
         <div class="card-head"><h3>Thư mục</h3><button class="icon-btn" id="addFolder" title="Thêm thư mục">${icon.plus}</button></div>
-        <div class="card-body" id="tree">Đang tải…</div>
+        <div class="card-body" id="tree" data-no-i18n>Đang tải…</div>
       </div>
       <div>
         <div class="toolbar">
@@ -129,7 +135,7 @@ async function viewDocuments() {
           <span class="spacer"></span>
           <button class="btn primary" id="uploadBtn">${icon.upload} Tải tài liệu lên</button>
         </div>
-        <div class="card"><div class="card-body flush" id="docTable">Đang tải…</div></div>
+        <div class="card"><div class="card-body flush" id="docTable" data-no-i18n>Đang tải…</div></div>
       </div>
     </div>`;
 
@@ -428,7 +434,7 @@ async function viewMembers() {
   const el = document.getElementById('view-members');
   el.innerHTML = `
     <div class="toolbar"><span class="spacer"></span><button class="btn primary" id="inviteBtn">${icon.plus} Mời thành viên</button></div>
-    <div class="card"><div class="card-body flush" id="memberTable">Đang tải…</div></div>
+    <div class="card"><div class="card-body flush" id="memberTable" data-no-i18n>Đang tải…</div></div>
     <div class="card"><div class="card-body">
       <h3>Phân quyền hoạt động thế nào?</h3>
       <p class="muted mt-1"><b>Quản trị</b> — tải lên, xem, xoá tài liệu, quản lý thư mục, mời và gỡ thành viên, xem lịch sử hỏi đáp của cả tổ chức.</p>
@@ -521,7 +527,7 @@ async function viewHistory() {
   const el = document.getElementById('view-history');
   el.innerHTML = `
     <div class="toolbar"><div class="search-box">${icon.search}<input type="search" id="hq" placeholder="Tìm trong câu hỏi…" /></div></div>
-    <div class="card"><div class="card-body flush" id="histBox">Đang tải…</div><div class="pager" id="histPager"></div></div>`;
+    <div class="card"><div class="card-body flush" id="histBox" data-no-i18n>Đang tải…</div><div class="pager" id="histPager"></div></div>`;
   document.getElementById('hq').oninput = debounce(() => { state.historyPage = 1; loadHistory(); }, 350);
   await loadHistory();
 }
@@ -572,7 +578,8 @@ async function viewBilling() {
   el.innerHTML = '<div class="loading-line"></div>';
   const b = await api(`/orgs/${orgId}/billing`);
   const u = b.usage, L = u.limits;
-  const intl = b.billing_country && b.billing_country !== 'VN';
+  // Tiền tệ đi theo ngôn ngữ đang chọn, không theo quốc gia đã lưu
+  const intl = currency() === 'USD';
 
   const line = (label, used, limit, unit = '') => `
     <div class="mb-2">
@@ -615,8 +622,14 @@ async function viewBilling() {
             <div style="font-size:22px;font-weight:680">${esc(b.plan?.name || 'Chưa gán gói')}</div>
             <div class="muted small">${esc(b.plan?.description || '')}</div>
             <div class="mt-2">${badge(b.billing_status, LABEL.billing)}</div>
-            <div class="small muted mt-1">Hạn dùng: ${esc(b.plan_expires_at ? fmt.date(b.plan_expires_at) : 'không giới hạn')}</div>
-            <div class="mt-2" style="font-size:20px;font-weight:650">${esc(fmt.money(b.plan?.price_vnd || 0))}<span class="muted small"> / tháng</span></div>
+            <div class="small muted mt-1">${esc(t('Hạn dùng'))}: ${esc(b.plan_expires_at ? fmt.date(b.plan_expires_at) : t('không giới hạn'))}</div>
+            ${b.trial?.isTrial && !b.trial.expired
+              ? `<div class="alert warn show mt-1" style="background:var(--warn-soft);color:var(--warn)">${esc(t('Bản dùng thử còn {time}', { time: fmt.duration(b.trial.msLeft) }))} — ${esc(t('hết hạn sẽ xoá toàn bộ tài liệu'))}</div>`
+              : ''}
+            ${b.trial?.expired
+              ? `<div class="alert error show mt-1">${esc(b.trial.purged ? t('Tài liệu đã bị xoá. Nâng cấp để bắt đầu lại.') : t('Nâng cấp ngay để giữ lại tài liệu của bạn.'))}</div>`
+              : ''}
+            <div class="mt-2" style="font-size:20px;font-weight:650">${esc(money(intl ? (b.plan?.price_usd || 0) : (b.plan?.price_vnd || 0), intl ? 'USD' : 'VND'))}<span class="muted small"> ${esc(t('/tháng'))}</span></div>
           </div>
         </div>
 
@@ -625,7 +638,7 @@ async function viewBilling() {
           <div class="card-body">
             ${b.available_plans.filter((p) => p.id !== b.plan?.id).map((p) => `
               <div class="mb-2" style="padding-bottom:12px;border-bottom:1px solid var(--border)">
-                <div class="row between"><b>${esc(p.name)}</b><span>${esc(intl ? '$' + Number(p.price_usd || 0).toFixed(0) : fmt.money(p.price_vnd))}/tháng</span></div>
+                <div class="row between"><b>${esc(p.name)}</b><span>${esc(money(intl ? p.price_usd : p.price_vnd, intl ? 'USD' : 'VND'))}${esc(t('/tháng'))}</span></div>
                 <div class="small muted mb-1">${fmt.num(p.max_documents)} tài liệu · ${fmt.num(p.max_members)} thành viên · ${fmt.num(p.max_questions_per_month)} lượt hỏi/tháng · ${fmt.num(p.max_ocr_pages_per_month || 0)} trang OCR/tháng</div>
                 ${Number(intl ? p.price_usd : p.price_vnd) > 0 && b.providers?.length
                   ? `<button class="btn sm primary" data-buy="${esc(p.id)}">Nâng cấp lên gói này</button>` : ''}
@@ -646,11 +659,12 @@ async function viewBilling() {
 /** Mở hộp thoại chọn phương thức rồi chuyển sang trang thanh toán của cổng. */
 function startCheckout(billing, planId, intl) {
   const plan = billing.available_plans.find((p) => p.id === planId);
-  const providers = billing.providers || [];
-  const amount = intl ? `$${Number(plan.price_usd).toFixed(2)}` : fmt.money(plan.price_vnd);
+  const wanted = preferredProvider();
+  const providers = [...(billing.providers || [])].sort((a, b) => Number(b.id === wanted) - Number(a.id === wanted));
+  const amount = money(intl ? plan.price_usd : plan.price_vnd, intl ? 'USD' : 'VND');
 
   modal({
-    title: `Nâng cấp lên gói ${plan.name}`,
+    title: t('Nâng cấp lên gói {name}', { name: plan.name }),
     okText: 'Tiếp tục thanh toán',
     body: `
       <div class="field">
@@ -658,7 +672,7 @@ function startCheckout(billing, planId, intl) {
         ${providers.map((p, i) => `
           <label class="pay-method ${i === 0 ? 'sel' : ''}">
             <input type="radio" name="prov" value="${esc(p.id)}" ${i === 0 ? 'checked' : ''} />
-            <span class="who"><b>${esc(p.name)}</b><span>${esc(p.description)}</span></span>
+            <span class="who"><b>${esc(t(p.name))}</b><span>${esc(t(p.description))}</span></span>
           </label>`).join('')}
       </div>
       <div class="row between" style="padding-top:10px;border-top:1px solid var(--border)">
@@ -746,6 +760,8 @@ async function viewSettings() {
 const VIEWS = { overview: viewOverview, documents: viewDocuments, members: viewMembers, history: viewHistory, billing: viewBilling, settings: viewSettings };
 
 shell();
+document.getElementById('trialBar').innerHTML = trialBanner(trial);
+
 router(async (view) => {
   const [t, d] = TITLES[view] || TITLES.overview;
   document.getElementById('ttl').textContent = t;

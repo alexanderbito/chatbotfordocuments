@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient.js';
 import { requireAuth, requireOrgMember, requireOrgAdmin } from '../auth.js';
 import { getUsage } from '../limits.js';
 import { availableProviders } from '../payments/index.js';
+import { maybeSweep } from '../trials.js';
 import foldersRouter from './folders.js';
 import documentsRouter from './documents.js';
 import membersRouter from './members.js';
@@ -20,6 +21,9 @@ router.use('/:orgId/billing', billingRouter);
 
 /** GET /orgs/:orgId — thông tin tổ chức + vai trò của người đang đăng nhập */
 router.get('/:orgId', requireAuth, requireOrgMember, async (req, res) => {
+  // Bám vào lưu lượng thật để dọn dữ liệu hết hạn, không cần cron ngoài
+  maybeSweep();
+
   res.json({
     organization: {
       id: req.org.id,
@@ -33,6 +37,7 @@ router.get('/:orgId', requireAuth, requireOrgMember, async (req, res) => {
       created_at: req.org.created_at,
     },
     role: req.membership.role,
+    trial: req.trial,
   });
 });
 
@@ -133,6 +138,7 @@ router.get('/:orgId/billing', requireAuth, requireOrgMember, requireOrgAdmin, as
       billing_status: req.org.billing_status,
       plan_expires_at: req.org.plan_expires_at,
       billing_country: req.org.billing_country || 'VN',
+      trial: req.trial,
       usage,
       payments: payments || [],
       available_plans: plans || [],
