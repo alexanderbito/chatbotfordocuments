@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient.js';
 import { trialStatus, EXPIRED_MESSAGE } from './trials.js';
+import { isSystemAdminEmail } from './systemAdmins.js';
 
 /**
  * Lấy access token từ header Authorization: Bearer <token>
@@ -32,11 +33,25 @@ export async function requireAuth(req, res, next) {
       return res.status(403).json({ error: 'Tài khoản đã bị khoá' });
     }
 
+    // Quyền admin hệ thống: cờ trong CSDL HOẶC email nằm trong SYSTEM_ADMIN_EMAILS.
+    // Vế thứ hai là đường "phá kính lấy búa" để lập tài khoản đầu tiên và để
+    // lấy lại quyền nếu lỡ tự gỡ mất.
+    const byEnv = isSystemAdminEmail(data.user.email);
+    const isSystemAdmin = !!profile?.is_system_admin || byEnv;
+
+    // Nếu được cấp qua biến môi trường mà CSDL chưa ghi nhận thì đồng bộ lại,
+    // để các trang liệt kê người dùng hiển thị đúng.
+    if (byEnv && profile && !profile.is_system_admin) {
+      supabase.from('app_users').update({ is_system_admin: true }).eq('id', data.user.id)
+        .then(() => {}, (err) => console.error('không đồng bộ được cờ admin:', err.message));
+    }
+
     req.user = {
       id: data.user.id,
       email: data.user.email,
       full_name: profile?.full_name || data.user.user_metadata?.full_name || '',
-      is_system_admin: !!profile?.is_system_admin,
+      is_system_admin: isSystemAdmin,
+      is_env_admin: byEnv,
     };
     next();
   } catch (err) {

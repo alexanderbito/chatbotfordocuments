@@ -6,7 +6,8 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "make-admin": "node scripts/make-admin.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.634.0",

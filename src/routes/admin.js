@@ -6,6 +6,7 @@ import { logEvent } from '../logger.js';
 import { decodeFilename } from '../utils/filename.js';
 import { queueStats } from '../queue.js';
 import { purgeExpiredTrials, purgeOrganizationData } from '../trials.js';
+import { systemAdminEmails, isSystemAdminEmail } from '../systemAdmins.js';
 import { isOcrEnabled, ocrModels } from '../ocr.js';
 
 const router = express.Router();
@@ -241,6 +242,67 @@ router.get('/users', async (req, res) => {
   }
 });
 
+/**
+ * POST /admin/users — tạo một tài khoản quản trị hệ thống mới.
+ * Tài khoản này không thuộc doanh nghiệp nào.
+ */
+router.post('/users', async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const password = req.body?.password || '';
+    const fullName = req.body?.full_name || '';
+
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Email không hợp lệ' });
+    if (password.length < 8) return res.status(400).json({ error: 'Mật khẩu quản trị hệ thống phải có ít nhất 8 ký tự' });
+
+    const { data: existed } = await supabase.from('app_users').select('id').ilike('email', email).maybeSingle();
+    if (existed) return res.status(400).json({ error: 'Email này đã có tài khoản. Dùng nút cấp quyền ở danh sách người dùng.' });
+
+    const { data: created, error: createErr } = await supabase.auth.admin.createUser({
+      email, password, email_confirm: true, user_metadata: { full_name: fullName },
+    });
+    if (createErr) {
+      const msg = /already been registered|already exists/i.test(createErr.message)
+        ? 'Email này đã được đăng ký' : createErr.message;
+      return res.status(400).json({ error: msg });
+    }
+
+    await supabase.from('app_users').upsert({
+      id: created.user.id, email, full_name: fullName, is_system_admin: true,
+    });
+
+    await logEvent({
+      level: 'warn', scope: 'auth', userId: req.user.id,
+      message: `Tạo tài khoản quản trị hệ thống mới: ${email}`,
+    });
+
+    res.json({ id: created.user.id, email, full_name: fullName, is_system_admin: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /admin/system-admins — ai đang có quyền quản trị hệ thống */
+router.get('/system-admins', async (req, res) => {
+  try {
+    const { data } = await supabase
+      .from('app_users')
+      .select('id, email, full_name, status, last_login_at, created_at')
+      .eq('is_system_admin', true)
+      .order('created_at');
+
+    const envList = systemAdminEmails();
+    res.json({
+      admins: (data || []).map((u) => ({ ...u, from_env: envList.includes(String(u.email).toLowerCase()) })),
+      env_emails: envList,
+      // Email khai báo trong biến môi trường nhưng chưa đăng ký tài khoản
+      env_pending: envList.filter((e) => !(data || []).some((u) => String(u.email).toLowerCase() === e)),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /** PATCH /admin/users/:id { is_system_admin, status } */
 router.patch('/users/:id', async (req, res) => {
   try {
@@ -249,6 +311,27 @@ router.patch('/users/:id', async (req, res) => {
     if (req.body?.status) patch.status = req.body.status;
     if (req.params.id === req.user.id && patch.is_system_admin === false) {
       return res.status(400).json({ error: 'Không thể tự gỡ quyền admin hệ thống của chính mình' });
+    }
+
+    if (patch.is_system_admin === false) {
+      const { data: target } = await supabase.from('app_users').select('email').eq('id', req.params.id).maybeSingle();
+      if (target && isSystemAdminEmail(target.email)) {
+        return res.status(400).json({
+          error: `Email ${target.email} được cấp quyền qua biến môi trường SYSTEM_ADMIN_EMAILS. Hãy gỡ khỏi biến đó trên máy chủ, gỡ ở đây không có tác dụng.`,
+        });
+      }
+    }
+
+    // Phải luôn còn ít nhất một quản trị hệ thống
+    if (patch.is_system_admin === false || patch.status === 'disabled') {
+      const { count } = await supabase
+        .from('app_users')
+        .select('id', { count: 'exact', head: true })
+        .eq('is_system_admin', true)
+        .eq('status', 'active');
+      if ((count || 0) <= 1) {
+        return res.status(400).json({ error: 'Đây là quản trị hệ thống hoạt động duy nhất, không thể gỡ quyền hoặc khoá.' });
+      }
     }
     const { data, error } = await supabase.from('app_users').update(patch).eq('id', req.params.id).select().single();
     if (error) throw error;

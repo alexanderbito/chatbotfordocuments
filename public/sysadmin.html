@@ -407,10 +407,16 @@ function paymentModal() {
 async function viewUsers() {
   const el = document.getElementById('view-users');
   el.innerHTML = `
+    <div class="card"><div class="card-head"><h3>Quản trị hệ thống</h3>
+      <span class="sub">Những tài khoản thấy được toàn bộ dữ liệu của mọi doanh nghiệp</span>
+      <button class="btn primary" id="newAdmin">${icon.plus} Tạo tài khoản quản trị</button></div>
+      <div class="card-body flush" id="adminBox">Đang tải…</div></div>
+
     <div class="toolbar"><div class="search-box">${icon.search}<input type="search" id="uq" placeholder="Tìm theo email…" /></div></div>
     <div class="card"><div class="card-body flush" id="userTable">Đang tải…</div></div>`;
   document.getElementById('uq').oninput = debounce(loadUsers, 350);
-  await loadUsers();
+  document.getElementById('newAdmin').onclick = newAdminModal;
+  await Promise.all([loadUsers(), loadSystemAdmins()]);
 }
 
 async function loadUsers() {
@@ -438,15 +444,71 @@ async function loadUsers() {
     b.onclick = async () => {
       try {
         await api(`/admin/users/${b.dataset.sa}`, { method: 'PATCH', body: { is_system_admin: b.dataset.on !== '1' } });
-        toast('Đã cập nhật quyền', 'ok'); loadUsers();
+        toast('Đã cập nhật quyền', 'ok'); loadUsers(); loadSystemAdmins();
       } catch (err) { toast(err.message, 'err'); }
     };
   });
   box.querySelectorAll('[data-block]').forEach((b) => {
     b.onclick = async () => {
       await api(`/admin/users/${b.dataset.block}`, { method: 'PATCH', body: { status: b.dataset.st === 'disabled' ? 'active' : 'disabled' } });
-      toast('Đã cập nhật trạng thái', 'ok'); loadUsers();
+      toast('Đã cập nhật trạng thái', 'ok'); loadUsers(); loadSystemAdmins();
     };
+  });
+}
+
+async function loadSystemAdmins() {
+  const box = document.getElementById('adminBox');
+  if (!box) return;
+  const d = await api('/admin/system-admins');
+
+  const rows = d.admins.map((a) => `
+    <tr>
+      <td><div class="cell-main">${esc(a.full_name || a.email.split('@')[0])}</div>
+          <div class="cell-sub">${esc(a.email)}</div></td>
+      <td>${a.from_env ? '<span class="badge purple">Từ biến môi trường</span>' : '<span class="badge info">Cấp trong hệ thống</span>'}</td>
+      <td>${badge(a.status, LABEL.status)}</td>
+      <td class="small">${esc(fmt.ago(a.last_login_at))}</td>
+    </tr>`).join('');
+
+  const pending = d.env_pending.map((e) => `
+    <tr>
+      <td><div class="cell-main">${esc(e)}</div>
+          <div class="cell-sub">Đã khai báo trong SYSTEM_ADMIN_EMAILS nhưng chưa đăng ký tài khoản</div></td>
+      <td><span class="badge purple">Từ biến môi trường</span></td>
+      <td><span class="badge warn">Chờ đăng ký</span></td>
+      <td class="small">—</td>
+    </tr>`).join('');
+
+  box.innerHTML = `<div class="table-wrap"><table class="tbl">
+    <thead><tr><th>Tài khoản</th><th>Nguồn quyền</th><th>Trạng thái</th><th>Đăng nhập gần nhất</th></tr></thead>
+    <tbody>${rows}${pending}</tbody></table></div>
+    ${d.env_emails.length
+      ? `<div class="card-body" style="padding-top:0"><p class="small muted mb-0">SYSTEM_ADMIN_EMAILS đang khai báo: <span class="mono">${esc(d.env_emails.join(', '))}</span>. Những email này luôn có quyền, gỡ trong giao diện không có tác dụng.</p></div>`
+      : `<div class="card-body" style="padding-top:0"><p class="small muted mb-0">Chưa khai báo SYSTEM_ADMIN_EMAILS. Nên đặt biến này trên máy chủ để còn đường lấy lại quyền nếu mất tài khoản quản trị.</p></div>`}`;
+}
+
+function newAdminModal() {
+  modal({
+    title: 'Tạo tài khoản quản trị hệ thống',
+    okText: 'Tạo tài khoản',
+    body: `
+      <div class="alert info show">Tài khoản quản trị hệ thống <b>đọc được tài liệu và lịch sử hỏi đáp của MỌI doanh nghiệp</b>. Chỉ cấp cho người thực sự cần.</div>
+      <div class="field"><label>Email</label><input type="email" id="na_email" placeholder="admin@congty.vn" /></div>
+      <div class="field"><label>Họ và tên</label><input type="text" id="na_name" /></div>
+      <div class="field"><label>Mật khẩu</label><input type="password" id="na_pw" placeholder="Ít nhất 8 ký tự" />
+        <div class="hint">Đặt mật khẩu mạnh và gửi cho người dùng qua kênh an toàn. Họ nên đổi lại sau lần đăng nhập đầu.</div></div>`,
+    onOk: async (box) => {
+      const email = box.querySelector('#na_email').value.trim();
+      const pw = box.querySelector('#na_pw').value;
+      if (!email) { toast('Chưa nhập email', 'err'); return false; }
+      if (pw.length < 8) { toast('Mật khẩu phải có ít nhất 8 ký tự', 'err'); return false; }
+
+      await api('/admin/users', { method: 'POST', body: {
+        email, password: pw, full_name: box.querySelector('#na_name').value.trim(),
+      }});
+      toast('Đã tạo tài khoản quản trị hệ thống', 'ok');
+      loadSystemAdmins(); loadUsers();
+    },
   });
 }
 

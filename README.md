@@ -85,6 +85,7 @@ So với bản gốc có **thêm các biến**:
 | `PAYOS_CLIENT_ID` / `PAYOS_API_KEY` / `PAYOS_CHECKSUM_KEY` | Nếu bán cho khách VN | Lấy tại payos.vn |
 | `PAYPAL_CLIENT_ID` / `PAYPAL_SECRET` / `PAYPAL_WEBHOOK_ID` | Nếu bán cho khách nước ngoài | Lấy tại developer.paypal.com |
 | `APP_BASE_URL` | Không | URL công khai; trên Render tự đọc `RENDER_EXTERNAL_URL` |
+| `SYSTEM_ADMIN_EMAILS` | Nên có | Email luôn có quyền quản trị hệ thống, ngăn cách bằng dấu phẩy |
 | `CRON_SECRET` | Nên có | Bảo vệ endpoint dọn dữ liệu hết hạn dùng thử |
 | `TRIAL_GRACE_HOURS` | Không | Số giờ ân hạn trước khi xoá, mặc định 0 |
 
@@ -98,16 +99,42 @@ npm install
 npm run dev        # http://localhost:3000
 ```
 
-### Bước 4 — Tạo admin hệ thống đầu tiên
+### Bước 4 — Tạo tài khoản quản trị hệ thống đầu tiên
 
-1. Vào `/register.html`, đăng ký một tài khoản (ví dụ với tên doanh nghiệp "Quản trị hệ thống").
-2. Trong Supabase SQL Editor chạy:
+Có ba cách, chọn một.
 
-```sql
-update app_users set is_system_admin = true where email = 'email-cua-ban@example.com';
+**Cách 1 — biến môi trường (khuyến nghị).** Đặt `SYSTEM_ADMIN_EMAILS` trên Render
+(hoặc trong `.env` khi chạy local), rồi vào `/register.html` đăng ký bằng đúng email đó:
+
+```
+SYSTEM_ADMIN_EMAILS=ban@congty.vn
 ```
 
-3. Đăng nhập lại — bạn sẽ được đưa thẳng vào `/sysadmin.html`.
+Email nằm trong biến này **không bị bắt nhập tên doanh nghiệp** và không tạo tổ chức rác —
+tài khoản quản trị hệ thống đứng ngoài mọi tổ chức. Đăng nhập xong vào thẳng `/sysadmin.html`.
+
+Biến này cũng là đường "phá kính lấy búa": quyền hiệu lực = cờ trong CSDL **hoặc** email
+nằm trong danh sách. Nếu lỡ tự gỡ quyền hay mất tài khoản, thêm email vào đây là vào lại được.
+
+**Cách 2 — dòng lệnh.** Đăng ký tài khoản bình thường trước, rồi chạy ở máy có `.env`:
+
+```bash
+npm run make-admin -- ban@congty.vn          # cấp quyền
+npm run make-admin -- ban@congty.vn --revoke # gỡ quyền
+npm run make-admin -- --list                 # xem ai đang có quyền
+```
+
+**Cách 3 — SQL.** Đăng ký trước, rồi chạy trong Supabase SQL Editor:
+
+```sql
+update app_users set is_system_admin = true where email = 'ban@congty.vn';
+```
+
+Khi đã có một tài khoản quản trị, những tài khoản sau tạo thẳng trong
+`/sysadmin.html → Người dùng → Tạo tài khoản quản trị`.
+
+⚠️ Quản trị hệ thống **đọc được tài liệu và lịch sử hỏi đáp của mọi doanh nghiệp**.
+Chỉ cấp cho người thực sự cần.
 
 ---
 
@@ -172,6 +199,8 @@ GET    /orgs/:orgId/chat/history              toàn bộ lịch sử            
 /admin/*                                      toàn bộ khu vực admin hệ thống
        overview · organizations · users · plans · payments · logs
        failed-documents · health · maintenance/fix-filenames
+POST   /admin/users                           tạo tài khoản quản trị hệ thống mới
+GET    /admin/system-admins                   ai đang có quyền quản trị hệ thống
 ```
 
 Xác thực: header `Authorization: Bearer <access_token>` (token do Supabase Auth cấp).

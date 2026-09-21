@@ -2,6 +2,7 @@ import express from 'express';
 import { supabase, supabaseAuth } from '../supabaseClient.js';
 import { requireAuth } from '../auth.js';
 import { trialStatus } from '../trials.js';
+import { isSystemAdminEmail } from '../systemAdmins.js';
 import { logEvent } from '../logger.js';
 
 const router = express.Router();
@@ -18,7 +19,12 @@ router.post('/register', async (req, res) => {
 
     if (!email || !password) return res.status(400).json({ error: 'Thiếu email hoặc mật khẩu' });
     if (password.length < 6) return res.status(400).json({ error: 'Mật khẩu phải có ít nhất 6 ký tự' });
-    if (!organization_name && !invite_token) {
+
+    // Email khai báo trong SYSTEM_ADMIN_EMAILS là tài khoản quản trị hệ thống:
+    // không thuộc doanh nghiệp nào nên không bắt nhập tên doanh nghiệp.
+    const isSysAdmin = isSystemAdminEmail(email);
+
+    if (!isSysAdmin && !organization_name && !invite_token) {
       return res.status(400).json({ error: 'Cần nhập tên doanh nghiệp hoặc mã lời mời' });
     }
 
@@ -57,10 +63,14 @@ router.post('/register', async (req, res) => {
       id: userId,
       email,
       full_name: full_name || '',
+      is_system_admin: isSysAdmin,
     });
 
     // 3. Gắn vào tổ chức
-    if (invite) {
+    if (isSysAdmin && !invite) {
+      // Quản trị hệ thống đứng ngoài mọi tổ chức
+      await logEvent({ scope: 'auth', userId, message: `Tạo tài khoản quản trị hệ thống: ${email}` });
+    } else if (invite) {
       await supabase
         .from('organization_members')
         .update({ user_id: userId, status: 'active', invite_token: null })
