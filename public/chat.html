@@ -66,7 +66,7 @@ function render() {
                 <span>Enter để gửi · Shift+Enter xuống dòng</span>
                 <span class="spacer"></span>
                 <label class="row" style="gap:6px">Phạm vi:
-                  <select id="folderScope" data-no-i18n style="width:auto;padding:3px 8px;font-size:12px"></select>
+                  <select id="folderScope" style="width:auto;padding:3px 8px;font-size:12px"></select>
                 </label>
               </div>
             </div>
@@ -131,8 +131,8 @@ async function loadFolders() {
     const res = await api(`/orgs/${orgId}/folders`);
     folders = res.folders;
     const sel = document.getElementById('folderScope');
-    sel.innerHTML = '<option value="">Tất cả tài liệu tôi được xem</option>' +
-      folders.map((f) => `<option value="${esc(f.id)}">${f.visibility === 'private' ? '🔒 ' : ''}${esc(f.name)} (${f.document_count})</option>`).join('');
+    sel.innerHTML = `<option value="">${esc(t('Tất cả tài liệu tôi được xem'))}</option>` +
+      folders.map((f) => `<option value="${esc(f.id)}" data-no-i18n>${f.visibility === 'private' ? '🔒 ' : ''}${esc(f.name)} (${f.document_count})</option>`).join('');
   } catch { /* thư mục không lấy được thì vẫn hỏi trên toàn bộ phạm vi được phép */ }
 }
 

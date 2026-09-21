@@ -14,7 +14,8 @@
   </div>
 </div>
 <script type="module">
-  import { Session, api } from '/assets/app.js';
+  import { Session, api, observeAndTranslate } from '/assets/app.js';
+  observeAndTranslate();
   (async () => {
     if (!Session.token) return (location.href = '/login.html');
     try {

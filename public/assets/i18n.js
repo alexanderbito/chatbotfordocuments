@@ -282,6 +282,7 @@ const EN = {
   // Gói cước
   'Doanh nghiệp đang dùng gói miễn phí.': 'This organization is on the free plan.',
   'Chưa gán gói': 'No plan assigned',
+  '— Không có —': '— None —', ' (riêng tư)': ' (private)',
   'Gỡ thành viên': 'Remove member',
   'Máy chủ chưa bật cổng thanh toán nào. Liên hệ quản trị hệ thống để đổi gói.':
     'No payment gateway is enabled on the server. Contact the system administrator to change plan.',
@@ -304,6 +305,8 @@ const EN = {
 
   // Trang tĩnh
   'Đang chuyển hướng…': 'Redirecting…',
+  'Kết quả thanh toán': 'Payment result',
+  'Chatbot tài liệu doanh nghiệp': 'Chatbot for company documents',
   'Không tìm thấy trang': 'Page not found',
   'Đường dẫn bạn truy cập không tồn tại hoặc đã bị thay đổi.': 'That address does not exist or has changed.',
 };
@@ -358,7 +361,10 @@ export function locale() { return current === 'en' ? 'en-GB' : 'vi-VN'; }
 
 /* ---------- Dịch nội dung đã render ---------- */
 
-const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'CODE', 'PRE', 'TEXTAREA', 'OPTION']);
+// Không đưa OPTION vào đây: chữ trong <option> phần lớn là chữ giao diện và
+// cần dịch. Dữ liệu người dùng (tên tổ chức, tên thư mục) được bảo vệ riêng
+// bằng data-no-i18n đặt trên chính thẻ <option> hoặc <select> chứa nó.
+const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'CODE', 'PRE', 'TEXTAREA']);
 
 function shouldSkip(node) {
   let el = node.parentElement;
@@ -375,8 +381,22 @@ function shouldSkip(node) {
  * Dữ liệu của người dùng (tên tài liệu, nội dung chat…) nằm trong phần tử
  * đánh dấu data-no-i18n nên không bị đụng tới.
  */
+/**
+ * Dịch tiêu đề tab. Tiêu đề có dạng "Phần A — Phần B"; dịch từng phần rồi
+ * ghép lại, nhờ vậy "Hỏi đáp tài liệu — DocBot" thành "Ask your documents — DocBot".
+ */
+export function translateTitle() {
+  if (current !== 'en') return;
+  const raw = document.title;
+  if (!raw) return;
+  const parts = raw.split(' — ').map((x) => x.trim());
+  const out = parts.map((x) => EN[x] || x).join(' — ');
+  if (out !== raw) document.title = out;
+}
+
 export function translateDOM(root) {
   if (current !== 'en') return;
+  if (!root) translateTitle();
   root = root || document.body;
   if (!root) return;
 

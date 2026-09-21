@@ -220,7 +220,7 @@ async function folderModal(folder) {
 
   const grantedSet = new Set(granted);
   const opts = state.folders.filter((f) => f.id !== folder?.id)
-    .map((f) => `<option value="${esc(f.id)}" ${folder?.parent_id === f.id ? 'selected' : ''}>${esc(f.name)}${f.visibility === 'private' ? ' (riêng tư)' : ''}</option>`).join('');
+    .map((f) => `<option value="${esc(f.id)}" data-no-i18n ${folder?.parent_id === f.id ? 'selected' : ''}>${esc(f.name)}${f.visibility === 'private' ? t(' (riêng tư)') : ''}</option>`).join('');
 
   const memberRows = members
     .filter((m) => m.role !== 'admin')
@@ -240,7 +240,7 @@ async function folderModal(folder) {
     body: `
       <div class="form-grid">
         <div class="field"><label>Tên thư mục</label><input type="text" id="fname" value="${esc(folder?.name || '')}" placeholder="${esc(t('Ví dụ: Quy trình nhân sự'))}" /></div>
-        <div class="field"><label>Thư mục cha</label><select id="fparent"><option value="">— Không có —</option>${opts}</select></div>
+        <div class="field"><label>Thư mục cha</label><select id="fparent"><option value="">${esc(t('— Không có —'))}</option>${opts}</select></div>
       </div>
 
       <div class="field">
@@ -311,12 +311,12 @@ async function folderModal(folder) {
 }
 
 function uploadModal() {
-  const opts = state.folders.map((f) => `<option value="${esc(f.id)}" ${state.folder === f.id ? 'selected' : ''}>${esc(f.name)}</option>`).join('');
+  const opts = state.folders.map((f) => `<option value="${esc(f.id)}" data-no-i18n ${state.folder === f.id ? 'selected' : ''}>${esc(f.name)}</option>`).join('');
   modal({
     title: t('Tải tài liệu lên'),
     okText: t('Tải lên'),
     body: `
-      <div class="field"><label>Chọn thư mục</label><select id="ufolder"><option value="">Chưa phân loại</option>${opts}</select></div>
+      <div class="field"><label>Chọn thư mục</label><select id="ufolder"><option value="">${esc(t('Chưa phân loại'))}</option>${opts}</select></div>
       <div class="field"><label>Tệp tài liệu</label><input type="file" id="ufile" multiple accept=".pdf,.docx,.txt" />
         <div class="hint">${esc(t('Hỗ trợ PDF (kể cả bản scan — hệ thống tự nhận dạng chữ), DOCX và TXT. Tối đa 25 MB mỗi tệp.'))}<br>${esc(t('PDF scan xử lý lâu hơn và tính vào hạn mức trang nhận dạng của gói.'))}</div></div>
       <div id="uprogress" class="small muted"></div>`,
@@ -394,8 +394,8 @@ async function loadDocs(q = '') {
       modal({
         title: t('Chuyển thư mục'),
         body: `<div class="field"><label>${esc(t('Thư mục đích cho "{name}"', { name: d.filename }))}</label>
-          <select id="mvf"><option value="">Chưa phân loại</option>
-          ${state.folders.map((f) => `<option value="${esc(f.id)}" ${d.folder_id === f.id ? 'selected' : ''}>${esc(f.name)}${f.visibility === 'private' ? ' (riêng tư)' : ''}</option>`).join('')}</select></div>
+          <select id="mvf"><option value="">${esc(t('Chưa phân loại'))}</option>
+          ${state.folders.map((f) => `<option value="${esc(f.id)}" data-no-i18n ${d.folder_id === f.id ? 'selected' : ''}>${esc(f.name)}${f.visibility === 'private' ? t(' (riêng tư)') : ''}</option>`).join('')}</select></div>
           <div class="hint">${esc(t('Chuyển vào "Chưa phân loại" nghĩa là mọi thành viên trong tổ chức đều hỏi được tài liệu này.'))}</div>`,
         onOk: async (box2) => {
           await api(`/orgs/${orgId}/documents/${d.id}`, { method: 'PATCH', body: { folder_id: box2.querySelector('#mvf').value || null } });
