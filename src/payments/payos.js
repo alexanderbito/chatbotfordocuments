@@ -11,20 +11,43 @@ import 'dotenv/config';
 
 let client = null;
 
+/** Cắt khoảng trắng thừa: dán biến môi trường trên Render rất hay dính \n ở cuối. */
+function creds() {
+  return {
+    clientId: String(process.env.PAYOS_CLIENT_ID || '').trim(),
+    apiKey: String(process.env.PAYOS_API_KEY || '').trim(),
+    checksumKey: String(process.env.PAYOS_CHECKSUM_KEY || '').trim(),
+  };
+}
+
 export function isEnabled() {
-  return !!(process.env.PAYOS_CLIENT_ID && process.env.PAYOS_API_KEY && process.env.PAYOS_CHECKSUM_KEY);
+  const c = creds();
+  return !!(c.clientId && c.apiKey && c.checksumKey);
 }
 
 function getClient() {
   if (!isEnabled()) throw new Error('Chưa cấu hình payOS (PAYOS_CLIENT_ID / PAYOS_API_KEY / PAYOS_CHECKSUM_KEY)');
-  if (!client) {
-    client = new PayOS({
-      clientId: process.env.PAYOS_CLIENT_ID,
-      apiKey: process.env.PAYOS_API_KEY,
-      checksumKey: process.env.PAYOS_CHECKSUM_KEY,
-    });
-  }
+  if (!client) client = new PayOS(creds());
   return client;
+}
+
+/** Chẩn đoán cấu hình payOS cho trang Sức khoẻ hệ thống. */
+export async function diagnose() {
+  if (!isEnabled()) {
+    return { ok: false, detail: 'Chưa đặt PAYOS_CLIENT_ID / PAYOS_API_KEY / PAYOS_CHECKSUM_KEY' };
+  }
+  try {
+    // Tra một mã đơn không tồn tại: đủ để payOS kiểm tra khoá mà không tạo gì.
+    await getClient().paymentRequests.get(999999999);
+    return { ok: true, detail: 'Khoá hợp lệ' };
+  } catch (err) {
+    const msg = String(err?.message || err);
+    // "không tìm thấy đơn" nghĩa là khoá đã được chấp nhận — đúng thứ ta cần biết.
+    if (/not.?found|không tìm thấy|kh.ng t.n t.i|1[0-9]{2}\b/i.test(msg)) {
+      return { ok: true, detail: 'Khoá hợp lệ' };
+    }
+    return { ok: false, detail: `Không gọi được payOS — ${msg}` };
+  }
 }
 
 export const meta = {

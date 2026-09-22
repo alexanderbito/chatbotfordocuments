@@ -634,9 +634,9 @@ async function viewHealth() {
           <thead><tr><th>Dịch vụ</th><th>Trạng thái</th><th class="num">Thời gian phản hồi</th><th>Chi tiết</th></tr></thead>
           <tbody>${d.checks.map((c) => `<tr>
             <td class="cell-main">${esc(c.name)}${c.optional ? ' <span class="badge tiny">tuỳ chọn</span>' : ''}</td>
-            <td>${c.ok ? '<span class="badge ok">Bình thường</span>' : c.optional ? '<span class="badge warn">Chưa bật</span>' : '<span class="badge err">Lỗi</span>'}</td>
+            <td>${c.ok && c.warning ? '<span class="badge warn">Cần xem lại</span>' : c.ok ? '<span class="badge ok">Bình thường</span>' : c.optional ? '<span class="badge warn">Chưa bật</span>' : '<span class="badge err">Lỗi</span>'}</td>
             <td class="num small">${c.ms} ms</td>
-            <td class="small ${c.ok ? 'muted' : ''}" style="${c.ok || c.optional ? '' : 'color:var(--danger)'}">${esc(c.detail)}</td>
+            <td class="small ${c.ok && !c.warning ? 'muted' : ''}" style="${c.ok || c.optional ? (c.warning ? 'color:var(--warn,#b26b00)' : '') : 'color:var(--danger)'}">${esc(c.detail)}</td>
           </tr>`).join('')}</tbody></table></div>
         ${d.queue ? `<div class="mt-2 row wrap" style="gap:14px">
           <span class="badge ${d.queue.running ? 'warn' : 'ok'}">Hàng đợi xử lý: ${d.queue.running} đang chạy</span>

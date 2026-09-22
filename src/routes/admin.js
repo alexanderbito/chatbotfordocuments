@@ -8,6 +8,7 @@ import { queueStats } from '../queue.js';
 import { purgeExpiredTrials, purgeOrganizationData } from '../trials.js';
 import { systemAdminEmails, isSystemAdminEmail } from '../systemAdmins.js';
 import { isOcrEnabled, ocrModels } from '../ocr.js';
+import { payos, paypal } from '../payments/index.js';
 
 const router = express.Router();
 router.use(requireAuth, requireSystemAdmin);
@@ -661,6 +662,38 @@ router.get('/health', async (req, res) => {
         : results.map((r) => `${r.model}: ${r.detail}`).join(' | '),
     });
   }
+
+  // Cổng thanh toán — sai cấu hình ở đây là khách trả tiền mà không lên gói,
+  // nên kiểm tra tách riêng từng cổng thay vì gộp một dòng chung chung.
+  for (const [id, label] of [['payos', 'payOS (VietQR, VND)'], ['paypal', 'PayPal (USD)']]) {
+    const t = Date.now();
+    const provider = id === 'payos' ? payos : paypal;
+    if (!provider.isEnabled()) {
+      checks.push({ name: label, ok: false, optional: true, ms: 0, detail: 'Chưa cấu hình — cổng này không hiện ở trang thanh toán' });
+      continue;
+    }
+    try {
+      const d = await provider.diagnose();
+      checks.push({ name: label, ok: d.ok, warning: d.warning, ms: Date.now() - t, detail: d.detail });
+    } catch (e) {
+      checks.push({ name: label, ok: false, ms: Date.now() - t, detail: e.message });
+    }
+  }
+
+  // APP_BASE_URL sai là link quay về sau thanh toán và chữ ký webhook PayPal đều hỏng
+  const configured = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
+  const actual = `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`;
+  checks.push({
+    name: 'APP_BASE_URL (địa chỉ công khai)',
+    ok: !!configured && configured === actual,
+    warning: !!configured && configured !== actual,
+    ms: 0,
+    detail: !configured
+      ? `Chưa đặt APP_BASE_URL — đang tự suy ra "${actual}". Đặt hẳn biến này, nếu không link quay về sau thanh toán sẽ sai khi đổi tên miền.`
+      : configured === actual
+        ? configured
+        : `APP_BASE_URL đang là "${configured}" nhưng bạn đang truy cập qua "${actual}". Webhook PayPal ký theo địa chỉ nên lệch là chữ ký hỏng.`,
+  });
 
   res.json({ checked_at: new Date().toISOString(), checks, queue: queueStats() });
 });

@@ -10,12 +10,29 @@ import 'dotenv/config';
 const LIVE = 'https://api-m.paypal.com';
 const SANDBOX = 'https://api-m.sandbox.paypal.com';
 
-function apiBase() {
-  return (process.env.PAYPAL_ENV || 'sandbox') === 'live' ? LIVE : SANDBOX;
+/**
+ * Dán biến môi trường trên Render rất hay dính khoảng trắng hoặc xuống dòng ở
+ * cuối. Chuỗi Basic auth vì thế sai và PayPal trả 401 "Client Authentication
+ * failed" — nhìn hệt như nhập sai khoá. Cắt sạch ngay từ đầu.
+ */
+function creds() {
+  return {
+    id: String(process.env.PAYPAL_CLIENT_ID || '').trim(),
+    secret: String(process.env.PAYPAL_SECRET || '').trim(),
+  };
+}
+
+export function env() {
+  return String(process.env.PAYPAL_ENV || 'sandbox').trim().toLowerCase() === 'live' ? 'live' : 'sandbox';
+}
+
+function apiBase(forEnv) {
+  return (forEnv || env()) === 'live' ? LIVE : SANDBOX;
 }
 
 export function isEnabled() {
-  return !!(process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_SECRET);
+  const { id, secret } = creds();
+  return !!(id && secret);
 }
 
 export const meta = {
@@ -32,19 +49,91 @@ async function accessToken() {
   if (!isEnabled()) throw new Error('Chưa cấu hình PayPal (PAYPAL_CLIENT_ID / PAYPAL_SECRET)');
   if (tokenCache.value && Date.now() < tokenCache.expiresAt) return tokenCache.value;
 
-  const basic = Buffer.from(`${process.env.PAYPAL_CLIENT_ID}:${process.env.PAYPAL_SECRET}`).toString('base64');
-  const res = await fetch(`${apiBase()}/v1/oauth2/token`, {
+  const { value: token } = await fetchToken(env());
+  tokenCache = token;
+  return tokenCache.value;
+}
+
+/**
+ * Lấy token cho MỘT môi trường cụ thể. Tách riêng để phần chẩn đoán có thể thử
+ * cả hai môi trường mà không đụng vào bộ nhớ đệm đang dùng để thu tiền thật.
+ */
+async function fetchToken(forEnv) {
+  const { id, secret } = creds();
+  const basic = Buffer.from(`${id}:${secret}`).toString('base64');
+  const res = await fetch(`${apiBase(forEnv)}/v1/oauth2/token`, {
     method: 'POST',
     headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: 'grant_type=client_credentials',
     signal: AbortSignal.timeout(20000),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(`PayPal: không lấy được access token — ${data?.error_description || res.status}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const why = data?.error_description || data?.error || `HTTP ${res.status}`;
+    const err = new Error(
+      `PayPal: không lấy được access token — ${why} ` +
+      `(PAYPAL_ENV=${forEnv}, máy chủ ${apiBase(forEnv)}, client id bắt đầu bằng "${id.slice(0, 8)}…", dài ${id.length} ký tự)`
+    );
+    err.status = res.status;
+    throw err;
+  }
 
   // Trừ hao 60 giây để không dùng token vừa hết hạn
-  tokenCache = { value: data.access_token, expiresAt: Date.now() + (data.expires_in - 60) * 1000 };
-  return tokenCache.value;
+  return { value: { value: data.access_token, expiresAt: Date.now() + (data.expires_in - 60) * 1000 } };
+}
+
+/**
+ * Chẩn đoán cấu hình PayPal cho trang Sức khoẻ hệ thống.
+ *
+ * Khi khoá không dùng được ở môi trường đang đặt, thử nốt môi trường còn lại.
+ * Lý do: lỗi phổ biến nhất là tạo app Live trên PayPal nhưng quên đặt
+ * PAYPAL_ENV=live, nên khoá Live bị gửi tới máy chủ sandbox và nhận đúng một
+ * câu "Client Authentication failed" chẳng nói lên điều gì. Đây chỉ là lệnh
+ * xin token, không tạo đơn và không đụng tới tiền.
+ */
+export async function diagnose() {
+  const current = env();
+  if (!isEnabled()) {
+    return { ok: false, env: current, detail: 'Chưa đặt PAYPAL_CLIENT_ID / PAYPAL_SECRET' };
+  }
+
+  try {
+    await fetchToken(current);
+  } catch (err) {
+    const other = current === 'live' ? 'sandbox' : 'live';
+    let otherWorks = false;
+    try { await fetchToken(other); otherWorks = true; } catch { /* khoá sai ở cả hai nơi */ }
+
+    if (otherWorks) {
+      return {
+        ok: false,
+        env: current,
+        mismatch: other,
+        detail:
+          `Khoá này KHÔNG dùng được ở môi trường "${current}" nhưng dùng được ở "${other}". ` +
+          `Sửa biến PAYPAL_ENV thành "${other}" trên Render rồi deploy lại.`,
+      };
+    }
+    return {
+      ok: false,
+      env: current,
+      detail: `${err.message}. Khoá cũng không dùng được ở môi trường "${other}" — nhiều khả năng Client ID hoặc Secret bị sai, thiếu ký tự hoặc dính khoảng trắng.`,
+    };
+  }
+
+  const warnings = [];
+  if (!process.env.PAYPAL_WEBHOOK_ID) {
+    warnings.push('Chưa đặt PAYPAL_WEBHOOK_ID — webhook sẽ bị từ chối, khách trả tiền mà không được nâng gói');
+  }
+  if (current === 'sandbox') {
+    warnings.push('Đang chạy ở môi trường sandbox — tiền không có thật');
+  }
+  return {
+    ok: true,
+    env: current,
+    detail: warnings.length ? warnings.join(' · ') : `Lấy token thành công ở môi trường ${current}`,
+    warning: warnings.length > 0,
+  };
 }
 
 async function callPaypal(path, { method = 'POST', body, headers = {} } = {}) {
