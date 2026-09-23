@@ -100,7 +100,17 @@ function render() {
 
   const ta = document.getElementById('q');
   ta.oninput = () => { ta.style.height = 'auto'; ta.style.height = Math.min(160, ta.scrollHeight) + 'px'; };
-  ta.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(); } };
+  ta.onkeydown = (e) => {
+    // An input method editor — Vietnamese Telex/VNI, Chinese pinyin, Japanese
+    // kana and the rest — uses Enter itself to commit the characters being
+    // composed. keydown still reports key === 'Enter' at that moment, but the
+    // textarea does not hold the final character yet: sending here would post a
+    // question with its last character missing and then drop that character
+    // into the freshly cleared box. isComposing marks exactly that moment
+    // (keyCode 229 is the same signal on older browsers).
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(); }
+  };
   document.getElementById('sendBtn').onclick = ask;
 
   greet();
@@ -141,7 +151,7 @@ function bubble(role, html) {
   el.innerHTML = `
     <div class="bubble-avatar">${role === 'user' ? esc((me.user.full_name || me.user.email)[0].toUpperCase()) : 'D'}</div>
     <div class="body">
-      <div class="who" ${role === 'user' ? 'data-no-i18n' : ''}>${role === 'user' ? esc(me.user.full_name || t('You')) : 'DocBot'}</div>
+      <div class="who">${role === 'user' ? esc(me.user.full_name || t('You')) : 'DocBot'}</div>
       <div class="text">${html}</div>
       <div class="srcs"></div>
     </div>`;

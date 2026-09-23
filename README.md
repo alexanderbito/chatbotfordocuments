@@ -96,6 +96,7 @@ In **Supabase Dashboard -> SQL Editor -> New query**, run these files in order:
    per-email folder permissions.
 6. `migration_v6_payments.sql` — **required**. Adds USD pricing and gateway checkout.
 7. `migration_v7_trial.sql` — **required**. Turns the free plan into a 3-day trial with no OCR.
+8. `migration_v8_english_plans.sql` — **required**. Moves the plan catalogue to English. Plan names and descriptions live in the database and are rendered on the pricing page, the sign-up page and the "Current plan" card, so a database seeded before the switch keeps showing its original text until this runs.
 
 **Run them in that order.** Every file from v3 onwards starts with a precondition check and
 stops with a clear message if an earlier file has not been run.
