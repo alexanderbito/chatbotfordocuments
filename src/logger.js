@@ -1,8 +1,8 @@
 import { supabase } from './supabaseClient.js';
 
 /**
- * Ghi nhật ký vào bảng system_logs để console admin hệ thống đọc được.
- * Không bao giờ ném lỗi ra ngoài — ghi log hỏng không được làm hỏng request chính.
+ * Write an entry to system_logs so the system-admin console can read it.
+ * Never throws: a failed log write must not take down the request it describes.
  */
 export async function logEvent({ level = 'info', scope = 'system', organizationId = null, userId = null, message, detail = null }) {
   try {
@@ -15,7 +15,7 @@ export async function logEvent({ level = 'info', scope = 'system', organizationI
       detail,
     });
   } catch (err) {
-    console.error('[logger] không ghi được nhật ký:', err.message);
+    console.error('[logger] could not write log entry:', err.message);
   }
   const line = `[${level.toUpperCase()}][${scope}] ${message}`;
   if (level === 'error') console.error(line);

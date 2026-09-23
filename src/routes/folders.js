@@ -9,9 +9,10 @@ router.use(requireAuth, requireOrgMember);
 
 /**
  * GET /orgs/:orgId/folders
- * Admin tổ chức thấy toàn bộ thư mục kèm số người được cấp quyền.
- * Thành viên thường CHỈ thấy thư mục mình được đọc — thư mục riêng tư không
- * có quyền sẽ bị ẩn hoàn toàn, vì bản thân tên thư mục cũng có thể nhạy cảm.
+ * Organization admins see every folder along with how many people have been
+ * granted access to it. Regular members see ONLY the folders they may read — a
+ * private folder they have no grant for is hidden entirely, because the folder
+ * name alone can be sensitive.
  */
 router.get('/', async (req, res) => {
   try {
@@ -19,7 +20,7 @@ router.get('/', async (req, res) => {
     const visible = access.isAdmin ? access.folders : access.accessible;
     const visibleIds = new Set(visible.map((f) => f.id));
 
-    // Đếm tài liệu, chỉ trong phạm vi thư mục người này được thấy
+    // Count documents, but only within the folders this person can see
     const { data: docs } = await supabase
       .from('documents')
       .select('folder_id')
@@ -32,7 +33,7 @@ router.get('/', async (req, res) => {
       else if (visibleIds.has(d.folder_id)) counts[d.folder_id] = (counts[d.folder_id] || 0) + 1;
     }
 
-    // Số email được cấp quyền cho từng thư mục riêng tư (chỉ admin cần biết)
+    // Number of emails granted access to each private folder (only admins need this)
     let permCounts = {};
     if (access.isAdmin) {
       const privateIds = visible.filter((f) => f.visibility === 'private').map((f) => f.id);
@@ -63,7 +64,7 @@ router.get('/', async (req, res) => {
 router.post('/', requireOrgAdmin, async (req, res) => {
   try {
     const name = (req.body?.name || '').trim();
-    if (!name) return res.status(400).json({ error: 'Thiếu tên thư mục' });
+    if (!name) return res.status(400).json({ error: 'A folder name is required' });
 
     const visibility = req.body?.visibility === 'private' ? 'private' : 'public';
 
@@ -87,7 +88,7 @@ router.post('/', requireOrgAdmin, async (req, res) => {
         scope: 'auth',
         organizationId: req.org.id,
         userId: req.user.id,
-        message: `Tạo thư mục riêng tư "${name}" cho ${permissions.saved.length} thành viên`,
+        message: `Created private folder "${name}" for ${permissions.saved.length} members`,
       });
     }
 
@@ -106,7 +107,7 @@ router.patch('/:folderId', requireOrgAdmin, async (req, res) => {
       .eq('id', req.params.folderId)
       .eq('organization_id', req.org.id)
       .maybeSingle();
-    if (!folder) return res.status(404).json({ error: 'Không tìm thấy thư mục' });
+    if (!folder) return res.status(404).json({ error: 'Folder not found' });
 
     const patch = {};
     if (req.body?.name !== undefined) patch.name = String(req.body.name).trim();
@@ -116,9 +117,9 @@ router.patch('/:folderId', requireOrgAdmin, async (req, res) => {
     }
 
     if (patch.parent_id === req.params.folderId) {
-      return res.status(400).json({ error: 'Không thể đặt thư mục làm cha của chính nó' });
+      return res.status(400).json({ error: 'A folder cannot be its own parent' });
     }
-    // Chặn tạo vòng lặp: không cho chuyển một thư mục vào chính nhánh con của nó
+    // Prevent cycles: a folder must not be moved into its own subtree
     if (patch.parent_id) {
       const { data: all } = await supabase
         .from('folders')
@@ -129,7 +130,7 @@ router.patch('/:folderId', requireOrgAdmin, async (req, res) => {
       const seen = new Set();
       while (cur) {
         if (cur.id === req.params.folderId) {
-          return res.status(400).json({ error: 'Không thể chuyển thư mục vào bên trong thư mục con của chính nó' });
+          return res.status(400).json({ error: 'A folder cannot be moved inside one of its own subfolders' });
         }
         if (seen.has(cur.id)) break;
         seen.add(cur.id);
@@ -154,7 +155,7 @@ router.patch('/:folderId', requireOrgAdmin, async (req, res) => {
         permissions = await setFolderPermissions(req.org.id, data.id, req.body.emails, req.user.id);
       }
     } else if (folder.visibility === 'private') {
-      // Chuyển về công khai thì bỏ hết danh sách quyền cũ cho khỏi hiểu nhầm
+      // Switching back to public drops the old grant list so it cannot be misread
       await supabase.from('folder_permissions').delete().eq('folder_id', data.id);
     }
 
@@ -163,7 +164,7 @@ router.patch('/:folderId', requireOrgAdmin, async (req, res) => {
         scope: 'auth',
         organizationId: req.org.id,
         userId: req.user.id,
-        message: `Đổi thư mục "${data.name}" sang ${patch.visibility === 'private' ? 'riêng tư' : 'công khai'}`,
+        message: `Changed folder "${data.name}" to ${patch.visibility === 'private' ? 'private' : 'public'}`,
       });
     }
 
@@ -173,7 +174,7 @@ router.patch('/:folderId', requireOrgAdmin, async (req, res) => {
   }
 });
 
-/** GET /orgs/:orgId/folders/:folderId/permissions — danh sách email được đọc */
+/** GET /orgs/:orgId/folders/:folderId/permissions — the emails allowed to read it */
 router.get('/:folderId/permissions', requireOrgAdmin, async (req, res) => {
   try {
     const { data: folder } = await supabase
@@ -182,7 +183,7 @@ router.get('/:folderId/permissions', requireOrgAdmin, async (req, res) => {
       .eq('id', req.params.folderId)
       .eq('organization_id', req.org.id)
       .maybeSingle();
-    if (!folder) return res.status(404).json({ error: 'Không tìm thấy thư mục' });
+    if (!folder) return res.status(404).json({ error: 'Folder not found' });
 
     const [permissions, { data: members }] = await Promise.all([
       listFolderPermissions(folder.id),
@@ -213,9 +214,9 @@ router.put('/:folderId/permissions', requireOrgAdmin, async (req, res) => {
       .eq('id', req.params.folderId)
       .eq('organization_id', req.org.id)
       .maybeSingle();
-    if (!folder) return res.status(404).json({ error: 'Không tìm thấy thư mục' });
+    if (!folder) return res.status(404).json({ error: 'Folder not found' });
     if (folder.visibility !== 'private') {
-      return res.status(400).json({ error: 'Thư mục đang ở chế độ công khai nên không cần cấp quyền riêng' });
+      return res.status(400).json({ error: 'This folder is public, so per-member access does not apply' });
     }
 
     const result = await setFolderPermissions(req.org.id, folder.id, req.body?.emails, req.user.id);
@@ -223,7 +224,7 @@ router.put('/:folderId/permissions', requireOrgAdmin, async (req, res) => {
       scope: 'auth',
       organizationId: req.org.id,
       userId: req.user.id,
-      message: `Cập nhật quyền thư mục "${folder.name}": ${result.saved.length} thành viên`,
+      message: `Updated access for folder "${folder.name}": ${result.saved.length} members`,
     });
 
     res.json(result);
@@ -234,8 +235,8 @@ router.put('/:folderId/permissions', requireOrgAdmin, async (req, res) => {
 
 /**
  * DELETE /orgs/:orgId/folders/:folderId
- * Thư mục con bị xoá theo (cascade). Tài liệu bên trong KHÔNG bị xoá,
- * chỉ chuyển về mục "Chưa phân loại".
+ * Subfolders are deleted along with it (cascade). The documents inside are NOT
+ * deleted, they are only moved to "Unfiled".
  */
 router.delete('/:folderId', requireOrgAdmin, async (req, res) => {
   try {
@@ -244,7 +245,7 @@ router.delete('/:folderId', requireOrgAdmin, async (req, res) => {
       .select('id, parent_id, visibility, name')
       .eq('organization_id', req.org.id);
 
-    // Gom toàn bộ nhánh con sẽ bị xoá theo
+    // Collect the whole subtree that will be deleted along with it
     const ids = [];
     const collect = (id) => {
       ids.push(id);
@@ -254,8 +255,9 @@ router.delete('/:folderId', requireOrgAdmin, async (req, res) => {
 
     const target = (all || []).find((f) => f.id === req.params.folderId);
 
-    // Cảnh báo: tài liệu trong thư mục riêng tư sẽ thành "chưa phân loại",
-    // nghĩa là cả tổ chức đọc được. Buộc admin xác nhận rõ ràng.
+    // Careful: documents in a private folder become "unfiled", which means the
+    // whole organization can read them. Require an explicit confirmation from
+    // the admin before that happens.
     const hasPrivate = (all || []).some((f) => ids.includes(f.id) && f.visibility === 'private');
     if (hasPrivate && req.query.confirm !== 'move-to-public') {
       const { count } = await supabase
@@ -265,9 +267,9 @@ router.delete('/:folderId', requireOrgAdmin, async (req, res) => {
       return res.status(409).json({
         error: 'needs_confirmation',
         message:
-          `Thư mục này (hoặc thư mục con) đang ở chế độ riêng tư và chứa ${count || 0} tài liệu. ` +
-          `Nếu xoá, các tài liệu đó sẽ chuyển về mục "Chưa phân loại" và MỌI thành viên trong tổ chức sẽ hỏi được. ` +
-          `Hãy chuyển tài liệu sang thư mục riêng tư khác trước, hoặc xác nhận để tiếp tục.`,
+          `This folder (or one of its subfolders) is private and holds ${count || 0} documents. ` +
+          `Deleting it moves those documents to "Unfiled", where EVERY member of the organization can ask about them. ` +
+          `Move them to another private folder first, or confirm to continue.`,
         document_count: count || 0,
       });
     }
@@ -286,10 +288,10 @@ router.delete('/:folderId', requireOrgAdmin, async (req, res) => {
       scope: 'auth',
       organizationId: req.org.id,
       userId: req.user.id,
-      message: `Xoá thư mục "${target?.name || req.params.folderId}"`,
+      message: `Deleted folder "${target?.name || req.params.folderId}"`,
     });
 
-    res.json({ message: 'Đã xoá thư mục, tài liệu bên trong chuyển về mục Chưa phân loại' });
+    res.json({ message: 'Folder deleted; the documents inside were moved to Unfiled' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -3,18 +3,21 @@ import { deleteFromR2 } from './storage.js';
 import { logEvent } from './logger.js';
 
 /**
- * Vòng đời gói dùng thử.
+ * Free trial lifecycle.
  *
- * Gói dùng thử cho đủ tính năng (trừ OCR) trong `plans.trial_days` ngày.
- * Hết hạn: khoá không cho dùng tiếp, rồi dọn tài liệu.
+ * A trial gives full access to every feature except OCR for `plans.trial_days`
+ * days. Once it expires we first lock the organization out, then purge its
+ * documents.
  *
- * Phạm vi dọn: tài liệu, file trên R2, các đoạn đã lập chỉ mục, bản OCR tạm,
- * và lịch sử hỏi đáp (vì câu trả lời có chứa nội dung tài liệu).
- * GIỮ LẠI: tài khoản, tổ chức, thành viên, cây thư mục — để khách quay lại
- * nâng cấp là dùng được ngay, không phải đăng ký từ đầu.
+ * What the purge covers: documents, the files stored on R2, the indexed chunks,
+ * temporary OCR output, and the chat history (answers quote document content,
+ * so leaving them behind would leave the content behind too).
+ * What we KEEP: accounts, organizations, members and the folder tree — so a
+ * customer who comes back to upgrade can start using the product straight away
+ * instead of signing up all over again.
  */
 
-/** Giờ ân hạn sau thời điểm hết hạn mới thực sự xoá. */
+/** Hours of grace after the expiry timestamp before anything is actually deleted. */
 const GRACE_HOURS = Number(process.env.TRIAL_GRACE_HOURS || 0);
 
 export function isTrialPlan(plan) {
@@ -22,7 +25,7 @@ export function isTrialPlan(plan) {
 }
 
 /**
- * Tình trạng dùng thử của một tổ chức.
+ * Trial state of a single organization.
  * @returns {{ isTrial: boolean, expired: boolean, expiresAt: string|null, msLeft: number, purged: boolean }}
  */
 export function trialStatus(org) {
@@ -41,31 +44,32 @@ export function trialStatus(org) {
   };
 }
 
-/** Thông báo chuẩn khi hết hạn dùng thử. */
+/** Standard notice shown once the trial has expired. */
 export const EXPIRED_MESSAGE =
-  'Thời gian dùng thử đã kết thúc. Vui lòng nâng cấp gói để tiếp tục sử dụng.';
+  'Your free trial has ended. Upgrade your plan to keep using DocBot.';
 
 /**
- * Dọn dữ liệu của MỘT tổ chức đã hết hạn dùng thử.
- * Idempotent: chạy lại trên tổ chức đã dọn sẽ không làm gì thêm.
+ * Purge the data of ONE organization whose trial has expired.
+ * Idempotent: running it again on an already purged organization does nothing.
  */
-export async function purgeOrganizationData(orgId, { reason = 'hết hạn dùng thử' } = {}) {
+export async function purgeOrganizationData(orgId, { reason = 'trial expired' } = {}) {
   const { data: org } = await supabase
     .from('organizations')
     .select('id, name, trial_data_purged_at')
     .eq('id', orgId)
     .maybeSingle();
-  if (!org) return { skipped: true, reason: 'không tìm thấy tổ chức' };
-  if (org.trial_data_purged_at) return { skipped: true, reason: 'đã dọn trước đó' };
+  if (!org) return { skipped: true, reason: 'organization not found' };
+  if (org.trial_data_purged_at) return { skipped: true, reason: 'already purged' };
 
   const { data: docs } = await supabase
     .from('documents')
     .select('id, storage_key, filename')
     .eq('organization_id', orgId);
 
-  // Xoá file trên R2 trước. Lỗi ở một file không được chặn cả quá trình —
-  // file mồ côi trên R2 phiền nhưng không nguy hiểm, còn để lại bản ghi
-  // trong CSDL thì khách vẫn hỏi được nội dung đáng lẽ đã bị xoá.
+  // Delete the R2 files first. A failure on one file must not abort the whole
+  // run — an orphaned file on R2 is annoying but harmless, whereas leaving the
+  // database rows in place would let the customer keep asking questions about
+  // content that was supposed to be gone.
   let filesDeleted = 0, fileErrors = 0;
   for (const d of docs || []) {
     try { await deleteFromR2(d.storage_key); filesDeleted++; }
@@ -86,7 +90,7 @@ export async function purgeOrganizationData(orgId, { reason = 'hết hạn dùng
     level: 'warn',
     scope: 'system',
     organizationId: orgId,
-    message: `Đã dọn dữ liệu của "${org.name}" (${reason}): ${(docs || []).length} tài liệu`,
+    message: `Purged data for "${org.name}" (${reason}): ${(docs || []).length} documents`,
     detail: { documents: (docs || []).length, files_deleted: filesDeleted, file_errors: fileErrors },
   });
 
@@ -98,7 +102,7 @@ export async function purgeOrganizationData(orgId, { reason = 'hết hạn dùng
   };
 }
 
-/** Dọn tất cả tổ chức đã hết hạn dùng thử. */
+/** Purge every organization whose trial has expired. */
 export async function purgeExpiredTrials() {
   const { data: rows, error } = await supabase.rpc('list_expired_trials', { grace_hours: GRACE_HOURS });
   if (error) throw error;
@@ -114,7 +118,7 @@ export async function purgeExpiredTrials() {
         level: 'error',
         scope: 'system',
         organizationId: row.organization_id,
-        message: `Dọn dữ liệu dùng thử thất bại: ${row.organization_name}`,
+        message: `Trial data purge failed: ${row.organization_name}`,
         detail: { error: err.message },
       });
     }
@@ -123,13 +127,14 @@ export async function purgeExpiredTrials() {
 }
 
 /**
- * Chạy dọn dẹp định kỳ mà không cần dịch vụ cron bên ngoài.
+ * Run the periodic cleanup without depending on an external cron service.
  *
- * Render Free ngủ sau 15 phút không có traffic nên cron nội bộ theo giờ là
- * không đáng tin. Cách này bám vào lưu lượng thật: mỗi khi có request, nếu
- * đã quá khoảng thời gian định trước thì chạy dọn một lần ở chế độ nền.
- * Vẫn nên trỏ thêm một dịch vụ cron miễn phí vào /admin/maintenance/purge-trials
- * để những tổ chức bỏ hoang cũng được dọn đúng hạn.
+ * Render's free tier puts the instance to sleep after 15 minutes without
+ * traffic, so an in-process hourly timer is not reliable. This approach rides on
+ * real traffic instead: on every request, if enough time has passed since the
+ * last sweep, one sweep is kicked off in the background. It is still worth
+ * pointing a free cron service at /admin/maintenance/purge-trials so that
+ * abandoned organizations are purged on time as well.
  */
 const SWEEP_INTERVAL_MS = Number(process.env.TRIAL_SWEEP_INTERVAL_MS || 6 * 60 * 60 * 1000);
 let lastSweep = 0;
@@ -143,8 +148,8 @@ export function maybeSweep() {
 
   purgeExpiredTrials()
     .then((r) => {
-      if (r.checked) console.log(`[trials] đã kiểm tra ${r.checked} tổ chức hết hạn dùng thử`);
+      if (r.checked) console.log(`[trials] checked ${r.checked} organizations with expired trials`);
     })
-    .catch((err) => console.error('[trials] dọn dẹp thất bại:', err.message))
+    .catch((err) => console.error('[trials] sweep failed:', err.message))
     .finally(() => { sweeping = false; });
 }

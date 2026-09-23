@@ -1,7 +1,7 @@
 {
   "name": "doc-chatbot-demo",
   "version": "1.0.0",
-  "description": "SaaS chatbot RAG cho tài liệu doanh nghiệp - Supabase + R2 + Voyage + DeepSeek",
+  "description": "RAG chatbot SaaS for company documents — Supabase + R2 + Voyage + DeepSeek",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
@@ -12,7 +12,6 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.634.0",
     "@aws-sdk/s3-request-presigner": "^3.634.0",
-    "@payos/node": "^2.0.5",
     "@supabase/supabase-js": "^2.45.4",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",

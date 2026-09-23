@@ -1,23 +1,23 @@
--- MIGRATION: chuyển embedding từ 1536 chiều (OpenAI) sang 1024 chiều (Voyage voyage-4-lite)
--- Chạy toàn bộ file này trong Supabase SQL Editor > New query > Run
+-- MIGRATION: move embeddings from 1536 dimensions (OpenAI) to 1024 dimensions (Voyage voyage-4-lite)
+-- Run this entire file in the Supabase SQL Editor > New query > Run
 
--- 1. Xoá sạch dữ liệu tài liệu + chunk cũ
---    (vì đã đổi provider embedding, dữ liệu cũ không dùng lại được — cần upload + index lại)
+-- 1. Wipe the existing documents and chunks
+--    (the embedding provider changed, so the old vectors are unusable — everything must be re-uploaded and re-indexed)
 truncate table document_chunks;
 delete from documents;
 
--- 2. Đổi cột embedding sang 1024 chiều
---    (chạy được vì bảng đã trống sau bước 1 ở trên)
+-- 2. Change the embedding column to 1024 dimensions
+--    (this works only because step 1 above left the table empty)
 alter table document_chunks
   alter column embedding type vector(1024);
 
--- 3. Xoá và tạo lại index cho đúng chiều mới
+-- 3. Drop and recreate the index so it matches the new dimension
 drop index if exists document_chunks_embedding_idx;
 create index document_chunks_embedding_idx
   on document_chunks using ivfflat (embedding vector_cosine_ops)
   with (lists = 100);
 
--- 4. Cập nhật lại hàm tìm kiếm ngữ nghĩa theo chiều mới
+-- 4. Update the semantic search function for the new dimension
 create or replace function match_document_chunks(
   query_embedding vector(1024),
   match_org_id uuid,

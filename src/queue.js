@@ -1,13 +1,13 @@
 /**
- * Hàng đợi xử lý tài liệu, chạy trong tiến trình web.
+ * In-process document-processing queue.
  *
- * Vì sao cần: OCR một tài liệu scan mất vài chục giây đến vài phút và tốn bộ nhớ.
- * Nếu nhiều file được tải lên cùng lúc mà xử lý song song, instance Render Free
- * (512 MB RAM, dưới 1 CPU) sẽ hết bộ nhớ và bị khởi động lại, làm tài liệu
- * treo mãi ở trạng thái "đang xử lý".
+ * Why it exists: running OCR over a scanned document takes tens of seconds to
+ * several minutes and is memory-hungry. Processing a batch of uploads in
+ * parallel would exhaust a small instance (512 MB RAM, under 1 CPU), restart it,
+ * and leave documents stuck in "processing" forever.
  *
- * Hàng đợi này giới hạn số việc chạy đồng thời và độ dài hàng chờ. Khi lên
- * production thật nên thay bằng Background Worker riêng trên Render.
+ * The queue caps both concurrency and queue depth. At real production volume
+ * this should be replaced by a dedicated background worker.
  */
 
 const CONCURRENCY = Number(process.env.WORKER_CONCURRENCY || 1);
@@ -18,14 +18,14 @@ let running = 0;
 
 export class QueueFullError extends Error {
   constructor() {
-    super('Hệ thống đang xử lý nhiều tài liệu khác. Vui lòng thử lại sau vài phút.');
+    super('The system is busy processing other documents. Please try again in a few minutes.');
     this.name = 'QueueFullError';
   }
 }
 
 /**
- * Đưa một việc vào hàng đợi. Trả về Promise kết thúc khi việc chạy xong.
- * Ném QueueFullError ngay nếu hàng chờ đã đầy.
+ * Enqueue a job. Resolves when the job finishes.
+ * Throws QueueFullError immediately when the queue is already full.
  */
 export function enqueue(label, task) {
   if (pending.length >= MAX_QUEUE) throw new QueueFullError();
@@ -50,7 +50,7 @@ function drain() {
   }
 }
 
-/** Trạng thái hàng đợi, dùng cho trang sức khoẻ hệ thống. */
+/** Queue state, surfaced on the system-health page. */
 export function queueStats() {
   return {
     running,

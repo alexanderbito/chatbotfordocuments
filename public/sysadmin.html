@@ -1,56 +1,53 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Quản trị hệ thống — DocBot</title>
+<title>System admin — DocBot</title>
 <link rel="stylesheet" href="/assets/app.css" />
 </head>
 <body>
 <div class="shell" id="shell"></div>
 
 <script type="module">
-import {
-  api, requireSession, buildSidebar, logout, icon, esc, fmt, toast,
-  modal, confirmDialog, emptyState, badge, LABEL, renderBars, debounce, router,
-} from '/assets/app.js';
+import {api, requireSession, buildSidebar, logout, icon, esc, fmt, money, toast, modal, confirmDialog, emptyState, badge, LABEL, renderBars, debounce, router} from '/assets/app.js';
 
 const me = await requireSession({ systemAdmin: true });
 let cache = { plans: [], orgs: [] };
 let state = { logPage: 1 };
 
 const TITLES = {
-  overview: ['Bảng điều khiển hệ thống', 'Toàn cảnh khách hàng, mức sử dụng và doanh thu.'],
-  orgs: ['Tổ chức', 'Toàn bộ doanh nghiệp đang dùng hệ thống.'],
-  plans: ['Gói cước', 'Định nghĩa hạn mức và giá bán của từng gói.'],
-  payments: ['Thanh toán', 'Ghi nhận giao dịch và gia hạn gói cho khách hàng.'],
-  users: ['Người dùng', 'Tất cả tài khoản trong hệ thống.'],
-  logs: ['Nhật ký', 'Sự kiện và lỗi phát sinh trong quá trình vận hành.'],
-  health: ['Sức khoẻ hệ thống', 'Kiểm tra kết nối tới các dịch vụ phụ thuộc.'],
+  overview: ['System dashboard', 'Customers, usage and revenue at a glance.'],
+  orgs: ['Organizations', 'Every company using the platform.'],
+  plans: ['Plans', 'Define the limits and price of each plan.'],
+  payments: ['Payments', 'Record transactions and extend customer plans.'],
+  users: ['Users', 'Every account on the platform.'],
+  logs: ['Activity log', 'Events and errors raised while the system runs.'],
+  health: ['System health', 'Check connectivity to every upstream service.'],
 };
 
 function shell() {
   document.getElementById('shell').innerHTML = `
     ${buildSidebar({
-      brandSub: 'Quản trị hệ thống',
+      brandSub: 'System admin',
       user: me.user,
       items: [
-        { group: 'Kinh doanh' },
-        { view: 'overview', icon: 'dashboard', label: 'Bảng điều khiển' },
-        { view: 'orgs', icon: 'building', label: 'Tổ chức' },
-        { view: 'plans', icon: 'card', label: 'Gói cước' },
-        { view: 'payments', icon: 'chart', label: 'Thanh toán' },
-        { group: 'Vận hành' },
-        { view: 'users', icon: 'users', label: 'Người dùng' },
-        { view: 'logs', icon: 'history', label: 'Nhật ký' },
-        { view: 'health', icon: 'pulse', label: 'Sức khoẻ hệ thống' },
+        { group: 'Business' },
+        { view: 'overview', icon: 'dashboard', label: 'Dashboard' },
+        { view: 'orgs', icon: 'building', label: 'Organizations' },
+        { view: 'plans', icon: 'card', label: 'Plans' },
+        { view: 'payments', icon: 'chart', label: 'Payments' },
+        { group: 'Operations' },
+        { view: 'users', icon: 'users', label: 'Users' },
+        { view: 'logs', icon: 'history', label: 'Activity log' },
+        { view: 'health', icon: 'pulse', label: 'System health' },
       ],
     })}
     <div class="main">
       <div class="topbar">
         <div class="title"><h1 id="ttl"></h1><p id="dsc"></p></div>
-        <span class="badge purple">${icon.shield} Admin hệ thống</span>
-        <a class="btn" href="/admin.html">Bảng quản trị doanh nghiệp</a>
+        <span class="badge purple">${icon.shield} System admin</span>
+        <a class="btn" href="/admin.html">Organization console</a>
       </div>
       <div class="page">
         ${Object.keys(TITLES).map((v) => `<section class="page-section" data-view="${v}" id="view-${v}"></section>`).join('')}
@@ -59,7 +56,7 @@ function shell() {
   document.getElementById('logoutBtn').onclick = logout;
 }
 
-/* =================== BẢNG ĐIỀU KHIỂN =================== */
+/* =================== DASHBOARD =================== */
 async function viewOverview() {
   const el = document.getElementById('view-overview');
   el.innerHTML = '<div class="loading-line"></div>';
@@ -75,35 +72,35 @@ async function viewOverview() {
 
   el.innerHTML = `
     <div class="stat-grid">
-      ${stat('Doanh nghiệp', fmt.num(t.organizations), 'building', `${t.suspended_organizations} đang bị tạm khoá`)}
-      ${stat('Người dùng', fmt.num(t.users), 'users')}
-      ${stat('Tài liệu', fmt.num(t.documents), 'file', `${fmt.num(t.chunks)} đoạn · ${t.failed_documents} lỗi`)}
-      ${stat('Lượt hỏi', fmt.num(t.questions), 'chat')}
-      ${stat('Dung lượng', fmt.mb(t.storage_mb), 'db')}
-      ${stat('Doanh thu tháng này', fmt.money(d.revenue.this_month_vnd), 'card', `Luỹ kế ${fmt.money(d.revenue.total_vnd)}`)}
-      ${stat('Trang OCR tháng này', fmt.num(d.ocr?.pages_this_month || 0), 'scan', `${fmt.num(d.ocr?.documents || 0)} tài liệu scan · luỹ kế ${fmt.num(d.ocr?.pages_total || 0)} trang`)}
+      ${stat('Organization', fmt.num(t.organizations), 'building', `${t.suspended_organizations} suspended`)}
+      ${stat('Users', fmt.num(t.users), 'users')}
+      ${stat('Documents', fmt.num(t.documents), 'file', `${fmt.num(t.chunks)} chunks · ${t.failed_documents} failed`)}
+      ${stat('Questions', fmt.num(t.questions), 'chat')}
+      ${stat('Size', fmt.mb(t.storage_mb), 'db')}
+      ${stat('Revenue this month', fmt.money(d.revenue.this_month), 'card', `${fmt.money(d.revenue.total)} all time`)}
+      ${stat('OCR pages this month', fmt.num(d.ocr?.pages_this_month || 0), 'scan', `${fmt.num(d.ocr?.documents || 0)} scanned documents · ${fmt.num(d.ocr?.pages_total || 0)} pages all time`)}
     </div>
 
     <div class="card">
-      <div class="card-head"><h2>Lượt hỏi 30 ngày gần nhất</h2><span class="sub">Tổng ${fmt.num(d.series.reduce((s, x) => s + x.questions, 0))} câu hỏi</span></div>
+      <div class="card-head"><h2>Questions over the last 30 days</h2><span class="sub">${fmt.num(d.series.reduce((s, x) => s + x.questions, 0))} questions in total</span></div>
       <div class="card-body"><div id="chartQ"></div></div>
     </div>
 
     <div class="split" style="grid-template-columns:1fr 1fr">
       <div class="card">
-        <div class="card-head"><h3>Tài liệu tải lên 30 ngày</h3></div>
+        <div class="card-head"><h3>Uploads over the last 30 days</h3></div>
         <div class="card-body"><div id="chartD"></div></div>
       </div>
       <div class="card">
-        <div class="card-head"><h3>Phân bố theo gói cước</h3></div>
+        <div class="card-head"><h3>Customers by plan</h3></div>
         <div class="card-body">
           ${Object.entries(d.by_plan).map(([name, count]) => {
             const total = Object.values(d.by_plan).reduce((s, x) => s + x, 0) || 1;
             const pct = Math.round((count / total) * 100);
             return `<div class="mb-2">
-              <div class="row between small"><span>${esc(name)}</span><span class="muted">${count} tổ chức · ${pct}%</span></div>
+              <div class="row between small"><span>${esc(name)}</span><span class="muted">${count} organizations · ${pct}%</span></div>
               <div class="meter"><i style="width:${pct}%"></i></div></div>`;
-          }).join('') || emptyState('Chưa có dữ liệu')}
+          }).join('') || emptyState('No data yet')}
         </div>
       </div>
     </div>`;
@@ -112,17 +109,17 @@ async function viewOverview() {
   renderBars(document.getElementById('chartD'), d.series, 'documents');
 }
 
-/* =================== TỔ CHỨC =================== */
+/* =================== ORGANIZATIONS =================== */
 async function viewOrgs() {
   const el = document.getElementById('view-orgs');
   el.innerHTML = `
     <div class="toolbar">
-      <div class="search-box">${icon.search}<input type="search" id="oq" placeholder="Tìm theo tên doanh nghiệp…" /></div>
-      <select id="ostatus" style="width:auto"><option value="">Mọi trạng thái</option><option value="active">Hoạt động</option><option value="suspended">Tạm khoá</option></select>
+      <div class="search-box">${icon.search}<input type="search" id="oq" placeholder="Search by company name…" /></div>
+      <select id="ostatus" style="width:auto"><option value="">Any status</option><option value="active">Active</option><option value="suspended">Suspended</option></select>
       <span class="spacer"></span>
-      <button class="btn" id="reloadOrgs">${icon.refresh} Làm mới</button>
+      <button class="btn" id="reloadOrgs">${icon.refresh} Refresh</button>
     </div>
-    <div class="card"><div class="card-body flush" id="orgTable">Đang tải…</div></div>`;
+    <div class="card"><div class="card-body flush" id="orgTable">Loading…</div></div>`;
   document.getElementById('oq').oninput = debounce(loadOrgs, 350);
   document.getElementById('ostatus').onchange = loadOrgs;
   document.getElementById('reloadOrgs').onclick = loadOrgs;
@@ -137,10 +134,10 @@ async function loadOrgs() {
   const orgs = await api(`/admin/organizations?q=${encodeURIComponent(q)}&status=${st}`);
   cache.orgs = orgs;
 
-  if (!orgs.length) return (box.innerHTML = emptyState('Không có tổ chức nào'));
+  if (!orgs.length) return (box.innerHTML = emptyState('No organizations yet'));
 
   box.innerHTML = `<div class="table-wrap"><table class="tbl">
-    <thead><tr><th>Doanh nghiệp</th><th>Gói</th><th>Thanh toán</th><th class="num">Tài liệu</th><th class="num">Thành viên</th><th class="num">Lượt hỏi</th><th>Trạng thái</th><th>Tạo lúc</th><th></th></tr></thead>
+    <thead><tr><th>Organization</th><th>Plan</th><th>Billing</th><th class="num">Documents</th><th class="num">Members</th><th class="num">Questions</th><th>Status</th><th>Created</th><th></th></tr></thead>
     <tbody>${orgs.map((o) => `
       <tr>
         <td><div class="cell-main">${esc(o.name)}</div><div class="cell-sub">${esc(o.owner_email)}</div></td>
@@ -152,9 +149,9 @@ async function loadOrgs() {
         <td>${badge(o.status, LABEL.status)}</td>
         <td class="small nowrap">${esc(fmt.date(o.created_at))}</td>
         <td class="nowrap" style="width:1%">
-          <button class="icon-btn" data-view="${esc(o.id)}" title="Xem chi tiết">${icon.search}</button>
-          <button class="icon-btn" data-edit="${esc(o.id)}" title="Sửa">${icon.edit}</button>
-          <button class="icon-btn" data-rm="${esc(o.id)}" title="Xoá">${icon.trash}</button>
+          <button class="icon-btn" data-view="${esc(o.id)}" title="View details">${icon.search}</button>
+          <button class="icon-btn" data-edit="${esc(o.id)}" title="Edit">${icon.edit}</button>
+          <button class="icon-btn" data-rm="${esc(o.id)}" title="Delete">${icon.trash}</button>
         </td>
       </tr>`).join('')}</tbody></table></div>`;
 
@@ -163,9 +160,9 @@ async function loadOrgs() {
   box.querySelectorAll('[data-rm]').forEach((b) => {
     b.onclick = async () => {
       const o = orgs.find((x) => x.id === b.dataset.rm);
-      if (!(await confirmDialog('Xoá tổ chức', `Xoá vĩnh viễn "${o.name}" cùng toàn bộ tài liệu, thành viên và lịch sử? Không thể hoàn tác.`))) return;
+      if (!(await confirmDialog('Delete organization', `Permanently delete "${o.name}" along with every document, member and chat message? This cannot be undone.`))) return;
       await api(`/admin/organizations/${o.id}`, { method: 'DELETE' });
-      toast('Đã xoá tổ chức', 'ok'); loadOrgs();
+      toast('Organization deleted', 'ok'); loadOrgs();
     };
   });
 }
@@ -174,51 +171,51 @@ async function orgDetail(id) {
   const d = await api(`/admin/organizations/${id}`);
   const o = d.organization, u = d.usage, L = u.limits;
   modal({
-    title: o.name, wide: true, okText: 'Đóng', cancelText: 'Đóng',
+    title: o.name, wide: true, okText: 'Close', cancelText: 'Close',
     body: `
       <div class="stat-grid" style="margin-bottom:14px">
-        <div class="stat"><div class="label">Tài liệu</div><div class="value" style="font-size:20px">${fmt.num(u.documents)} <small>/ ${fmt.num(L.max_documents)}</small></div></div>
-        <div class="stat"><div class="label">Thành viên</div><div class="value" style="font-size:20px">${fmt.num(u.members)} <small>/ ${fmt.num(L.max_members)}</small></div></div>
-        <div class="stat"><div class="label">Lượt hỏi tháng</div><div class="value" style="font-size:20px">${fmt.num(u.questions_this_month)}</div></div>
-        <div class="stat"><div class="label">Dung lượng</div><div class="value" style="font-size:20px">${fmt.mb(u.storage_mb)}</div></div>
-        <div class="stat"><div class="label">Trang OCR tháng này</div><div class="value" style="font-size:20px">${fmt.num(u.ocr_pages_this_month)} <small>/ ${fmt.num(L.max_ocr_pages_per_month)}</small></div></div>
+        <div class="stat"><div class="label">Documents</div><div class="value" style="font-size:20px">${fmt.num(u.documents)} <small>/ ${fmt.num(L.max_documents)}</small></div></div>
+        <div class="stat"><div class="label">Members</div><div class="value" style="font-size:20px">${fmt.num(u.members)} <small>/ ${fmt.num(L.max_members)}</small></div></div>
+        <div class="stat"><div class="label">Questions this month</div><div class="value" style="font-size:20px">${fmt.num(u.questions_this_month)}</div></div>
+        <div class="stat"><div class="label">Size</div><div class="value" style="font-size:20px">${fmt.mb(u.storage_mb)}</div></div>
+        <div class="stat"><div class="label">OCR pages this month</div><div class="value" style="font-size:20px">${fmt.num(u.ocr_pages_this_month)} <small>/ ${fmt.num(L.max_ocr_pages_per_month)}</small></div></div>
       </div>
       <div class="form-grid">
-        <div class="field"><label>Gói cước</label><div>${esc(o.plan?.name || '—')} · ${esc(fmt.money(o.plan?.price_vnd || 0))}/tháng</div></div>
-        <div class="field"><label>Hạn dùng</label><div>${esc(o.plan_expires_at ? fmt.date(o.plan_expires_at) : 'không giới hạn')}</div></div>
-        <div class="field"><label>Email liên hệ</label><div>${esc(o.contact_email || '—')}</div></div>
-        <div class="field"><label>Mã số thuế</label><div>${esc(o.tax_code || '—')}</div></div>
+        <div class="field"><label>Plan</label><div>${esc(o.plan?.name || '—')} · ${esc(fmt.money(o.plan?.price_usd || 0))}/month</div></div>
+        <div class="field"><label>Valid until</label><div>${esc(o.plan_expires_at ? fmt.date(o.plan_expires_at) : 'unlimited')}</div></div>
+        <div class="field"><label>Contact email</label><div>${esc(o.contact_email || '—')}</div></div>
+        <div class="field"><label>Tax code</label><div>${esc(o.tax_code || '—')}</div></div>
       </div>
-      <h3 class="mt-2 mb-1">Thành viên (${d.members.length})</h3>
+      <h3 class="mt-2 mb-1">Members (${d.members.length})</h3>
       <div class="table-wrap"><table class="tbl"><tbody>
-        ${d.members.map((m) => `<tr><td>${esc(m.email)}</td><td style="width:1%">${badge(m.role, LABEL.role)}</td><td style="width:1%">${badge(m.status, LABEL.status)}</td></tr>`).join('') || '<tr><td class="muted">Chưa có</td></tr>'}
+        ${d.members.map((m) => `<tr><td>${esc(m.email)}</td><td style="width:1%">${badge(m.role, LABEL.role)}</td><td style="width:1%">${badge(m.status, LABEL.status)}</td></tr>`).join('') || '<tr><td class="muted">None yet</td></tr>'}
       </tbody></table></div>
-      <h3 class="mt-2 mb-1">Tài liệu gần đây</h3>
+      <h3 class="mt-2 mb-1">Recent documents</h3>
       <div class="table-wrap"><table class="tbl"><tbody>
-        ${d.recent_documents.map((x) => `<tr><td>${esc(x.filename)}</td><td style="width:1%">${badge(x.status, LABEL.status)}</td><td class="small nowrap" style="width:1%">${esc(fmt.date(x.created_at))}</td></tr>`).join('') || '<tr><td class="muted">Chưa có</td></tr>'}
+        ${d.recent_documents.map((x) => `<tr><td>${esc(x.filename)}</td><td style="width:1%">${badge(x.status, LABEL.status)}</td><td class="small nowrap" style="width:1%">${esc(fmt.date(x.created_at))}</td></tr>`).join('') || '<tr><td class="muted">None yet</td></tr>'}
       </tbody></table></div>`,
   });
 }
 
 function orgEdit(o) {
-  const planOpts = cache.plans.map((p) => `<option value="${esc(p.id)}" ${o.plan_id === p.id ? 'selected' : ''}>${esc(p.name)} — ${fmt.money(p.price_vnd)}/tháng</option>`).join('');
+  const planOpts = cache.plans.map((p) => `<option value="${esc(p.id)}" ${o.plan_id === p.id ? 'selected' : ''}>${esc(p.name)} — ${fmt.money(p.price_usd)}/month</option>`).join('');
   modal({
-    title: `Sửa tổ chức: ${o.name}`, wide: true,
+    title: `Edit organization: ${o.name}`, wide: true,
     body: `
       <div class="form-grid">
-        <div class="field"><label>Tên doanh nghiệp</label><input type="text" id="e_name" value="${esc(o.name)}" /></div>
-        <div class="field"><label>Email liên hệ</label><input type="text" id="e_mail" value="${esc(o.contact_email || '')}" /></div>
-        <div class="field"><label>Gói cước</label><select id="e_plan">${planOpts}</select></div>
-        <div class="field"><label>Trạng thái</label><select id="e_status">
-          <option value="active" ${o.status === 'active' ? 'selected' : ''}>Hoạt động</option>
-          <option value="suspended" ${o.status === 'suspended' ? 'selected' : ''}>Tạm khoá</option></select></div>
-        <div class="field"><label>Tình trạng thanh toán</label><select id="e_billing">
-          <option value="trial" ${o.billing_status === 'trial' ? 'selected' : ''}>Dùng thử</option>
-          <option value="paid" ${o.billing_status === 'paid' ? 'selected' : ''}>Đã thanh toán</option>
-          <option value="overdue" ${o.billing_status === 'overdue' ? 'selected' : ''}>Quá hạn</option></select></div>
-        <div class="field"><label>Hạn dùng đến</label><input type="date" id="e_exp" value="${o.plan_expires_at ? new Date(o.plan_expires_at).toISOString().slice(0, 10) : ''}" /></div>
+        <div class="field"><label>Company name</label><input type="text" id="e_name" value="${esc(o.name)}" /></div>
+        <div class="field"><label>Contact email</label><input type="text" id="e_mail" value="${esc(o.contact_email || '')}" /></div>
+        <div class="field"><label>Plan</label><select id="e_plan">${planOpts}</select></div>
+        <div class="field"><label>Status</label><select id="e_status">
+          <option value="active" ${o.status === 'active' ? 'selected' : ''}>Active</option>
+          <option value="suspended" ${o.status === 'suspended' ? 'selected' : ''}>Suspended</option></select></div>
+        <div class="field"><label>Billing status</label><select id="e_billing">
+          <option value="trial" ${o.billing_status === 'trial' ? 'selected' : ''}>Trial</option>
+          <option value="paid" ${o.billing_status === 'paid' ? 'selected' : ''}>Paid</option>
+          <option value="overdue" ${o.billing_status === 'overdue' ? 'selected' : ''}>Overdue</option></select></div>
+        <div class="field"><label>Valid until</label><input type="date" id="e_exp" value="${o.plan_expires_at ? new Date(o.plan_expires_at).toISOString().slice(0, 10) : ''}" /></div>
       </div>
-      <div class="field"><label>Ghi chú nội bộ</label><textarea id="e_note">${esc(o.note || '')}</textarea></div>`,
+      <div class="field"><label>Internal note</label><textarea id="e_note">${esc(o.note || '')}</textarea></div>`,
     onOk: async (box) => {
       await api(`/admin/organizations/${o.id}`, { method: 'PATCH', body: {
         name: box.querySelector('#e_name').value.trim(),
@@ -229,17 +226,17 @@ function orgEdit(o) {
         plan_expires_at: box.querySelector('#e_exp').value || null,
         note: box.querySelector('#e_note').value.trim(),
       }});
-      toast('Đã cập nhật tổ chức', 'ok'); loadOrgs();
+      toast('Organization updated', 'ok'); loadOrgs();
     },
   });
 }
 
-/* =================== GÓI CƯỚC =================== */
+/* =================== PLANS =================== */
 async function viewPlans() {
   const el = document.getElementById('view-plans');
   el.innerHTML = `
-    <div class="toolbar"><span class="spacer"></span><button class="btn primary" id="addPlan">${icon.plus} Thêm gói</button></div>
-    <div class="card"><div class="card-body flush" id="planTable">Đang tải…</div></div>`;
+    <div class="toolbar"><span class="spacer"></span><button class="btn primary" id="addPlan">${icon.plus} New plan</button></div>
+    <div class="card"><div class="card-body flush" id="planTable">Loading…</div></div>`;
   document.getElementById('addPlan').onclick = () => planModal();
   await loadPlans();
 }
@@ -247,20 +244,20 @@ async function viewPlans() {
 async function loadPlans() {
   cache.plans = await api('/admin/plans');
   document.getElementById('planTable').innerHTML = `<div class="table-wrap"><table class="tbl">
-    <thead><tr><th>Gói</th><th class="num">Giá VNĐ</th><th class="num">Giá USD</th><th class="num">Tài liệu</th><th class="num">Thành viên</th><th class="num">Dung lượng</th><th class="num">Lượt hỏi/tháng</th><th class="num">Trang OCR/tháng</th><th>OCR</th><th class="num">Đang dùng</th><th>Trạng thái</th><th></th></tr></thead>
+    <thead><tr><th>Plan</th><th class="num">Price/month</th><th class="num">Documents</th><th class="num">Members</th><th class="num">Storage</th><th class="num">Questions/month</th><th class="num">OCR pages/month</th><th>OCR</th><th class="num">In use</th><th>Status</th><th></th></tr></thead>
     <tbody>${cache.plans.map((p) => `
       <tr>
         <td><div class="cell-main">${esc(p.name)}</div><div class="cell-sub mono">${esc(p.code)}</div></td>
-        <td class="num">${esc(fmt.money(p.price_vnd))}</td>
+        <td class="num">${esc(fmt.money(p.price_usd))}</td>
         <td class="num">${p.price_usd ? '$' + Number(p.price_usd).toFixed(0) : '—'}</td>
         <td class="num">${fmt.num(p.max_documents)}</td>
         <td class="num">${fmt.num(p.max_members)}</td>
         <td class="num">${fmt.num(p.max_storage_mb)} MB</td>
         <td class="num">${fmt.num(p.max_questions_per_month)}</td>
         <td class="num">${fmt.num(p.max_ocr_pages_per_month || 0)}</td>
-        <td>${p.ocr_enabled === false ? '<span class="badge">Tắt</span>' : '<span class="badge ok">Bật</span>'}</td>
+        <td>${p.ocr_enabled === false ? '<span class="badge">Off</span>' : '<span class="badge ok">On</span>'}</td>
         <td class="num">${fmt.num(p.organization_count)}</td>
-        <td>${p.is_active ? '<span class="badge ok">Đang bán</span>' : '<span class="badge">Ngừng bán</span>'}</td>
+        <td>${p.is_active ? '<span class="badge ok">On sale</span>' : '<span class="badge">Retired</span>'}</td>
         <td class="nowrap" style="width:1%">
           <button class="icon-btn" data-edit="${esc(p.id)}">${icon.edit}</button>
           <button class="icon-btn" data-rm="${esc(p.id)}">${icon.trash}</button>
@@ -271,8 +268,8 @@ async function loadPlans() {
   document.querySelectorAll('#planTable [data-rm]').forEach((b) => {
     b.onclick = async () => {
       const p = cache.plans.find((x) => x.id === b.dataset.rm);
-      if (!(await confirmDialog('Xoá gói cước', `Xoá gói "${p.name}"?`))) return;
-      try { await api(`/admin/plans/${p.id}`, { method: 'DELETE' }); toast('Đã xoá gói', 'ok'); loadPlans(); }
+      if (!(await confirmDialog('Delete plan', `Delete the "${p.name}" plan?`))) return;
+      try { await api(`/admin/plans/${p.id}`, { method: 'DELETE' }); toast('Plan deleted', 'ok'); loadPlans(); }
       catch (err) { toast(err.message, 'err'); }
     };
   });
@@ -281,58 +278,55 @@ async function loadPlans() {
 function planModal(p) {
   const f = (id, label, value, type = 'text') => `<div class="field"><label>${esc(label)}</label><input type="${type}" id="${id}" value="${esc(value ?? '')}" /></div>`;
   modal({
-    title: p ? `Sửa gói: ${p.name}` : 'Thêm gói cước', wide: true,
+    title: p ? `Edit plan: ${p.name}` : 'New plan', wide: true,
     body: `
       <div class="form-grid">
-        ${f('p_code', 'Mã gói (không dấu)', p?.code)}
-        ${f('p_name', 'Tên hiển thị (tiếng Việt)', p?.name)}
-        ${f('p_name_en', 'Tên hiển thị (tiếng Anh)', p?.name_en)}
-        ${f('p_trial', 'Số ngày dùng thử (0 = gói trả phí)', p?.trial_days ?? 0, 'number')}
-        ${f('p_price', 'Giá mỗi tháng (đ) — khách VN', p?.price_vnd ?? 0, 'number')}
-        ${f('p_usd', 'Giá mỗi tháng (USD) — khách ngoài VN', p?.price_usd ?? 0, 'number')}
-        ${f('p_sort', 'Thứ tự hiển thị', p?.sort_order ?? 0, 'number')}
-        ${f('p_docs', 'Số tài liệu tối đa', p?.max_documents ?? 20, 'number')}
-        ${f('p_members', 'Số thành viên tối đa', p?.max_members ?? 5, 'number')}
-        ${f('p_storage', 'Dung lượng tối đa (MB)', p?.max_storage_mb ?? 100, 'number')}
-        ${f('p_questions', 'Lượt hỏi mỗi tháng', p?.max_questions_per_month ?? 500, 'number')}
-        ${f('p_ocr', 'Trang nhận dạng OCR mỗi tháng', p?.max_ocr_pages_per_month ?? 50, 'number')}
+        ${f('p_code', 'Plan code (lowercase, no spaces)', p?.code)}
+        ${f('p_name', 'Display name', p?.name)}
+        ${f('p_trial', 'Trial days (0 = paid plan)', p?.trial_days ?? 0, 'number')}
+        ${f('p_usd', 'Price per month (USD)', p?.price_usd ?? 0, 'number')}
+        ${f('p_sort', 'Sort order', p?.sort_order ?? 0, 'number')}
+        ${f('p_docs', 'Max documents', p?.max_documents ?? 20, 'number')}
+        ${f('p_members', 'Max members', p?.max_members ?? 5, 'number')}
+        ${f('p_storage', 'Max storage (MB)', p?.max_storage_mb ?? 100, 'number')}
+        ${f('p_questions', 'Questions per month', p?.max_questions_per_month ?? 500, 'number')}
+        ${f('p_ocr', 'OCR pages per month', p?.max_ocr_pages_per_month ?? 50, 'number')}
       </div>
-      <div class="field"><label>Mô tả (tiếng Việt)</label><textarea id="p_desc">${esc(p?.description || '')}</textarea></div>
-      <div class="field"><label>Mô tả (tiếng Anh)</label><textarea id="p_desc_en">${esc(p?.description_en || '')}</textarea></div>
-      <label class="check"><input type="checkbox" id="p_active" ${p?.is_active !== false ? 'checked' : ''} /> Đang mở bán</label>
-      <label class="check"><input type="checkbox" id="p_ocr" ${p?.ocr_enabled !== false ? 'checked' : ''} /> Cho phép nhận dạng PDF scan (OCR)</label>`,
+      <div class="field"><label>Description</label><textarea id="p_desc">${esc(p?.description || '')}</textarea></div>
+      <label class="check"><input type="checkbox" id="p_active" ${p?.is_active !== false ? 'checked' : ''} /> On sale</label>
+      <label class="check"><input type="checkbox" id="p_ocr" ${p?.ocr_enabled !== false ? 'checked' : ''} /> Allow scanned-PDF OCR</label>`,
     onOk: async (box) => {
       const g = (id) => box.querySelector('#' + id).value;
       const body = {
-        code: g('p_code').trim(), name: g('p_name').trim(), name_en: g('p_name_en').trim(),
-        description: g('p_desc').trim(), description_en: g('p_desc_en').trim(),
+        code: g('p_code').trim(), name: g('p_name').trim(),
+        description: g('p_desc').trim(),
         trial_days: g('p_trial'),
-        price_vnd: g('p_price'), price_usd: g('p_usd'), sort_order: g('p_sort'),
+        price_usd: g('p_usd'), sort_order: g('p_sort'),
         max_documents: g('p_docs'), max_members: g('p_members'),
         max_storage_mb: g('p_storage'), max_questions_per_month: g('p_questions'),
         max_ocr_pages_per_month: g('p_ocr'),
         is_active: box.querySelector('#p_active').checked,
         ocr_enabled: box.querySelector('#p_ocr').checked,
       };
-      if (!body.code || !body.name) { toast('Thiếu mã hoặc tên gói', 'err'); return false; }
+      if (!body.code || !body.name) { toast('Plan code and name are required', 'err'); return false; }
       if (p) await api(`/admin/plans/${p.id}`, { method: 'PATCH', body });
       else await api('/admin/plans', { method: 'POST', body });
-      toast('Đã lưu gói cước', 'ok'); loadPlans();
+      toast('Plan saved', 'ok'); loadPlans();
     },
   });
 }
 
-/* =================== THANH TOÁN =================== */
+/* =================== PAYMENTS =================== */
 async function viewPayments() {
   const el = document.getElementById('view-payments');
   el.innerHTML = `
     <div class="toolbar">
-      <select id="pstatus" style="width:auto"><option value="">Mọi trạng thái</option>
-        <option value="paid">Đã thu</option><option value="pending">Chờ thu</option><option value="failed">Thất bại</option></select>
+      <select id="pstatus" style="width:auto"><option value="">Any status</option>
+        <option value="paid">Received</option><option value="pending">Pending</option><option value="failed">Failed</option></select>
       <span class="spacer"></span>
-      <button class="btn primary" id="addPay">${icon.plus} Ghi nhận thanh toán</button>
+      <button class="btn primary" id="addPay">${icon.plus} Record payment</button>
     </div>
-    <div class="card"><div class="card-body flush" id="payTable">Đang tải…</div></div>`;
+    <div class="card"><div class="card-body flush" id="payTable">Loading…</div></div>`;
   document.getElementById('pstatus').onchange = loadPayments;
   document.getElementById('addPay').onclick = paymentModal;
   if (!cache.plans.length) cache.plans = await api('/admin/plans');
@@ -344,26 +338,26 @@ async function loadPayments() {
   const st = document.getElementById('pstatus')?.value || '';
   const rows = await api(`/admin/payments?status=${st}`);
   const box = document.getElementById('payTable');
-  if (!rows.length) return (box.innerHTML = emptyState('Chưa có giao dịch nào', 'Bấm "Ghi nhận thanh toán" để tạo giao dịch đầu tiên.'));
+  if (!rows.length) return (box.innerHTML = emptyState('No transactions yet', 'Use "Record payment" to enter the first one.'));
 
   box.innerHTML = `<div class="table-wrap"><table class="tbl">
-    <thead><tr><th>Ngày</th><th>Doanh nghiệp</th><th>Gói</th><th>Kỳ dịch vụ</th><th class="num">Số tiền</th><th>Hình thức</th><th>Trạng thái</th><th></th></tr></thead>
+    <thead><tr><th>Date</th><th>Organization</th><th>Plan</th><th>Service period</th><th class="num">Amount</th><th>Method</th><th>Status</th><th></th></tr></thead>
     <tbody>${rows.map((p) => `
       <tr>
         <td class="small nowrap">${esc(fmt.date(p.created_at))}</td>
         <td class="cell-main">${esc(p.organization?.name || '—')}</td>
         <td class="small">${esc(p.plan?.name || '—')}</td>
         <td class="small nowrap">${esc(fmt.date(p.period_start))} → ${esc(fmt.date(p.period_end))}</td>
-        <td class="num">${esc(fmt.money(p.amount_vnd))}</td>
+        <td class="num">${esc(money(p.amount, p.currency || 'USD'))}</td>
         <td class="small">${esc(p.method || '—')}</td>
         <td>${badge(p.status, LABEL.payment)}</td>
-        <td style="width:1%">${p.status === 'pending' ? `<button class="btn sm" data-ok="${esc(p.id)}">Xác nhận đã thu</button>` : ''}</td>
+        <td style="width:1%">${p.status === 'pending' ? `<button class="btn sm" data-ok="${esc(p.id)}">Mark as received</button>` : ''}</td>
       </tr>`).join('')}</tbody></table></div>`;
 
   box.querySelectorAll('[data-ok]').forEach((b) => {
     b.onclick = async () => {
       await api(`/admin/payments/${b.dataset.ok}`, { method: 'PATCH', body: { status: 'paid' } });
-      toast('Đã xác nhận thanh toán', 'ok'); loadPayments();
+      toast('Payment confirmed', 'ok'); loadPayments();
     };
   });
 }
@@ -372,30 +366,30 @@ function paymentModal() {
   const today = new Date();
   const nextMonth = new Date(today); nextMonth.setMonth(today.getMonth() + 1);
   modal({
-    title: 'Ghi nhận thanh toán', wide: true, okText: 'Lưu giao dịch',
+    title: 'Record payment', wide: true, okText: 'Save transaction',
     body: `
       <div class="form-grid">
-        <div class="field"><label>Doanh nghiệp</label><select id="y_org">${cache.orgs.map((o) => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('')}</select></div>
-        <div class="field"><label>Gói cước</label><select id="y_plan">${cache.plans.map((p) => `<option value="${esc(p.id)}" data-price="${p.price_vnd}">${esc(p.name)} — ${fmt.money(p.price_vnd)}</option>`).join('')}</select></div>
-        <div class="field"><label>Số tiền (đ)</label><input type="number" id="y_amount" value="${cache.plans[0]?.price_vnd || 0}" /></div>
-        <div class="field"><label>Hình thức</label><select id="y_method">
-          <option value="bank_transfer">Chuyển khoản</option><option value="momo">Ví MoMo</option>
-          <option value="card">Thẻ</option><option value="manual">Ghi nhận thủ công</option></select></div>
-        <div class="field"><label>Từ ngày</label><input type="date" id="y_start" value="${today.toISOString().slice(0, 10)}" /></div>
-        <div class="field"><label>Đến ngày</label><input type="date" id="y_end" value="${nextMonth.toISOString().slice(0, 10)}" /></div>
-        <div class="field"><label>Trạng thái</label><select id="y_status"><option value="paid">Đã thu</option><option value="pending">Chờ thu</option></select></div>
-        <div class="field"><label>Mã tham chiếu</label><input type="text" id="y_ref" placeholder="Mã giao dịch ngân hàng" /></div>
+        <div class="field"><label>Organization</label><select id="y_org">${cache.orgs.map((o) => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>Plan</label><select id="y_plan">${cache.plans.map((p) => `<option value="${esc(p.id)}" data-price="${p.price_usd}">${esc(p.name)} — ${fmt.money(p.price_usd)}</option>`).join('')}</select></div>
+        <div class="field"><label>Amount (USD)</label><input type="number" step="0.01" id="y_amount" value="${cache.plans[0]?.price_usd || 0}" /></div>
+        <div class="field"><label>Method</label><select id="y_method">
+          <option value="paypal">PayPal</option><option value="card">Card</option>
+          <option value="bank_transfer">Bank transfer</option><option value="manual">Manual entry</option></select></div>
+        <div class="field"><label>From</label><input type="date" id="y_start" value="${today.toISOString().slice(0, 10)}" /></div>
+        <div class="field"><label>To</label><input type="date" id="y_end" value="${nextMonth.toISOString().slice(0, 10)}" /></div>
+        <div class="field"><label>Status</label><select id="y_status"><option value="paid">Received</option><option value="pending">Pending</option></select></div>
+        <div class="field"><label>Reference</label><input type="text" id="y_ref" placeholder="Gateway or bank transaction id" /></div>
       </div>
-      <div class="field"><label>Ghi chú</label><textarea id="y_note"></textarea></div>
-      <div class="alert info show">Khi trạng thái là "Đã thu", gói cước và hạn dùng của doanh nghiệp sẽ được cập nhật ngay.</div>`,
+      <div class="field"><label>Note</label><textarea id="y_note"></textarea></div>
+      <div class="alert info show">Setting the status to "Received" activates the plan and extends the expiry date immediately.</div>`,
     onOk: async (box) => {
       const g = (id) => box.querySelector('#' + id).value;
       await api('/admin/payments', { method: 'POST', body: {
-        organization_id: g('y_org'), plan_id: g('y_plan'), amount_vnd: g('y_amount'),
+        organization_id: g('y_org'), plan_id: g('y_plan'), amount: g('y_amount'),
         period_start: g('y_start'), period_end: g('y_end'), status: g('y_status'),
         method: g('y_method'), reference: g('y_ref').trim(), note: g('y_note').trim(),
       }});
-      toast('Đã ghi nhận thanh toán', 'ok'); loadPayments();
+      toast('Payment recorded', 'ok'); loadPayments();
     },
   }).el.querySelector('#y_plan').onchange = (e) => {
     const price = e.target.selectedOptions[0]?.dataset.price;
@@ -403,17 +397,17 @@ function paymentModal() {
   };
 }
 
-/* =================== NGƯỜI DÙNG =================== */
+/* =================== USERS =================== */
 async function viewUsers() {
   const el = document.getElementById('view-users');
   el.innerHTML = `
-    <div class="card"><div class="card-head"><h3>Quản trị hệ thống</h3>
-      <span class="sub">Những tài khoản thấy được toàn bộ dữ liệu của mọi doanh nghiệp</span>
-      <button class="btn primary" id="newAdmin">${icon.plus} Tạo tài khoản quản trị</button></div>
-      <div class="card-body flush" id="adminBox">Đang tải…</div></div>
+    <div class="card"><div class="card-head"><h3>System admin</h3>
+      <span class="sub">Accounts that can read every organization's data</span>
+      <button class="btn primary" id="newAdmin">${icon.plus} Create account an admin</button></div>
+      <div class="card-body flush" id="adminBox">Loading…</div></div>
 
-    <div class="toolbar"><div class="search-box">${icon.search}<input type="search" id="uq" placeholder="Tìm theo email…" /></div></div>
-    <div class="card"><div class="card-body flush" id="userTable">Đang tải…</div></div>`;
+    <div class="toolbar"><div class="search-box">${icon.search}<input type="search" id="uq" placeholder="Search by email…" /></div></div>
+    <div class="card"><div class="card-body flush" id="userTable">Loading…</div></div>`;
   document.getElementById('uq').oninput = debounce(loadUsers, 350);
   document.getElementById('newAdmin').onclick = newAdminModal;
   await Promise.all([loadUsers(), loadSystemAdmins()]);
@@ -423,20 +417,20 @@ async function loadUsers() {
   const q = document.getElementById('uq')?.value || '';
   const users = await api(`/admin/users?q=${encodeURIComponent(q)}`);
   const box = document.getElementById('userTable');
-  if (!users.length) return (box.innerHTML = emptyState('Không tìm thấy người dùng'));
+  if (!users.length) return (box.innerHTML = emptyState('No users found'));
 
   box.innerHTML = `<div class="table-wrap"><table class="tbl">
-    <thead><tr><th>Người dùng</th><th>Quyền hệ thống</th><th>Trạng thái</th><th>Đăng nhập gần nhất</th><th>Tạo lúc</th><th></th></tr></thead>
+    <thead><tr><th>User</th><th>System access</th><th>Status</th><th>Last sign-in</th><th>Created</th><th></th></tr></thead>
     <tbody>${users.map((u) => `
       <tr>
         <td><div class="cell-main">${esc(u.full_name || u.email.split('@')[0])}</div><div class="cell-sub">${esc(u.email)}</div></td>
-        <td>${u.is_system_admin ? '<span class="badge purple">Admin hệ thống</span>' : '<span class="badge">Người dùng</span>'}</td>
+        <td>${u.is_system_admin ? '<span class="badge purple">System admin</span>' : '<span class="badge">User</span>'}</td>
         <td>${badge(u.status, LABEL.status)}</td>
         <td class="small">${esc(fmt.ago(u.last_login_at))}</td>
         <td class="small nowrap">${esc(fmt.date(u.created_at))}</td>
         <td class="nowrap" style="width:1%">
-          <button class="btn sm" data-sa="${esc(u.id)}" data-on="${u.is_system_admin ? '1' : '0'}">${u.is_system_admin ? 'Gỡ quyền admin' : 'Cấp quyền admin'}</button>
-          <button class="btn sm" data-block="${esc(u.id)}" data-st="${esc(u.status)}">${u.status === 'disabled' ? 'Mở khoá' : 'Khoá'}</button>
+          <button class="btn sm" data-sa="${esc(u.id)}" data-on="${u.is_system_admin ? '1' : '0'}">${u.is_system_admin ? 'Revoke admin' : 'Grant admin'}</button>
+          <button class="btn sm" data-block="${esc(u.id)}" data-st="${esc(u.status)}">${u.status === 'disabled' ? 'Unblock' : 'Block'}</button>
         </td>
       </tr>`).join('')}</tbody></table></div>`;
 
@@ -444,14 +438,14 @@ async function loadUsers() {
     b.onclick = async () => {
       try {
         await api(`/admin/users/${b.dataset.sa}`, { method: 'PATCH', body: { is_system_admin: b.dataset.on !== '1' } });
-        toast('Đã cập nhật quyền', 'ok'); loadUsers(); loadSystemAdmins();
+        toast('Access updated', 'ok'); loadUsers(); loadSystemAdmins();
       } catch (err) { toast(err.message, 'err'); }
     };
   });
   box.querySelectorAll('[data-block]').forEach((b) => {
     b.onclick = async () => {
       await api(`/admin/users/${b.dataset.block}`, { method: 'PATCH', body: { status: b.dataset.st === 'disabled' ? 'active' : 'disabled' } });
-      toast('Đã cập nhật trạng thái', 'ok'); loadUsers(); loadSystemAdmins();
+      toast('Status updated', 'ok'); loadUsers(); loadSystemAdmins();
     };
   });
 }
@@ -465,7 +459,7 @@ async function loadSystemAdmins() {
     <tr>
       <td><div class="cell-main">${esc(a.full_name || a.email.split('@')[0])}</div>
           <div class="cell-sub">${esc(a.email)}</div></td>
-      <td>${a.from_env ? '<span class="badge purple">Từ biến môi trường</span>' : '<span class="badge info">Cấp trong hệ thống</span>'}</td>
+      <td>${a.from_env ? '<span class="badge purple">From environment</span>' : '<span class="badge info">Granted in app</span>'}</td>
       <td>${badge(a.status, LABEL.status)}</td>
       <td class="small">${esc(fmt.ago(a.last_login_at))}</td>
     </tr>`).join('');
@@ -473,57 +467,57 @@ async function loadSystemAdmins() {
   const pending = d.env_pending.map((e) => `
     <tr>
       <td><div class="cell-main">${esc(e)}</div>
-          <div class="cell-sub">Đã khai báo trong SYSTEM_ADMIN_EMAILS nhưng chưa đăng ký tài khoản</div></td>
-      <td><span class="badge purple">Từ biến môi trường</span></td>
-      <td><span class="badge warn">Chờ đăng ký</span></td>
+          <div class="cell-sub">Listed in SYSTEM_ADMIN_EMAILS but has not registered yet</div></td>
+      <td><span class="badge purple">From environment</span></td>
+      <td><span class="badge warn">Awaiting sign-up</span></td>
       <td class="small">—</td>
     </tr>`).join('');
 
   box.innerHTML = `<div class="table-wrap"><table class="tbl">
-    <thead><tr><th>Tài khoản</th><th>Nguồn quyền</th><th>Trạng thái</th><th>Đăng nhập gần nhất</th></tr></thead>
+    <thead><tr><th>Account</th><th>Granted by</th><th>Status</th><th>Last sign-in</th></tr></thead>
     <tbody>${rows}${pending}</tbody></table></div>
     ${d.env_emails.length
-      ? `<div class="card-body" style="padding-top:0"><p class="small muted mb-0">SYSTEM_ADMIN_EMAILS đang khai báo: <span class="mono">${esc(d.env_emails.join(', '))}</span>. Những email này luôn có quyền, gỡ trong giao diện không có tác dụng.</p></div>`
-      : `<div class="card-body" style="padding-top:0"><p class="small muted mb-0">Chưa khai báo SYSTEM_ADMIN_EMAILS. Nên đặt biến này trên máy chủ để còn đường lấy lại quyền nếu mất tài khoản quản trị.</p></div>`}`;
+      ? `<div class="card-body" style="padding-top:0"><p class="small muted mb-0">SYSTEM_ADMIN_EMAILS currently lists <span class="mono">${esc(d.env_emails.join(', '))}</span>. These addresses always keep access — revoking them here has no effect until they are removed from the environment variable.</p></div>`
+      : `<div class="card-body" style="padding-top:0"><p class="small muted mb-0">SYSTEM_ADMIN_EMAILS is not set. Set it on the server so there is a way back in if every admin account is lost.</p></div>`}`;
 }
 
 function newAdminModal() {
   modal({
-    title: 'Tạo tài khoản quản trị hệ thống',
-    okText: 'Tạo tài khoản',
+    title: 'Create system administrator',
+    okText: 'Create account',
     body: `
-      <div class="alert info show">Tài khoản quản trị hệ thống <b>đọc được tài liệu và lịch sử hỏi đáp của MỌI doanh nghiệp</b>. Chỉ cấp cho người thực sự cần.</div>
-      <div class="field"><label>Email</label><input type="email" id="na_email" placeholder="admin@congty.vn" /></div>
-      <div class="field"><label>Họ và tên</label><input type="text" id="na_name" /></div>
-      <div class="field"><label>Mật khẩu</label><input type="password" id="na_pw" placeholder="Ít nhất 8 ký tự" />
-        <div class="hint">Đặt mật khẩu mạnh và gửi cho người dùng qua kênh an toàn. Họ nên đổi lại sau lần đăng nhập đầu.</div></div>`,
+      <div class="alert info show">A system administrator <b>can read the documents and chat history of every organization</b>. Grant this only to people who genuinely need it.</div>
+      <div class="field"><label>Email</label><input type="email" id="na_email" placeholder="admin@company.com" /></div>
+      <div class="field"><label>Full name</label><input type="text" id="na_name" /></div>
+      <div class="field"><label>Password</label><input type="password" id="na_pw" placeholder="At least 8 characters" />
+        <div class="hint">Use a strong password and share it over a secure channel. Ask them to change it after their first sign-in.</div></div>`,
     onOk: async (box) => {
       const email = box.querySelector('#na_email').value.trim();
       const pw = box.querySelector('#na_pw').value;
-      if (!email) { toast('Chưa nhập email', 'err'); return false; }
-      if (pw.length < 8) { toast('Mật khẩu phải có ít nhất 8 ký tự', 'err'); return false; }
+      if (!email) { toast('Please enter an email', 'err'); return false; }
+      if (pw.length < 8) { toast('Password must be at least 8 characters', 'err'); return false; }
 
       await api('/admin/users', { method: 'POST', body: {
         email, password: pw, full_name: box.querySelector('#na_name').value.trim(),
       }});
-      toast('Đã tạo tài khoản quản trị hệ thống', 'ok');
+      toast('System administrator created', 'ok');
       loadSystemAdmins(); loadUsers();
     },
   });
 }
 
-/* =================== NHẬT KÝ =================== */
+/* =================== ACTIVITY LOG =================== */
 async function viewLogs() {
   const el = document.getElementById('view-logs');
   el.innerHTML = `
     <div class="toolbar">
-      <select id="llevel" style="width:auto"><option value="">Mọi mức độ</option><option value="info">Thông tin</option><option value="warn">Cảnh báo</option><option value="error">Lỗi</option></select>
-      <select id="lscope" style="width:auto"><option value="">Mọi nhóm</option><option value="auth">Tài khoản</option><option value="upload">Tài liệu</option><option value="chat">Hỏi đáp</option><option value="billing">Thanh toán</option><option value="system">Hệ thống</option></select>
+      <select id="llevel" style="width:auto"><option value="">Any level</option><option value="info">Info</option><option value="warn">Warning</option><option value="error">Error</option></select>
+      <select id="lscope" style="width:auto"><option value="">Any area</option><option value="auth">Account</option><option value="upload">Documents</option><option value="chat">Chat</option><option value="billing">Payments</option><option value="system">System</option></select>
       <span class="spacer"></span>
-      <button class="btn" id="reloadLogs">${icon.refresh} Làm mới</button>
+      <button class="btn" id="reloadLogs">${icon.refresh} Refresh</button>
     </div>
-    <div class="card"><div class="card-head"><h3>Tài liệu xử lý lỗi</h3></div><div class="card-body flush" id="failedBox">Đang tải…</div></div>
-    <div class="card"><div class="card-body flush" id="logBox">Đang tải…</div><div class="pager" id="logPager"></div></div>`;
+    <div class="card"><div class="card-head"><h3>Documents that failed to process</h3></div><div class="card-body flush" id="failedBox">Loading…</div></div>
+    <div class="card"><div class="card-body flush" id="logBox">Loading…</div><div class="pager" id="logPager"></div></div>`;
   document.getElementById('llevel').onchange = () => { state.logPage = 1; loadLogs(); };
   document.getElementById('lscope').onchange = () => { state.logPage = 1; loadLogs(); };
   document.getElementById('reloadLogs').onclick = () => { loadLogs(); loadFailed(); };
@@ -533,13 +527,13 @@ async function viewLogs() {
 async function loadFailed() {
   const rows = await api('/admin/failed-documents');
   const box = document.getElementById('failedBox');
-  if (!rows.length) return (box.innerHTML = `<div class="card-body"><span class="badge ok">${icon.check} Không có tài liệu nào bị lỗi</span></div>`);
+  if (!rows.length) return (box.innerHTML = `<div class="card-body"><span class="badge ok">${icon.check} No documents have failed</span></div>`);
   box.innerHTML = `<div class="table-wrap"><table class="tbl">
-    <thead><tr><th>Tài liệu</th><th>Doanh nghiệp</th><th>Nguyên nhân</th><th>Lúc</th></tr></thead>
+    <thead><tr><th>Document</th><th>Organization</th><th>Reason</th><th>When</th></tr></thead>
     <tbody>${rows.map((r) => `<tr>
       <td class="cell-main">${esc(r.filename)}</td>
       <td class="small">${esc(r.organization?.name || '—')}</td>
-      <td class="small" style="color:var(--danger)">${esc(r.error_message || 'Không rõ')}</td>
+      <td class="small" style="color:var(--danger)">${esc(r.error_message || 'Unknown')}</td>
       <td class="small nowrap">${esc(fmt.dateTime(r.created_at))}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
@@ -549,14 +543,14 @@ async function loadLogs() {
   const res = await api(`/admin/logs?page=${state.logPage}&size=50&level=${level}&scope=${scope}`);
   const box = document.getElementById('logBox');
 
-  if (!res.items.length) { box.innerHTML = emptyState('Chưa có nhật ký'); document.getElementById('logPager').innerHTML = ''; return; }
+  if (!res.items.length) { box.innerHTML = emptyState('Nothing logged yet'); document.getElementById('logPager').innerHTML = ''; return; }
 
   box.innerHTML = `<div class="table-wrap"><table class="tbl">
-    <thead><tr><th>Thời điểm</th><th>Mức độ</th><th>Nhóm</th><th>Nội dung</th><th>Doanh nghiệp</th></tr></thead>
+    <thead><tr><th>Time</th><th>Level</th><th>Area</th><th>Message</th><th>Organization</th></tr></thead>
     <tbody>${res.items.map((l) => `
       <tr>
         <td class="small nowrap">${esc(fmt.dateTime(l.created_at))}</td>
-        <td>${badge(l.level === 'error' ? 'err' : l.level === 'warn' ? 'warn' : 'info', { err: 'Lỗi', warn: 'Cảnh báo', info: 'Thông tin' })}</td>
+        <td>${badge(l.level === 'error' ? 'err' : l.level === 'warn' ? 'warn' : 'info', { err: 'Failed', warn: 'Warning', info: 'Info' })}</td>
         <td class="small">${esc(LABEL.scope[l.scope] || l.scope)}</td>
         <td>${esc(l.message)}${l.detail ? `<div class="cell-sub mono truncate" style="max-width:420px">${esc(JSON.stringify(l.detail))}</div>` : ''}</td>
         <td class="small">${esc(l.organization?.name || '—')}</td>
@@ -564,35 +558,35 @@ async function loadLogs() {
 
   const pages = Math.ceil(res.total / res.size);
   document.getElementById('logPager').innerHTML = `
-    <span>${fmt.num(res.total)} dòng · trang ${res.page}/${pages || 1}</span>
-    <button class="btn sm" id="lprev" ${res.page <= 1 ? 'disabled' : ''}>Trước</button>
-    <button class="btn sm" id="lnext" ${res.page >= pages ? 'disabled' : ''}>Sau</button>`;
+    <span>${fmt.num(res.total)} entries · page ${res.page}/${pages || 1}</span>
+    <button class="btn sm" id="lprev" ${res.page <= 1 ? 'disabled' : ''}>Previous</button>
+    <button class="btn sm" id="lnext" ${res.page >= pages ? 'disabled' : ''}>Next</button>`;
   const prev = document.getElementById('lprev'), next = document.getElementById('lnext');
   if (prev) prev.onclick = () => { state.logPage--; loadLogs(); };
   if (next) next.onclick = () => { state.logPage++; loadLogs(); };
 }
 
-/* =================== SỨC KHOẺ HỆ THỐNG =================== */
+/* =================== SYSTEM HEALTH =================== */
 async function viewHealth() {
   const el = document.getElementById('view-health');
   el.innerHTML = `
     <div class="card">
-      <div class="card-head"><h2>Kiểm tra dịch vụ phụ thuộc</h2>
-        <span class="sub">Gọi thử tới từng dịch vụ. Lần kiểm tra có phát sinh chi phí rất nhỏ ở Voyage và DeepSeek.</span>
-        <button class="btn primary" id="runHealth">${icon.pulse} Chạy kiểm tra</button></div>
+      <div class="card-head"><h2>Upstream service checks</h2>
+        <span class="sub">Makes one real call to each service. Voyage and DeepSeek charge a tiny amount per run.</span>
+        <button class="btn primary" id="runHealth">${icon.pulse} Run checks</button></div>
       <div class="card-body" id="healthBox">
-        <p class="muted mb-0">Bấm "Chạy kiểm tra" để xem trạng thái kết nối tới Supabase, Cloudflare R2, Voyage AI và DeepSeek.</p>
+        <p class="muted mb-0">Run the checks to see connectivity to Supabase, Cloudflare R2, Voyage AI, DeepSeek, Gemini and the payment gateway.</p>
       </div>
     </div>
 
     <div class="card">
-      <div class="card-head"><h2>Bảo trì dữ liệu</h2>
-        <span class="sub">Sửa tên tài liệu cũ bị lỗi font (mojibake) hoặc còn ở dạng tổ hợp dấu rời NFD.</span>
+      <div class="card-head"><h2>Data maintenance</h2>
+        <span class="sub">Repair older document names stored as mojibake or in NFD (decomposed) form.</span>
       </div>
       <div class="card-body">
         <div class="btn-row">
-          <button class="btn" id="fixDry">Xem trước danh sách</button>
-          <button class="btn primary" id="fixRun">Sửa tên tài liệu</button>
+          <button class="btn" id="fixDry">Preview changes</button>
+          <button class="btn primary" id="fixRun">Repair names</button>
         </div>
         <div id="fixBox" class="mt-2"></div>
       </div>
@@ -605,19 +599,19 @@ async function viewHealth() {
     try {
       const d = await api(`/admin/maintenance/fix-filenames${dry ? '?dry_run=1' : ''}`, { method: 'POST' });
       if (!d.changed) {
-        box.innerHTML = `<span class="badge ok">${icon.check} Đã quét ${fmt.num(d.scanned)} tài liệu, không có tên nào cần sửa</span>`;
+        box.innerHTML = `<span class="badge ok">${icon.check} Scanned ${fmt.num(d.scanned)} documents — no names need repair</span>`;
       } else {
         box.innerHTML = `
           <div class="alert ${dry ? 'info' : 'success'} show">${dry
-            ? `Tìm thấy ${fmt.num(d.changed)}/${fmt.num(d.scanned)} tài liệu cần sửa. Bấm "Sửa tên tài liệu" để áp dụng.`
-            : `Đã sửa ${fmt.num(d.changed)}/${fmt.num(d.scanned)} tài liệu.`}</div>
+            ? `${fmt.num(d.changed)} of ${fmt.num(d.scanned)} documents need repair. Use "Repair names" to apply.`
+            : `Repaired ${fmt.num(d.changed)} of ${fmt.num(d.scanned)} documents.`}</div>
           <div class="table-wrap"><table class="tbl">
-            <thead><tr><th>Tên hiện tại</th><th>Tên sau khi sửa</th></tr></thead>
+            <thead><tr><th>Current name</th><th>After repair</th></tr></thead>
             <tbody>${d.changes.map((c) => `<tr>
               <td class="small" style="color:var(--danger)">${esc(c.from)}</td>
               <td class="small">${esc(c.to)}</td></tr>`).join('')}</tbody></table></div>`;
       }
-      if (!dry) toast('Đã cập nhật tên tài liệu', 'ok');
+      if (!dry) toast('Document names updated', 'ok');
     } catch (err) { box.innerHTML = `<div class="alert error show">${esc(err.message)}</div>`; }
     finally { btn.disabled = false; }
   };
@@ -626,30 +620,30 @@ async function viewHealth() {
   document.getElementById('runHealth').onclick = async (e) => {
     e.target.disabled = true;
     const box = document.getElementById('healthBox');
-    box.innerHTML = '<div class="loading-line"></div><p class="muted mt-2">Đang kiểm tra…</p>';
+    box.innerHTML = '<div class="loading-line"></div><p class="muted mt-2">Running checks…</p>';
     try {
       const d = await api('/admin/health');
       box.innerHTML = `
         <div class="table-wrap"><table class="tbl">
-          <thead><tr><th>Dịch vụ</th><th>Trạng thái</th><th class="num">Thời gian phản hồi</th><th>Chi tiết</th></tr></thead>
+          <thead><tr><th>Service</th><th>Status</th><th class="num">Response time</th><th>Detail</th></tr></thead>
           <tbody>${d.checks.map((c) => `<tr>
-            <td class="cell-main">${esc(c.name)}${c.optional ? ' <span class="badge tiny">tuỳ chọn</span>' : ''}</td>
-            <td>${c.ok && c.warning ? '<span class="badge warn">Cần xem lại</span>' : c.ok ? '<span class="badge ok">Bình thường</span>' : c.optional ? '<span class="badge warn">Chưa bật</span>' : '<span class="badge err">Lỗi</span>'}</td>
+            <td class="cell-main">${esc(c.name)}${c.optional ? ' <span class="badge tiny">optional</span>' : ''}</td>
+            <td>${c.ok && c.warning ? '<span class="badge warn">Needs attention</span>' : c.ok ? '<span class="badge ok">Healthy</span>' : c.optional ? '<span class="badge warn">Not configured</span>' : '<span class="badge err">Failed</span>'}</td>
             <td class="num small">${c.ms} ms</td>
             <td class="small ${c.ok && !c.warning ? 'muted' : ''}" style="${c.ok || c.optional ? (c.warning ? 'color:var(--warn,#b26b00)' : '') : 'color:var(--danger)'}">${esc(c.detail)}</td>
           </tr>`).join('')}</tbody></table></div>
         ${d.queue ? `<div class="mt-2 row wrap" style="gap:14px">
-          <span class="badge ${d.queue.running ? 'warn' : 'ok'}">Hàng đợi xử lý: ${d.queue.running} đang chạy</span>
-          <span class="badge">${d.queue.waiting} đang chờ / tối đa ${d.queue.max_queue}</span>
-          <span class="badge">Chạy đồng thời: ${d.queue.concurrency}</span>
+          <span class="badge ${d.queue.running ? 'warn' : 'ok'}">Processing queue: ${d.queue.running} running</span>
+          <span class="badge">${d.queue.waiting} waiting / ${d.queue.max_queue} max</span>
+          <span class="badge">Concurrency: ${d.queue.concurrency}</span>
         </div>` : ''}
-        <p class="small muted mt-2 mb-0">Kiểm tra lúc ${esc(fmt.dateTime(d.checked_at))}</p>`;
+        <p class="small muted mt-2 mb-0">Checked at ${esc(fmt.dateTime(d.checked_at))}</p>`;
     } catch (err) { box.innerHTML = `<div class="alert error show">${esc(err.message)}</div>`; }
     finally { e.target.disabled = false; }
   };
 }
 
-/* =================== KHỞI CHẠY =================== */
+/* =================== BOOTSTRAP =================== */
 const VIEWS = { overview: viewOverview, orgs: viewOrgs, plans: viewPlans, payments: viewPayments, users: viewUsers, logs: viewLogs, health: viewHealth };
 
 shell();

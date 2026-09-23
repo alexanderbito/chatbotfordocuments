@@ -1,35 +1,44 @@
 import OpenAI from 'openai';
 import 'dotenv/config';
 
-// DeepSeek dùng API tương thích OpenAI, chỉ cần đổi baseURL + apiKey
+// DeepSeek exposes an OpenAI-compatible API; only baseURL and apiKey differ
 const deepseek = new OpenAI({
   apiKey: process.env.DEEPSEEK_API_KEY,
   baseURL: process.env.DEEPSEEK_BASE_URL,
 });
 
 /**
- * Sinh câu trả lời dựa trên các đoạn tài liệu liên quan (RAG).
- * contextChunks: mảng { content, filename } lấy từ semantic search.
+ * Answer a question from the retrieved document chunks (RAG).
+ * contextChunks: an array of { content, filename } from the semantic search.
  */
 export async function generateAnswer(question, contextChunks) {
   const contextText = contextChunks
-    .map((c, i) => `[Nguồn ${i + 1} - ${c.filename}]\n${c.content}`)
+    .map((c, i) => `[Source ${i + 1} - ${c.filename}]\n${c.content}`)
     .join('\n\n');
 
-  const systemPrompt = `Bạn là trợ lý trả lời câu hỏi dựa trên tài liệu nội bộ của doanh nghiệp.
-QUY TẮC BẮT BUỘC:
-- Chỉ trả lời dựa trên nội dung trong phần "Ngữ cảnh" bên dưới.
-- Nếu ngữ cảnh không đủ thông tin để trả lời, hãy nói rõ là không tìm thấy thông tin liên quan trong tài liệu, KHÔNG tự suy đoán hay bịa thông tin.
-- Khi trả lời, chỉ rõ câu trả lời lấy từ nguồn nào (ví dụ: "Theo [Nguồn 1]...").
-- Trả lời ngắn gọn, đúng trọng tâm, bằng tiếng Việt.`;
+  // Source documents are often written in another language than the product UI,
+  // so the reply language is pinned here rather than left to the model to guess.
+  const replyLanguage = process.env.BOT_REPLY_LANGUAGE || 'English';
+
+  const systemPrompt = `You answer questions using a company's internal documents.
+
+RULES:
+- Answer only from the "Context" section below.
+- If the context does not contain enough information, say plainly that you could
+  not find it in the documents. Never guess and never invent details.
+- Cite which source each fact came from, for example "According to [Source 1]...".
+- Be concise and stay on the question.
+- Always reply in ${replyLanguage}, even when the documents are written in
+  another language. Translate any passage you quote, but keep names, figures,
+  dates and identifiers exactly as they appear in the source.`;
 
   const res = await deepseek.chat.completions.create({
-    model: 'deepseek-chat', // model chat mặc định của DeepSeek (trỏ tới bản mới nhất)
+    model: 'deepseek-chat', // DeepSeek's default chat model, tracking their latest release
     messages: [
       { role: 'system', content: systemPrompt },
       {
         role: 'user',
-        content: `Ngữ cảnh:\n${contextText}\n\nCâu hỏi: ${question}`,
+        content: `Context:\n${contextText}\n\nQuestion: ${question}`,
       },
     ],
     temperature: 0.2,

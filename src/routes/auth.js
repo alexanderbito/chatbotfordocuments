@@ -9,23 +9,23 @@ const router = express.Router();
 
 /**
  * POST /auth/register
- * Hai kịch bản:
- *  - Có organization_name  -> tạo tài khoản + tổ chức mới, người đăng ký là ADMIN tổ chức
- *  - Có invite_token       -> tạo tài khoản và tham gia tổ chức đã mời với vai trò được gán sẵn
+ * Two scenarios:
+ *  - organization_name present -> create the account plus a new organization; the registrant becomes its ADMIN
+ *  - invite_token present      -> create the account and join the inviting organization with the role already assigned
  */
 router.post('/register', async (req, res) => {
   try {
     const { email, password, full_name, organization_name, invite_token } = req.body || {};
 
-    if (!email || !password) return res.status(400).json({ error: 'Thiếu email hoặc mật khẩu' });
-    if (password.length < 6) return res.status(400).json({ error: 'Mật khẩu phải có ít nhất 6 ký tự' });
+    if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
+    if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
 
-    // Email khai báo trong SYSTEM_ADMIN_EMAILS là tài khoản quản trị hệ thống:
-    // không thuộc doanh nghiệp nào nên không bắt nhập tên doanh nghiệp.
+    // An email listed in SYSTEM_ADMIN_EMAILS is a system administrator account: it does not
+    // belong to any company, so we do not require a company name.
     const isSysAdmin = isSystemAdminEmail(email);
 
     if (!isSysAdmin && !organization_name && !invite_token) {
-      return res.status(400).json({ error: 'Cần nhập tên doanh nghiệp hoặc mã lời mời' });
+      return res.status(400).json({ error: 'Enter a company name or an invite code' });
     }
 
     let invite = null;
@@ -35,14 +35,14 @@ router.post('/register', async (req, res) => {
         .select('*')
         .eq('invite_token', invite_token)
         .maybeSingle();
-      if (!data) return res.status(400).json({ error: 'Mã lời mời không hợp lệ hoặc đã được dùng' });
+      if (!data) return res.status(400).json({ error: 'This invite code is invalid or has already been used' });
       if (data.email.toLowerCase() !== email.toLowerCase()) {
-        return res.status(400).json({ error: `Lời mời này dành cho email ${data.email}` });
+        return res.status(400).json({ error: `This invite is for ${data.email}` });
       }
       invite = data;
     }
 
-    // 1. Tạo user trong Supabase Auth (xác nhận email luôn để dùng được ngay)
+    // 1. Create the user in Supabase Auth (confirm the email immediately so the account is usable right away)
     const { data: created, error: createErr } = await supabase.auth.admin.createUser({
       email,
       password,
@@ -51,14 +51,14 @@ router.post('/register', async (req, res) => {
     });
     if (createErr) {
       const msg = /already been registered|already exists/i.test(createErr.message)
-        ? 'Email này đã được đăng ký'
+        ? 'This email is already registered'
         : createErr.message;
       return res.status(400).json({ error: msg });
     }
 
     const userId = created.user.id;
 
-    // 2. Hồ sơ người dùng
+    // 2. User profile
     await supabase.from('app_users').upsert({
       id: userId,
       email,
@@ -66,16 +66,16 @@ router.post('/register', async (req, res) => {
       is_system_admin: isSysAdmin,
     });
 
-    // 3. Gắn vào tổ chức
+    // 3. Attach to an organization
     if (isSysAdmin && !invite) {
-      // Quản trị hệ thống đứng ngoài mọi tổ chức
-      await logEvent({ scope: 'auth', userId, message: `Tạo tài khoản quản trị hệ thống: ${email}` });
+      // System administrators sit outside every organization
+      await logEvent({ scope: 'auth', userId, message: `System administrator account created: ${email}` });
     } else if (invite) {
       await supabase
         .from('organization_members')
         .update({ user_id: userId, status: 'active', invite_token: null })
         .eq('id', invite.id);
-      await logEvent({ scope: 'auth', organizationId: invite.organization_id, userId, message: `Thành viên ${email} đã chấp nhận lời mời` });
+      await logEvent({ scope: 'auth', organizationId: invite.organization_id, userId, message: `Member ${email} accepted the invite` });
     } else {
       const { data: freePlan } = await supabase
         .from('plans')
@@ -83,7 +83,7 @@ router.post('/register', async (req, res) => {
         .eq('code', 'free')
         .maybeSingle();
 
-      // Đồng hồ dùng thử bắt đầu chạy ngay khi đăng ký
+      // The trial clock starts the moment the organization registers
       const trialDays = Number(freePlan?.trial_days || 0);
       const now = new Date();
       const expiresAt = trialDays > 0
@@ -116,16 +116,16 @@ router.post('/register', async (req, res) => {
 
       await supabase.from('folders').insert({
         organization_id: org.id,
-        name: 'Tài liệu chung',
+        name: 'General',
         created_by: userId,
       });
 
-      await logEvent({ scope: 'auth', organizationId: org.id, userId, message: `Doanh nghiệp mới đăng ký: ${organization_name} (dùng thử ${trialDays} ngày)` });
+      await logEvent({ scope: 'auth', organizationId: org.id, userId, message: `New company registered: ${organization_name} (${trialDays}-day trial)` });
     }
 
-    // 4. Đăng nhập luôn để trả token về cho frontend
+    // 4. Sign in right away so the frontend receives a token
     const { data: session, error: signErr } = await supabaseAuth.auth.signInWithPassword({ email, password });
-    if (signErr) return res.json({ message: 'Đăng ký thành công, vui lòng đăng nhập', requires_login: true });
+    if (signErr) return res.json({ message: 'Registration successful, please sign in', requires_login: true });
 
     res.json({ access_token: session.session.access_token, refresh_token: session.session.refresh_token });
   } catch (err) {
@@ -140,13 +140,13 @@ router.post('/register', async (req, res) => {
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
-    if (!email || !password) return res.status(400).json({ error: 'Thiếu email hoặc mật khẩu' });
+    if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
 
     const { data, error } = await supabaseAuth.auth.signInWithPassword({ email, password });
-    if (error) return res.status(401).json({ error: 'Email hoặc mật khẩu không đúng' });
+    if (error) return res.status(401).json({ error: 'Incorrect email or password' });
 
     const userId = data.user.id;
-    // Đảm bảo luôn có hồ sơ app_users (phòng trường hợp user tạo tay trên Supabase)
+    // Make sure an app_users profile always exists (in case the user was created by hand in Supabase)
     await supabase.from('app_users').upsert(
       { id: userId, email: data.user.email, last_login_at: new Date().toISOString() },
       { onConflict: 'id', ignoreDuplicates: false }
@@ -160,7 +160,7 @@ router.post('/login', async (req, res) => {
 });
 
 /**
- * GET /auth/me — thông tin tài khoản + danh sách tổ chức đang tham gia
+ * GET /auth/me — account details plus the organizations the user belongs to
  */
 router.get('/me', requireAuth, async (req, res) => {
   try {
@@ -197,17 +197,17 @@ router.post('/change-password', requireAuth, async (req, res) => {
   try {
     const { current_password, new_password } = req.body || {};
     if (!new_password || new_password.length < 6) {
-      return res.status(400).json({ error: 'Mật khẩu mới phải có ít nhất 6 ký tự' });
+      return res.status(400).json({ error: 'The new password must be at least 6 characters' });
     }
     const { error: checkErr } = await supabaseAuth.auth.signInWithPassword({
       email: req.user.email,
       password: current_password || '',
     });
-    if (checkErr) return res.status(400).json({ error: 'Mật khẩu hiện tại không đúng' });
+    if (checkErr) return res.status(400).json({ error: 'Your current password is incorrect' });
 
     const { error } = await supabase.auth.admin.updateUserById(req.user.id, { password: new_password });
     if (error) throw error;
-    res.json({ message: 'Đã đổi mật khẩu' });
+    res.json({ message: 'Password changed' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -233,7 +233,7 @@ router.patch('/profile', requireAuth, async (req, res) => {
 });
 
 /**
- * GET /auth/invite/:token — xem thông tin lời mời (không cần đăng nhập)
+ * GET /auth/invite/:token — look up an invite (no sign-in required)
  */
 router.get('/invite/:token', async (req, res) => {
   const { data } = await supabase
@@ -241,7 +241,7 @@ router.get('/invite/:token', async (req, res) => {
     .select('email, role, organization:organizations(name)')
     .eq('invite_token', req.params.token)
     .maybeSingle();
-  if (!data) return res.status(404).json({ error: 'Lời mời không tồn tại hoặc đã được sử dụng' });
+  if (!data) return res.status(404).json({ error: 'This invite does not exist or has already been used' });
   res.json({ email: data.email, role: data.role, organization_name: data.organization?.name });
 });
 

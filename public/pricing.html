@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Bảng giá — DocBot</title>
+<title>Pricing — DocBot</title>
 <link rel="stylesheet" href="/assets/app.css" />
 </head>
 <body>
@@ -11,16 +11,15 @@
   <div class="row between mb-2">
     <a href="/" class="brand" style="padding:0;text-decoration:none">
       <div class="brand-mark">D</div>
-      <div><div class="brand-name" style="color:var(--text)">DocBot</div><div class="brand-sub" style="color:var(--muted)">Chatbot tài liệu doanh nghiệp</div></div>
+      <div><div class="brand-name" style="color:var(--text)">DocBot</div><div class="brand-sub" style="color:var(--muted)">Chatbot for company documents</div></div>
     </a>
     <div class="btn-row" id="navBtns"></div>
   </div>
-  <div class="row" style="justify-content:flex-end;margin-bottom:8px" id="langBox"></div>
 
   <div class="pricing-head">
-    <h1 id="ttl">Chọn gói phù hợp với doanh nghiệp bạn</h1>
-    <p id="sub">Mọi gói đều dùng chung một hệ thống, khác nhau ở hạn mức. Đổi gói bất kỳ lúc nào.</p>
-    <p class="small muted mt-1" id="curNote"></p>
+    <h1 id="ttl">Pick the plan that fits your team</h1>
+    <p id="sub">Every plan runs the same system — they differ only in limits. Change plan any time.</p>
+    <p class="pricing-cta" id="curNote"></p>
   </div>
 
   <div id="plans" class="plan-grid"><div class="loading-line"></div></div>
@@ -29,28 +28,22 @@
 </div>
 
 <script type="module">
-import { api, Session, fmt, esc, icon, toast, modal,
-  t, currency, money, preferredProvider, langSwitcherHtml, bindLangSwitcher, observeAndTranslate } from '/assets/app.js';
+import {api, Session, fmt, esc, icon, toast, modal, t, money} from '/assets/app.js';
 
-document.getElementById('langBox').innerHTML = langSwitcherHtml().replace('lang-switch', 'lang-switch light');
-bindLangSwitcher();
-observeAndTranslate();
 
 let me = null;
 try { if (Session.token) me = await api('/auth/me'); } catch { me = null; }
 
 document.getElementById('navBtns').innerHTML = me
-  ? `<a class="btn" href="/admin.html">${esc(t('Bảng quản trị'))}</a>`
-  : `<a class="btn" href="/login.html">${esc(t('Đăng nhập'))}</a><a class="btn primary" href="/register.html">${esc(t('Dùng thử miễn phí'))}</a>`;
+  ? `<a class="btn" href="/admin.html">${esc(t('Admin console'))}</a>`
+  : `<a class="btn" href="/login.html">${esc(t('Sign in'))}</a><a class="btn primary" href="/register.html">${esc(t('Start free trial'))}</a>`;
 
-document.getElementById('ttl').textContent = t('Chọn gói phù hợp với doanh nghiệp bạn');
-document.getElementById('sub').textContent = t('Mọi gói đều dùng chung một hệ thống, khác nhau ở hạn mức. Đổi gói bất kỳ lúc nào.');
-document.getElementById('curNote').textContent = currency() === 'VND'
-  ? t('Giá hiển thị bằng VNĐ, thanh toán bằng chuyển khoản / VietQR. Đổi sang English để xem giá USD.')
-  : t('Prices shown in USD, paid by PayPal. Switch to Tiếng Việt for VND pricing and bank transfer.');
-document.getElementById('note').textContent = currency() === 'VND'
-  ? t('Giá chưa bao gồm VAT. Cần hoá đơn đỏ, vui lòng liên hệ trước khi thanh toán.')
-  : t('Billed monthly. Contact us for annual billing or custom limits.');
+document.getElementById('ttl').textContent = t('Pick the plan that fits your team');
+document.getElementById('sub').textContent = t('Every plan runs the same system — they differ only in limits. Change plan any time.');
+document.getElementById('curNote').textContent =
+  'Start your 3-day free trial — no card required. Upgrade anytime to keep your documents.';
+document.getElementById('note').textContent =
+  'All prices in USD, billed monthly. Contact us for annual billing or custom limits.';
 
 let data = null;
 
@@ -58,31 +51,31 @@ async function load() {
   const box = document.getElementById('plans');
   box.innerHTML = '<div class="loading-line"></div>';
   try {
-    data = await api(`/public/billing/plans?currency=${currency()}`);
+    data = await api('/public/billing/plans');
   } catch (err) { box.innerHTML = `<div class="alert error show">${esc(err.message)}</div>`; return; }
 
   box.innerHTML = data.plans.map((p, i) => {
     const featured = i === 1;
     const isTrial = Number(p.trial_days) > 0;
     const feats = [
-      `${fmt.num(p.max_documents)} ${t('tài liệu')}`,
-      `${fmt.num(p.max_members)} ${t('thành viên')}`,
-      `${fmt.num(p.max_questions_per_month)} ${t('lượt hỏi/tháng')}`,
+      `${fmt.num(p.max_documents)} ${t('documents')}`,
+      `${fmt.num(p.max_members)} ${t('members')}`,
+      `${fmt.num(p.max_questions_per_month)} ${t('questions/month')}`,
       p.ocr_enabled
-        ? `${fmt.num(p.max_ocr_pages_per_month)} ${t('trang nhận dạng PDF scan')}`
-        : t('Không có nhận dạng PDF scan'),
-      `${fmt.num(p.max_storage_mb)} MB ${t('dung lượng')}`,
+        ? `${fmt.num(p.max_ocr_pages_per_month)} ${t('scanned-PDF OCR pages')}`
+        : t('No scanned-PDF OCR'),
+      `${fmt.num(p.max_storage_mb)} MB ${t('storage')}`,
     ];
     return `
       <div class="plan-card ${featured ? 'featured' : ''}">
-        ${featured ? `<span class="tag">${esc(t('Phổ biến nhất'))}</span>` : ''}
+        ${featured ? `<span class="tag">${esc(t('Most popular'))}</span>` : ''}
         <h3>${esc(p.name)}</h3>
         <div class="blurb">${esc(p.description || '')}</div>
-        <div class="plan-price">${isTrial ? esc(t('Miễn phí')) : esc(money(p.price, data.currency))}${isTrial ? '' : `<small> ${esc(t('/tháng'))}</small>`}</div>
-        ${isTrial ? `<div class="small" style="color:var(--warn);font-weight:600">${esc(t('{n} ngày, sau đó tài liệu bị xoá', { n: p.trial_days }))}</div>` : ''}
+        <div class="plan-price">${isTrial ? esc(t('Free')) : esc(money(p.price))}${isTrial ? '' : `<small> ${esc(t('/month'))}</small>`}</div>
+        ${isTrial ? `<div class="small" style="color:var(--warn);font-weight:600">${esc(t('{n} days, then documents are deleted', { n: p.trial_days }))}</div>` : ''}
         <ul class="plan-feats">${feats.map((f, idx) => { const off = idx === 3 && !p.ocr_enabled; return `<li class="${off ? 'off' : ''}">${off ? icon.close : icon.check}<span>${esc(f)}</span></li>`; }).join('')}</ul>
         <button class="btn ${featured ? 'primary' : ''} block" data-plan="${esc(p.id)}" ${isTrial ? 'data-trial="1"' : ''}>
-          ${esc(isTrial ? t('Bắt đầu miễn phí') : t('Chọn gói này'))}
+          ${esc(isTrial ? t('Start free') : t('Choose plan'))}
         </button>
       </div>`;
   }).join('');
@@ -95,38 +88,35 @@ async function choose(planId, isTrial) {
   if (isTrial) { location.href = '/admin.html#billing'; return; }
 
   const orgs = me.organizations.filter((o) => o.role === 'admin');
-  if (!orgs.length) { toast(t('Chỉ quản trị viên doanh nghiệp mới đổi được gói'), 'err'); return; }
+  if (!orgs.length) { toast(t('Only company admins can change the plan'), 'err'); return; }
 
   const plan = data.plans.find((p) => p.id === planId);
   const providers = data.providers || [];
   if (!providers.length) {
-    toast(t('Máy chủ chưa bật cổng thanh toán nào. Liên hệ quản trị hệ thống.'), 'err');
+    toast(t('No payment gateway is enabled on the server. Contact the system administrator.'), 'err');
     return;
   }
 
-  // Ngôn ngữ quyết định cổng gợi ý: tiếng Việt -> VietQR, tiếng Anh -> PayPal
-  const wanted = preferredProvider();
-  const ordered = [...providers].sort((a, b) => Number(b.id === wanted) - Number(a.id === wanted));
 
   modal({
-    title: t('Thanh toán gói {name}', { name: plan.name }),
-    okText: t('Tiếp tục thanh toán'),
+    title: t('Pay for {name}', { name: plan.name }),
+    okText: t('Continue to payment'),
     body: `
-      ${orgs.length > 1 ? `<div class="field"><label>${esc(t('Doanh nghiệp'))}</label>
-        <select id="pOrg" data-no-i18n>${orgs.map((o) => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('')}</select></div>` : ''}
+      ${orgs.length > 1 ? `<div class="field"><label>${esc(t('Organization'))}</label>
+        <select id="pOrg">${orgs.map((o) => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('')}</select></div>` : ''}
       <div class="field">
-        <label>${esc(t('Phương thức thanh toán'))}</label>
-        ${ordered.map((p, i) => `
+        <label>${esc(t('Payment method'))}</label>
+        ${providers.map((p, i) => `
           <label class="pay-method ${i === 0 ? 'sel' : ''}">
-            <input type="radio" name="prov" value="${esc(p.id)}" ${i === 0 ? 'checked' : ''} />
-            <span class="who"><b>${esc(t(p.name))}</b><span>${esc(t(p.description))}</span></span>
+            <input type="radio" name="prov" value="${esc(p.id)}" ${i === 0 ? 'checked' : ''} ${providers.length === 1 ? 'hidden' : ''} />
+            <span class="who"><b>${esc(p.name)}</b><span>${esc(p.description)}</span></span>
           </label>`).join('')}
       </div>
       <div class="row between" style="padding-top:10px;border-top:1px solid var(--border)">
-        <b>${esc(t('Tổng thanh toán'))}</b>
-        <b style="font-size:18px">${esc(money(plan.price, data.currency))}</b>
+        <b>${esc(t('Total'))}</b>
+        <b style="font-size:18px">${esc(money(plan.price))}</b>
       </div>
-      <p class="small muted mt-1 mb-0">${esc(t('Gói có hiệu lực ngay sau khi hệ thống nhận được tiền.'))}</p>`,
+      <p class="small muted mt-1 mb-0">${esc(t('Your plan activates as soon as the payment arrives.'))}</p>`,
     onOk: async (box) => {
       const orgId = box.querySelector('#pOrg')?.value || orgs[0].id;
       const provider = box.querySelector('input[name="prov"]:checked').value;

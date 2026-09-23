@@ -8,13 +8,13 @@ import { queueStats } from '../queue.js';
 import { purgeExpiredTrials, purgeOrganizationData } from '../trials.js';
 import { systemAdminEmails, isSystemAdminEmail } from '../systemAdmins.js';
 import { isOcrEnabled, ocrModels } from '../ocr.js';
-import { payos, paypal } from '../payments/index.js';
+import { paypal } from '../payments/index.js';
 
 const router = express.Router();
 router.use(requireAuth, requireSystemAdmin);
 
 // =====================================================================
-// DASHBOARD & THỐNG KÊ TOÀN HỆ THỐNG
+// DASHBOARD & PLATFORM-WIDE STATISTICS
 // =====================================================================
 
 /** GET /admin/overview */
@@ -54,26 +54,28 @@ router.get('/overview', async (req, res) => {
 
     const storageBytes = (sizes.data || []).reduce((s, d) => s + (d.size_bytes || 0), 0);
 
-    // Doanh thu đã ghi nhận
-    const { data: paid } = await supabase.from('payments').select('amount_vnd, created_at').eq('status', 'paid');
+    // Recorded revenue. Only USD rows are summed: any legacy row settled in
+    // another currency would otherwise be added to the total at face value.
+    const { data: paid } = await supabase.from('payments').select('amount, currency, created_at').eq('status', 'paid');
     const now = new Date();
     const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const revenueTotal = (paid || []).reduce((s, p) => s + (p.amount_vnd || 0), 0);
-    const revenueMonth = (paid || [])
+    const usd = (paid || []).filter((p) => (p.currency || 'USD') === 'USD');
+    const revenueTotal = usd.reduce((s, p) => s + Number(p.amount || 0), 0);
+    const revenueMonth = usd
       .filter((p) => (p.created_at || '').slice(0, 7) === monthKey)
-      .reduce((s, p) => s + (p.amount_vnd || 0), 0);
+      .reduce((s, p) => s + Number(p.amount || 0), 0);
 
-    // Phân bố theo gói cước
+    // Breakdown by plan
     const { data: orgPlans } = await supabase.from('organizations').select('status, plan:plans(code, name)');
     const byPlan = {};
     let suspended = 0;
     for (const o of orgPlans || []) {
-      const name = o.plan?.name || 'Chưa gán gói';
+      const name = o.plan?.name || 'No plan assigned';
       byPlan[name] = (byPlan[name] || 0) + 1;
       if (o.status === 'suspended') suspended++;
     }
 
-    // Thống kê OCR
+    // OCR statistics
     const { data: ocrRows } = await supabase.from('documents').select('ocr_pages, extraction_method, created_at');
     const monthPrefix = new Date().toISOString().slice(0, 7);
     const ocr = (ocrRows || []).reduce(
@@ -98,7 +100,7 @@ router.get('/overview', async (req, res) => {
         suspended_organizations: suspended,
         storage_mb: Math.round((storageBytes / (1024 * 1024)) * 100) / 100,
       },
-      revenue: { total_vnd: revenueTotal, this_month_vnd: revenueMonth },
+      revenue: { total: revenueTotal, this_month: revenueMonth },
       by_plan: byPlan,
       series,
     });
@@ -108,7 +110,7 @@ router.get('/overview', async (req, res) => {
 });
 
 // =====================================================================
-// QUẢN LÝ TỔ CHỨC
+// ORGANIZATION MANAGEMENT
 // =====================================================================
 
 /** GET /admin/organizations?q=&status= */
@@ -116,7 +118,7 @@ router.get('/organizations', async (req, res) => {
   try {
     let query = supabase
       .from('organizations')
-      .select('*, plan:plans(id, code, name, price_vnd, max_documents, max_members)')
+      .select('*, plan:plans(id, code, name, price_usd, max_documents, max_members)')
       .order('created_at', { ascending: false });
 
     if (req.query.q) query = query.ilike('name', `%${req.query.q}%`);
@@ -161,7 +163,7 @@ router.get('/organizations', async (req, res) => {
   }
 });
 
-/** GET /admin/organizations/:id — chi tiết 1 tổ chức */
+/** GET /admin/organizations/:id — full detail for one organization */
 router.get('/organizations/:id', async (req, res) => {
   try {
     const { data: org, error } = await supabase
@@ -170,7 +172,7 @@ router.get('/organizations/:id', async (req, res) => {
       .eq('id', req.params.id)
       .maybeSingle();
     if (error) throw error;
-    if (!org) return res.status(404).json({ error: 'Không tìm thấy tổ chức' });
+    if (!org) return res.status(404).json({ error: 'Organization not found' });
 
     const [usage, { data: members }, { data: payments }, { data: recentDocs }] = await Promise.all([
       getUsage(org.id, org.plan),
@@ -204,7 +206,7 @@ router.patch('/organizations/:id', async (req, res) => {
       scope: 'billing',
       organizationId: req.params.id,
       userId: req.user.id,
-      message: `Admin hệ thống cập nhật tổ chức ${data.name}`,
+      message: `System admin updated the organization ${data.name}`,
       detail: patch,
     });
     res.json(data);
@@ -213,21 +215,21 @@ router.patch('/organizations/:id', async (req, res) => {
   }
 });
 
-/** DELETE /admin/organizations/:id — xoá vĩnh viễn (cascade toàn bộ dữ liệu) */
+/** DELETE /admin/organizations/:id — permanent delete, cascading to all its data */
 router.delete('/organizations/:id', async (req, res) => {
   try {
     const { data: org } = await supabase.from('organizations').select('name').eq('id', req.params.id).maybeSingle();
     const { error } = await supabase.from('organizations').delete().eq('id', req.params.id);
     if (error) throw error;
-    await logEvent({ level: 'warn', scope: 'system', userId: req.user.id, message: `Đã xoá tổ chức ${org?.name || req.params.id}` });
-    res.json({ message: 'Đã xoá tổ chức và toàn bộ dữ liệu liên quan' });
+    await logEvent({ level: 'warn', scope: 'system', userId: req.user.id, message: `Deleted the organization ${org?.name || req.params.id}` });
+    res.json({ message: 'Organization and all related data deleted' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // =====================================================================
-// NGƯỜI DÙNG
+// USERS
 // =====================================================================
 
 /** GET /admin/users?q= */
@@ -244,8 +246,8 @@ router.get('/users', async (req, res) => {
 });
 
 /**
- * POST /admin/users — tạo một tài khoản quản trị hệ thống mới.
- * Tài khoản này không thuộc doanh nghiệp nào.
+ * POST /admin/users — create a new system administrator account.
+ * The account belongs to no organization.
  */
 router.post('/users', async (req, res) => {
   try {
@@ -253,18 +255,18 @@ router.post('/users', async (req, res) => {
     const password = req.body?.password || '';
     const fullName = req.body?.full_name || '';
 
-    if (!email || !/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Email không hợp lệ' });
-    if (password.length < 8) return res.status(400).json({ error: 'Mật khẩu quản trị hệ thống phải có ít nhất 8 ký tự' });
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'That email address is not valid' });
+    if (password.length < 8) return res.status(400).json({ error: 'A system administrator password must be at least 8 characters' });
 
     const { data: existed } = await supabase.from('app_users').select('id').ilike('email', email).maybeSingle();
-    if (existed) return res.status(400).json({ error: 'Email này đã có tài khoản. Dùng nút cấp quyền ở danh sách người dùng.' });
+    if (existed) return res.status(400).json({ error: 'That email already has an account. Use "Grant admin" in the user list instead.' });
 
     const { data: created, error: createErr } = await supabase.auth.admin.createUser({
       email, password, email_confirm: true, user_metadata: { full_name: fullName },
     });
     if (createErr) {
       const msg = /already been registered|already exists/i.test(createErr.message)
-        ? 'Email này đã được đăng ký' : createErr.message;
+        ? 'That email is already registered' : createErr.message;
       return res.status(400).json({ error: msg });
     }
 
@@ -274,7 +276,7 @@ router.post('/users', async (req, res) => {
 
     await logEvent({
       level: 'warn', scope: 'auth', userId: req.user.id,
-      message: `Tạo tài khoản quản trị hệ thống mới: ${email}`,
+      message: `Created a new system administrator account: ${email}`,
     });
 
     res.json({ id: created.user.id, email, full_name: fullName, is_system_admin: true });
@@ -283,7 +285,7 @@ router.post('/users', async (req, res) => {
   }
 });
 
-/** GET /admin/system-admins — ai đang có quyền quản trị hệ thống */
+/** GET /admin/system-admins — who currently holds system access */
 router.get('/system-admins', async (req, res) => {
   try {
     const { data } = await supabase
@@ -296,7 +298,7 @@ router.get('/system-admins', async (req, res) => {
     res.json({
       admins: (data || []).map((u) => ({ ...u, from_env: envList.includes(String(u.email).toLowerCase()) })),
       env_emails: envList,
-      // Email khai báo trong biến môi trường nhưng chưa đăng ký tài khoản
+      // Listed in the environment variable but has not registered an account yet
       env_pending: envList.filter((e) => !(data || []).some((u) => String(u.email).toLowerCase() === e)),
     });
   } catch (err) {
@@ -311,19 +313,19 @@ router.patch('/users/:id', async (req, res) => {
     if (req.body?.is_system_admin !== undefined) patch.is_system_admin = !!req.body.is_system_admin;
     if (req.body?.status) patch.status = req.body.status;
     if (req.params.id === req.user.id && patch.is_system_admin === false) {
-      return res.status(400).json({ error: 'Không thể tự gỡ quyền admin hệ thống của chính mình' });
+      return res.status(400).json({ error: 'You cannot revoke your own system access' });
     }
 
     if (patch.is_system_admin === false) {
       const { data: target } = await supabase.from('app_users').select('email').eq('id', req.params.id).maybeSingle();
       if (target && isSystemAdminEmail(target.email)) {
         return res.status(400).json({
-          error: `Email ${target.email} được cấp quyền qua biến môi trường SYSTEM_ADMIN_EMAILS. Hãy gỡ khỏi biến đó trên máy chủ, gỡ ở đây không có tác dụng.`,
+          error: `${target.email} is granted access through the SYSTEM_ADMIN_EMAILS environment variable. Remove it there on the server — revoking here has no effect.`,
         });
       }
     }
 
-    // Phải luôn còn ít nhất một quản trị hệ thống
+    // There must always be at least one system administrator left
     if (patch.is_system_admin === false || patch.status === 'disabled') {
       const { count } = await supabase
         .from('app_users')
@@ -331,7 +333,7 @@ router.patch('/users/:id', async (req, res) => {
         .eq('is_system_admin', true)
         .eq('status', 'active');
       if ((count || 0) <= 1) {
-        return res.status(400).json({ error: 'Đây là quản trị hệ thống hoạt động duy nhất, không thể gỡ quyền hoặc khoá.' });
+        return res.status(400).json({ error: 'This is the only active system administrator, so it cannot be revoked or blocked.' });
       }
     }
     const { data, error } = await supabase.from('app_users').update(patch).eq('id', req.params.id).select().single();
@@ -343,7 +345,7 @@ router.patch('/users/:id', async (req, res) => {
 });
 
 // =====================================================================
-// GÓI CƯỚC
+// PLANS
 // =====================================================================
 
 router.get('/plans', async (req, res) => {
@@ -360,7 +362,7 @@ router.get('/plans', async (req, res) => {
 router.post('/plans', async (req, res) => {
   try {
     const { code, name } = req.body || {};
-    if (!code || !name) return res.status(400).json({ error: 'Thiếu mã hoặc tên gói' });
+    if (!code || !name) return res.status(400).json({ error: 'Plan code and name are required' });
     const { data, error } = await supabase.from('plans').insert(sanitizePlan(req.body)).select().single();
     if (error) throw error;
     res.json(data);
@@ -382,10 +384,10 @@ router.patch('/plans/:id', async (req, res) => {
 router.delete('/plans/:id', async (req, res) => {
   try {
     const { data: inUse } = await supabase.from('organizations').select('id').eq('plan_id', req.params.id).limit(1);
-    if (inUse?.length) return res.status(400).json({ error: 'Gói đang được tổ chức sử dụng, hãy chuyển gói trước khi xoá' });
+    if (inUse?.length) return res.status(400).json({ error: 'Organizations are still on this plan. Move them to another plan before deleting it.' });
     const { error } = await supabase.from('plans').delete().eq('id', req.params.id);
     if (error) throw error;
-    res.json({ message: 'Đã xoá gói cước' });
+    res.json({ message: 'Plan deleted' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -393,8 +395,8 @@ router.delete('/plans/:id', async (req, res) => {
 
 function sanitizePlan(body = {}) {
   const out = {};
-  const strs = ['code', 'name', 'name_en', 'description', 'description_en'];
-  const nums = ['price_vnd', 'price_usd', 'max_documents', 'max_members', 'max_storage_mb', 'max_questions_per_month', 'max_ocr_pages_per_month', 'sort_order'];
+  const strs = ['code', 'name', 'description'];
+  const nums = ['price_usd', 'max_documents', 'max_members', 'max_storage_mb', 'max_questions_per_month', 'max_ocr_pages_per_month', 'sort_order'];
   for (const f of strs) if (body[f] !== undefined) out[f] = body[f];
   for (const f of nums) if (body[f] !== undefined) out[f] = Number(body[f]) || 0;
   if (body.is_active !== undefined) out.is_active = !!body.is_active;
@@ -404,7 +406,7 @@ function sanitizePlan(body = {}) {
 }
 
 // =====================================================================
-// THANH TOÁN
+// PAYMENTS
 // =====================================================================
 
 router.get('/payments', async (req, res) => {
@@ -423,22 +425,23 @@ router.get('/payments', async (req, res) => {
   }
 });
 
-/** POST /admin/payments — ghi nhận một khoản thanh toán và gia hạn gói */
+/** POST /admin/payments — record a payment by hand and extend the plan */
 router.post('/payments', async (req, res) => {
   try {
-    const { organization_id, plan_id, amount_vnd, period_start, period_end, status, method, reference, note } = req.body || {};
-    if (!organization_id) return res.status(400).json({ error: 'Thiếu tổ chức' });
+    const { organization_id, plan_id, amount, period_start, period_end, status, method, reference, note } = req.body || {};
+    if (!organization_id) return res.status(400).json({ error: 'An organization is required' });
 
     const { data, error } = await supabase
       .from('payments')
       .insert({
         organization_id,
         plan_id: plan_id || null,
-        amount_vnd: Number(amount_vnd) || 0,
+        amount: Number(amount) || 0,
+        currency: 'USD',
         period_start: period_start || null,
         period_end: period_end || null,
         status: status || 'paid',
-        method: method || 'bank_transfer',
+        method: method || 'manual',
         reference: reference || null,
         note: note || null,
         created_by: req.user.id,
@@ -447,7 +450,7 @@ router.post('/payments', async (req, res) => {
       .single();
     if (error) throw error;
 
-    // Ghi nhận thanh toán thành công thì cập nhật gói + hạn dùng của tổ chức
+    // A payment recorded as received updates the organization's plan and expiry
     if ((status || 'paid') === 'paid') {
       const patch = { billing_status: 'paid' };
       if (plan_id) patch.plan_id = plan_id;
@@ -455,7 +458,7 @@ router.post('/payments', async (req, res) => {
       await supabase.from('organizations').update(patch).eq('id', organization_id);
     }
 
-    await logEvent({ scope: 'billing', organizationId: organization_id, userId: req.user.id, message: `Ghi nhận thanh toán ${Number(amount_vnd).toLocaleString('vi-VN')} đ` });
+    await logEvent({ scope: 'billing', organizationId: organization_id, userId: req.user.id, message: `Recorded a payment of $${Number(amount || 0).toLocaleString('en-US')}` });
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -475,7 +478,7 @@ router.patch('/payments/:id', async (req, res) => {
 });
 
 // =====================================================================
-// NHẬT KÝ & SỨC KHOẺ HỆ THỐNG
+// ACTIVITY LOG & SYSTEM HEALTH
 // =====================================================================
 
 router.get('/logs', async (req, res) => {
@@ -501,7 +504,7 @@ router.get('/logs', async (req, res) => {
   }
 });
 
-/** GET /admin/failed-documents — các tài liệu xử lý lỗi trên toàn hệ thống */
+/** GET /admin/failed-documents — documents that failed to process, platform-wide */
 router.get('/failed-documents', async (req, res) => {
   const { data, error } = await supabase
     .from('documents')
@@ -515,8 +518,8 @@ router.get('/failed-documents', async (req, res) => {
 
 /**
  * POST /admin/maintenance/fix-filenames
- * Sửa lại tên tài liệu đã lưu bị lỗi font (mojibake latin-1) hoặc còn ở dạng NFD.
- * Chạy ?dry_run=1 để xem trước danh sách sẽ đổi mà chưa ghi vào CSDL.
+ * Repair stored document names that are latin-1 mojibake or still in NFD form.
+ * Pass ?dry_run=1 to preview the changes without writing to the database.
  */
 router.post('/maintenance/fix-filenames', async (req, res) => {
   try {
@@ -541,7 +544,7 @@ router.post('/maintenance/fix-filenames', async (req, res) => {
         await logEvent({
           scope: 'system',
           userId: req.user.id,
-          message: `Đã sửa tên cho ${changes.length} tài liệu bị lỗi font`,
+          message: `Repaired the names of ${changes.length} documents`,
         });
       }
     }
@@ -554,8 +557,8 @@ router.post('/maintenance/fix-filenames', async (req, res) => {
 
 /**
  * POST /admin/maintenance/purge-trials
- * Dọn dữ liệu của các tổ chức đã hết hạn dùng thử.
- * ?dry_run=1 để chỉ xem danh sách sẽ bị dọn.
+ * Purge the data of organizations whose trial has expired.
+ * Pass ?dry_run=1 to list what would be purged without touching anything.
  */
 router.post('/maintenance/purge-trials', async (req, res) => {
   try {
@@ -574,17 +577,17 @@ router.post('/maintenance/purge-trials', async (req, res) => {
   }
 });
 
-/** POST /admin/organizations/:id/purge-data — dọn dữ liệu một tổ chức cụ thể */
+/** POST /admin/organizations/:id/purge-data — purge one specific organization */
 router.post('/organizations/:id/purge-data', async (req, res) => {
   try {
-    const result = await purgeOrganizationData(req.params.id, { reason: 'admin hệ thống yêu cầu' });
+    const result = await purgeOrganizationData(req.params.id, { reason: 'requested by a system administrator' });
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-/** GET /admin/health — kiểm tra kết nối các dịch vụ phụ thuộc */
+/** GET /admin/health — check connectivity to every upstream service */
 router.get('/health', async (req, res) => {
   const checks = [];
 
@@ -592,7 +595,7 @@ router.get('/health', async (req, res) => {
   const t0 = Date.now();
   try {
     const { error } = await supabase.from('organizations').select('id', { head: true, count: 'exact' });
-    checks.push({ name: 'Supabase (Postgres)', ok: !error, ms: Date.now() - t0, detail: error?.message || 'Kết nối bình thường' });
+    checks.push({ name: 'Supabase (Postgres)', ok: !error, ms: Date.now() - t0, detail: error?.message || 'Connection healthy' });
   } catch (e) {
     checks.push({ name: 'Supabase (Postgres)', ok: false, ms: Date.now() - t0, detail: e.message });
   }
@@ -602,40 +605,40 @@ router.get('/health', async (req, res) => {
   try {
     const { getDownloadUrl } = await import('../storage.js');
     await getDownloadUrl('healthcheck-probe', null, 60);
-    checks.push({ name: 'Cloudflare R2 (lưu trữ)', ok: true, ms: Date.now() - t1, detail: 'Cấu hình hợp lệ' });
+    checks.push({ name: 'Cloudflare R2 (storage)', ok: true, ms: Date.now() - t1, detail: 'Configuration valid' });
   } catch (e) {
-    checks.push({ name: 'Cloudflare R2 (lưu trữ)', ok: false, ms: Date.now() - t1, detail: e.message });
+    checks.push({ name: 'Cloudflare R2 (storage)', ok: false, ms: Date.now() - t1, detail: e.message });
   }
 
   // Voyage AI
   const t2 = Date.now();
   try {
     const { embedText } = await import('../embed.js');
-    await embedText('kiểm tra kết nối');
-    checks.push({ name: 'Voyage AI (embedding)', ok: true, ms: Date.now() - t2, detail: 'Gọi API thành công' });
+    await embedText('connectivity check');
+    checks.push({ name: 'Voyage AI (embeddings)', ok: true, ms: Date.now() - t2, detail: 'API call succeeded' });
   } catch (e) {
-    checks.push({ name: 'Voyage AI (embedding)', ok: false, ms: Date.now() - t2, detail: e.message });
+    checks.push({ name: 'Voyage AI (embeddings)', ok: false, ms: Date.now() - t2, detail: e.message });
   }
 
   // DeepSeek
   const t3 = Date.now();
   try {
     const { generateAnswer } = await import('../llm.js');
-    await generateAnswer('Xin chào', [{ content: 'Đây là đoạn văn bản kiểm tra kết nối.', filename: 'healthcheck.txt' }]);
-    checks.push({ name: 'DeepSeek (mô hình trả lời)', ok: true, ms: Date.now() - t3, detail: 'Gọi API thành công' });
+    await generateAnswer('Hello', [{ content: 'This is a short passage used to check connectivity.', filename: 'healthcheck.txt' }]);
+    checks.push({ name: 'DeepSeek (answer model)', ok: true, ms: Date.now() - t3, detail: 'API call succeeded' });
   } catch (e) {
-    checks.push({ name: 'DeepSeek (mô hình trả lời)', ok: false, ms: Date.now() - t3, detail: e.message });
+    checks.push({ name: 'DeepSeek (answer model)', ok: false, ms: Date.now() - t3, detail: e.message });
   }
 
-  // Gemini — chỉ dùng cho OCR, nên thiếu key là cảnh báo chứ không phải lỗi chặn
+  // Gemini is only used for OCR, so a missing key is a warning rather than a failure
   const t4 = Date.now();
   if (!isOcrEnabled()) {
     checks.push({
-      name: 'Gemini (nhận dạng PDF scan)',
+      name: 'Gemini (scanned-PDF OCR)',
       ok: false,
       optional: true,
       ms: 0,
-      detail: 'Chưa cấu hình GEMINI_API_KEY — PDF dạng scan sẽ báo lỗi khi tải lên',
+      detail: 'GEMINI_API_KEY is not set — uploading a scanned PDF will fail',
     });
   } else {
     const models = ocrModels();
@@ -647,52 +650,52 @@ router.get('/health', async (req, res) => {
           signal: AbortSignal.timeout(15000),
         });
         const body = await r.json().catch(() => ({}));
-        results.push({ model, ok: r.ok, detail: r.ok ? 'sẵn sàng' : (body?.error?.message || `HTTP ${r.status}`) });
+        results.push({ model, ok: r.ok, detail: r.ok ? 'ready' : (body?.error?.message || `HTTP ${r.status}`) });
       } catch (e) {
         results.push({ model, ok: false, detail: e.message });
       }
     }
     const anyOk = results.some((r) => r.ok);
     checks.push({
-      name: 'Gemini (nhận dạng PDF scan)',
+      name: 'Gemini (scanned-PDF OCR)',
       ok: anyOk,
       ms: Date.now() - t4,
       detail: anyOk
-        ? `Chuỗi dự phòng: ${results.map((r) => `${r.model} (${r.ok ? 'OK' : 'lỗi'})`).join(' → ')}`
+        ? `Fallback chain: ${results.map((r) => `${r.model} (${r.ok ? 'OK' : 'failed'})`).join(' → ')}`
         : results.map((r) => `${r.model}: ${r.detail}`).join(' | '),
     });
   }
 
-  // Cổng thanh toán — sai cấu hình ở đây là khách trả tiền mà không lên gói,
-  // nên kiểm tra tách riêng từng cổng thay vì gộp một dòng chung chung.
-  for (const [id, label] of [['payos', 'payOS (VietQR, VND)'], ['paypal', 'PayPal (USD)']]) {
+  // Payment gateway. A misconfiguration here means customers pay and never get
+  // upgraded, so it is checked on its own line rather than folded into a summary.
+  {
     const t = Date.now();
-    const provider = id === 'payos' ? payos : paypal;
-    if (!provider.isEnabled()) {
-      checks.push({ name: label, ok: false, optional: true, ms: 0, detail: 'Chưa cấu hình — cổng này không hiện ở trang thanh toán' });
-      continue;
-    }
-    try {
-      const d = await provider.diagnose();
-      checks.push({ name: label, ok: d.ok, warning: d.warning, ms: Date.now() - t, detail: d.detail });
-    } catch (e) {
-      checks.push({ name: label, ok: false, ms: Date.now() - t, detail: e.message });
+    const label = 'PayPal (USD)';
+    if (!paypal.isEnabled()) {
+      checks.push({ name: label, ok: false, optional: true, ms: 0, detail: 'Not configured — no payment method is offered at checkout' });
+    } else {
+      try {
+        const d = await paypal.diagnose();
+        checks.push({ name: label, ok: d.ok, warning: d.warning, ms: Date.now() - t, detail: d.detail });
+      } catch (e) {
+        checks.push({ name: label, ok: false, ms: Date.now() - t, detail: e.message });
+      }
     }
   }
 
-  // APP_BASE_URL sai là link quay về sau thanh toán và chữ ký webhook PayPal đều hỏng
+  // A wrong APP_BASE_URL breaks both the post-payment return link and PayPal's webhook signature
   const configured = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
   const actual = `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`;
   checks.push({
-    name: 'APP_BASE_URL (địa chỉ công khai)',
+    name: 'APP_BASE_URL (public address)',
     ok: !!configured && configured === actual,
     warning: !!configured && configured !== actual,
     ms: 0,
     detail: !configured
-      ? `Chưa đặt APP_BASE_URL — đang tự suy ra "${actual}". Đặt hẳn biến này, nếu không link quay về sau thanh toán sẽ sai khi đổi tên miền.`
+      ? `APP_BASE_URL is not set — falling back to "${actual}". Set it explicitly, or the post-payment return link will break the moment the domain changes.`
       : configured === actual
         ? configured
-        : `APP_BASE_URL đang là "${configured}" nhưng bạn đang truy cập qua "${actual}". Webhook PayPal ký theo địa chỉ nên lệch là chữ ký hỏng.`,
+        : `APP_BASE_URL is "${configured}" but you reached this page over "${actual}". PayPal signs webhooks against the address, so a mismatch breaks signature verification.`,
   });
 
   res.json({ checked_at: new Date().toISOString(), checks, queue: queueStats() });

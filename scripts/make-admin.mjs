@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
- * Cấp / gỡ quyền quản trị hệ thống từ dòng lệnh.
+ * Grant / revoke system administrator rights from the command line.
  *
- * Dùng khi không vào được giao diện, hoặc để lập tài khoản quản trị đầu tiên
- * mà không muốn mở Supabase SQL Editor.
+ * Use this when the web interface is unreachable, or to create the very first
+ * administrator account without opening the Supabase SQL Editor.
  *
- *   npm run make-admin -- email@congty.vn            # cấp quyền
- *   npm run make-admin -- email@congty.vn --revoke   # gỡ quyền
- *   npm run make-admin -- --list                     # xem ai đang có quyền
+ *   npm run make-admin -- admin@company.com            # grant
+ *   npm run make-admin -- admin@company.com --revoke   # revoke
+ *   npm run make-admin -- --list                       # show who currently has it
  *
- * Cần các biến SUPABASE_URL và SUPABASE_SERVICE_ROLE_KEY trong .env.
+ * Requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.
  */
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
@@ -20,7 +20,7 @@ const list = args.includes('--list');
 const email = args.find((a) => !a.startsWith('--'))?.trim().toLowerCase();
 
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('❌ Thiếu SUPABASE_URL hoặc SUPABASE_SERVICE_ROLE_KEY trong .env');
+  console.error('❌ Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env');
   process.exit(1);
 }
 
@@ -39,12 +39,12 @@ async function showList() {
   const envList = String(process.env.SYSTEM_ADMIN_EMAILS || '')
     .split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
 
-  if (!data?.length) console.log('(chưa có tài khoản quản trị hệ thống nào trong CSDL)');
+  if (!data?.length) console.log('(no system administrator accounts in the database yet)');
   else {
-    console.log('Quản trị hệ thống hiện có:');
+    console.log('Current system administrators:');
     for (const u of data) {
-      const tag = envList.includes(u.email.toLowerCase()) ? ' [từ biến môi trường]' : '';
-      const last = u.last_login_at ? new Date(u.last_login_at).toLocaleString('vi-VN') : 'chưa đăng nhập';
+      const tag = envList.includes(u.email.toLowerCase()) ? ' [from environment variable]' : '';
+      const last = u.last_login_at ? new Date(u.last_login_at).toLocaleString('en-US') : 'never signed in';
       console.log(`  • ${u.email}${tag} — ${u.status} — ${last}`);
     }
   }
@@ -60,13 +60,13 @@ async function setFlag() {
   if (error) throw error;
 
   if (!user) {
-    console.error(`❌ Không tìm thấy tài khoản ${email}`);
-    console.error('   Hãy đăng ký tài khoản đó trên /register.html trước, rồi chạy lại lệnh này.');
+    console.error(`❌ No account found for ${email}`);
+    console.error('   Register that account on /register.html first, then run this command again.');
     process.exit(1);
   }
 
   if (!revoke && user.is_system_admin) {
-    console.log(`✓ ${email} vốn đã là quản trị hệ thống, không cần làm gì.`);
+    console.log(`✓ ${email} is already a system administrator; nothing to do.`);
     return;
   }
 
@@ -75,7 +75,7 @@ async function setFlag() {
       .from('app_users').select('id', { count: 'exact', head: true })
       .eq('is_system_admin', true);
     if ((count || 0) <= 1) {
-      console.error('❌ Đây là quản trị hệ thống duy nhất, gỡ quyền sẽ không còn ai quản lý được.');
+      console.error('❌ This is the only system administrator; revoking it would leave nobody able to manage the system.');
       process.exit(1);
     }
   }
@@ -84,24 +84,24 @@ async function setFlag() {
     .from('app_users').update({ is_system_admin: !revoke }).eq('id', user.id);
   if (upErr) throw upErr;
 
-  console.log(revoke ? `✓ Đã gỡ quyền quản trị hệ thống của ${email}`
-                     : `✓ Đã cấp quyền quản trị hệ thống cho ${email}`);
-  if (!revoke) console.log('  Đăng xuất rồi đăng nhập lại để vào /sysadmin.html');
+  console.log(revoke ? `✓ Revoked system administrator rights from ${email}`
+                     : `✓ Granted system administrator rights to ${email}`);
+  if (!revoke) console.log('  Sign out and sign back in to reach /sysadmin.html');
 }
 
 try {
   if (list || !email) {
     await showList();
     if (!email && !list) {
-      console.log('\nCách dùng:');
-      console.log('  npm run make-admin -- email@congty.vn');
-      console.log('  npm run make-admin -- email@congty.vn --revoke');
+      console.log('\nUsage:');
+      console.log('  npm run make-admin -- admin@company.com');
+      console.log('  npm run make-admin -- admin@company.com --revoke');
       console.log('  npm run make-admin -- --list');
     }
   } else {
     await setFlag();
   }
 } catch (err) {
-  console.error('❌ Lỗi:', err.message);
+  console.error('❌ Error:', err.message);
   process.exit(1);
 }

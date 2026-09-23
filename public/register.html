@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Đăng ký — DocBot</title>
+<title>Sign up — DocBot</title>
 <link rel="stylesheet" href="/assets/app.css" />
 </head>
 <body>
@@ -12,10 +12,10 @@
     <div>
       <div class="brand" style="padding:0 0 30px">
         <div class="brand-mark">D</div>
-        <div><div class="brand-name">DocBot</div><div class="brand-sub">Chatbot tài liệu doanh nghiệp</div></div>
+        <div><div class="brand-name">DocBot</div><div class="brand-sub">Chatbot for company documents</div></div>
       </div>
-      <h2>Dùng thử miễn phí 3 ngày</h2>
-      <p>Đủ tính năng trong 3 ngày, trừ nhận dạng PDF scan. Hết 3 ngày, tài liệu sẽ bị xoá nếu bạn không nâng cấp.</p>
+      <h2>Free for 3 days</h2>
+      <p>Every feature for 3 days, except scanned-PDF OCR. After 3 days your documents are deleted unless you upgrade.</p>
       <div id="plans" class="mt-3"></div>
     </div>
     <p class="small" style="color:#9ea1d8">© 2026 DocBot</p>
@@ -23,68 +23,64 @@
 
   <div class="auth-main">
     <div class="auth-card">
-      <div class="row" style="justify-content:flex-end;margin-bottom:12px" id="langBox"></div>
-      <h1 id="heading">Đăng ký doanh nghiệp</h1>
-      <p class="lead" id="lead">Tài khoản đầu tiên sẽ là quản trị viên của doanh nghiệp.</p>
+      <h1 id="heading">Create a company account</h1>
+      <p class="lead" id="lead">The first account becomes the company administrator.</p>
 
       <div class="alert error" id="alert"></div>
 
       <form id="form">
         <div class="field" id="orgField">
-          <label for="orgName">Tên doanh nghiệp</label>
-          <input type="text" id="orgName" placeholder="Công ty TNHH ABC" />
+          <label for="orgName">Company name</label>
+          <input type="text" id="orgName" placeholder="Acme Corporation" />
         </div>
         <div class="field">
-          <label for="fullName">Họ và tên</label>
-          <input type="text" id="fullName" placeholder="Nguyễn Văn A" />
+          <label for="fullName">Full name</label>
+          <input type="text" id="fullName" placeholder="Jane Smith" />
         </div>
         <div class="field">
-          <label for="email">Email công việc</label>
-          <input type="email" id="email" required autocomplete="username" placeholder="ban@congty.vn" />
+          <label for="email">Work email</label>
+          <input type="email" id="email" required autocomplete="username" placeholder="you@company.com" />
         </div>
         <div class="field">
-          <label for="password">Mật khẩu</label>
-          <input type="password" id="password" required minlength="6" autocomplete="new-password" placeholder="Ít nhất 6 ký tự" />
-          <div class="hint">Dùng mật khẩu riêng, không trùng với email công việc.</div>
+          <label for="password">Password</label>
+          <input type="password" id="password" required minlength="6" autocomplete="new-password" placeholder="At least 6 characters" />
+          <div class="hint">Use a unique password, not the same as your work email.</div>
         </div>
-        <button class="btn primary block" type="submit" id="submitBtn">Tạo tài khoản</button>
+        <button class="btn primary block" type="submit" id="submitBtn">Create account</button>
       </form>
 
-      <p class="auth-alt">Đã có tài khoản? <a href="/login.html">Đăng nhập</a></p>
+      <p class="auth-alt">Already have an account? <a href="/login.html">Sign in</a></p>
     </div>
   </div>
 </div>
 
 <script type="module">
-  import { api, Session, fmt, esc, t, money, currency, langSwitcherHtml, bindLangSwitcher, observeAndTranslate } from '/assets/app.js';
+  import {api, Session, fmt, esc, t, money} from '/assets/app.js';
 
-  document.getElementById('langBox').innerHTML = langSwitcherHtml().replace('lang-switch', 'lang-switch light');
-  bindLangSwitcher();
-  observeAndTranslate();
 
   const alertEl = document.getElementById('alert');
   const show = (msg, kind = 'error') => { alertEl.textContent = msg; alertEl.className = `alert ${kind} show`; };
   const inviteToken = new URLSearchParams(location.search).get('invite');
 
-  // Bảng giá hiển thị bên trái
-  api(`/public/billing/plans?currency=${currency()}`).then((d) => {
+  // Plan summary shown in the left-hand panel.
+  api('/public/billing/plans').then((d) => {
     document.getElementById('plans').innerHTML = d.plans.map((p) => `
       <div class="auth-feature">
-        <div class="ico">${p.price === 0 ? '0' : ''}</div>
-        <div><b>${esc(p.name)} — ${p.price === 0 ? t('Miễn phí') : esc(money(p.price, d.currency)) + t('/tháng')}</b>
-        <span>${fmt.num(p.max_documents)} ${t('tài liệu')} · ${fmt.num(p.max_members)} ${t('thành viên')} · ${fmt.num(p.max_questions_per_month)} ${t('lượt hỏi/tháng')}</span></div>
+        <div class="ico">${p.price === 0 ? '0' : '$'}</div>
+        <div><b>${esc(p.name)} — ${p.price === 0 ? t('Free') : esc(money(p.price)) + t('/month')}</b>
+        <span>${fmt.num(p.max_documents)} ${t('documents')} · ${fmt.num(p.max_members)} ${t('members')} · ${fmt.num(p.max_questions_per_month)} ${t('questions/month')}</span></div>
       </div>`).join('');
   }).catch(() => {});
 
-  // Nếu vào từ lời mời thì ẩn ô tên doanh nghiệp và khoá email
+  // Invite flow: hide the company-name field and lock the email to the invited address.
   if (inviteToken) {
     document.getElementById('orgField').classList.add('hidden');
     api(`/auth/invite/${inviteToken}`)
       .then((info) => {
-        document.getElementById('heading').textContent = t('Tham gia doanh nghiệp');
-        document.getElementById('lead').textContent = t('Bạn được mời vào "{org}" với vai trò {role}.', {
+        document.getElementById('heading').textContent = t('Join the organization');
+        document.getElementById('lead').textContent = t('You were invited to "{org}" as {role}.', {
           org: info.organization_name,
-          role: info.role === 'admin' ? t('quản trị') : t('thành viên'),
+          role: info.role === 'admin' ? 'an admin' : 'a member',
         });
         const emailEl = document.getElementById('email');
         emailEl.value = info.email;
@@ -96,10 +92,10 @@
   document.getElementById('form').onsubmit = async (e) => {
     e.preventDefault();
     const btn = document.getElementById('submitBtn');
-    // Không chặn ở phía trình duyệt khi thiếu tên doanh nghiệp: email nằm trong
-    // SYSTEM_ADMIN_EMAILS là tài khoản quản trị hệ thống, đứng ngoài mọi doanh
-    // nghiệp nên được phép bỏ trống. Máy chủ mới đủ dữ liệu để quyết định.
-    btn.disabled = true; btn.textContent = t('Đang tạo tài khoản…');
+    // Deliberately no client-side check for a missing company name: an address
+    // listed in SYSTEM_ADMIN_EMAILS is a system administrator who belongs to no
+    // organization and may leave it blank. Only the server knows which is which.
+    btn.disabled = true; btn.textContent = t('Creating account…');
     try {
       const data = await api('/auth/register', {
         method: 'POST',
@@ -116,7 +112,7 @@
       location.href = '/';
     } catch (err) {
       show(err.message);
-      btn.disabled = false; btn.textContent = t('Tạo tài khoản');
+      btn.disabled = false; btn.textContent = t('Create account');
     }
   };
 </script>

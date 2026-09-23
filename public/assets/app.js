@@ -1,11 +1,32 @@
 /* =====================================================================
-   DocBot — thư viện dùng chung cho toàn bộ giao diện
+   DocBot — shared front-end library
    ===================================================================== */
 
-import { t, lang, isEnglish, currency, preferredProvider, money, locale, langSwitcherHtml, bindLangSwitcher, observeAndTranslate, translateDOM } from './i18n.js';
-export { t, lang, isEnglish, currency, preferredProvider, money, langSwitcherHtml, bindLangSwitcher, observeAndTranslate, translateDOM };
+const LOCALE = 'en-US';
+export function locale() { return LOCALE; }
 
-/* ---------- Phiên đăng nhập ---------- */
+/**
+ * Fill {placeholders} in a string. Not a translation layer — the app ships in
+ * English only — just one place to keep interpolation readable at call sites.
+ */
+export function t(s, vars) {
+  let out = String(s);
+  if (vars) for (const [k, v] of Object.entries(vars)) out = out.split(`{${k}}`).join(v);
+  return out;
+}
+
+/**
+ * The product prices and bills in USD. The optional currency argument exists
+ * only so the admin console can render historical transactions that were
+ * settled in another currency before the switch.
+ */
+export function money(amount, cur = 'USD') {
+  const n = Number(amount || 0);
+  if (cur !== 'USD') return `${n.toLocaleString(LOCALE)} ${cur}`;
+  return `$${n.toLocaleString(LOCALE, { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;
+}
+
+/* ---------- Session ---------- */
 const TOKEN_KEY = 'docbot_token';
 export const Session = {
   get token() { return localStorage.getItem(TOKEN_KEY); },
@@ -15,7 +36,7 @@ export const Session = {
   set orgId(v) { v ? localStorage.setItem('docbot_org', v) : localStorage.removeItem('docbot_org'); },
 };
 
-/* ---------- Gọi API ---------- */
+/* ---------- API calls ---------- */
 export async function api(path, { method = 'GET', body, form, raw } = {}) {
   const headers = {};
   if (Session.token) headers.Authorization = `Bearer ${Session.token}`;
@@ -27,16 +48,16 @@ export async function api(path, { method = 'GET', body, form, raw } = {}) {
   if (res.status === 401) {
     Session.clear();
     if (!location.pathname.includes('login')) location.href = '/login.html?expired=1';
-    throw new Error(t('Phiên đăng nhập đã hết hạn'));
+    throw new Error(t('Your session has expired'));
   }
   const text = await res.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
-  if (!res.ok) throw new Error(data?.error || t('Lỗi {code}', { code: res.status }));
+  if (!res.ok) throw new Error(data?.error || t('Error {code}', { code: res.status }));
   return raw ? text : data;
 }
 
-/* ---------- Bảo vệ trang ---------- */
+/* ---------- Page guards ---------- */
 export async function requireSession({ systemAdmin = false } = {}) {
   if (!Session.token) { location.href = '/login.html'; throw new Error('redirect'); }
   try {
@@ -51,10 +72,10 @@ export async function requireSession({ systemAdmin = false } = {}) {
 
 export function logout() { Session.clear(); location.href = '/login.html'; }
 
-/* ---------- Định dạng ---------- */
+/* ---------- Formatting ---------- */
 export const fmt = {
   num: (n) => Number(n || 0).toLocaleString(locale()),
-  money: (n) => money(n, 'VND'),
+  money: (n) => money(n),
   mb: (n) => `${Number(n || 0).toLocaleString(locale(), { maximumFractionDigits: 1 })} MB`,
   bytes(b) {
     b = Number(b || 0);
@@ -73,27 +94,27 @@ export const fmt = {
   until(d) {
     if (!d) return '';
     const s = (new Date(d) - Date.now()) / 1000;
-    if (s <= 0) return t('sắp chạy');
-    if (s < 60) return t('sau {n} giây', { n: Math.ceil(s) });
-    return t('sau {n} phút', { n: Math.ceil(s / 60) });
+    if (s <= 0) return t('starting soon');
+    if (s < 60) return t('in {n}s', { n: Math.ceil(s) });
+    return t('in {n} min', { n: Math.ceil(s / 60) });
   },
-  /** Khoảng thời gian còn lại dạng "2 ngày 5 giờ" */
+  /** Time left, rendered as "2d 5h". */
   duration(ms) {
     const total = Math.max(0, Math.floor(ms / 1000));
     const d = Math.floor(total / 86400);
     const h = Math.floor((total % 86400) / 3600);
     const m = Math.floor((total % 3600) / 60);
-    if (d > 0) return t('{d} ngày {h} giờ', { d, h });
-    if (h > 0) return t('{h} giờ {m} phút', { h, m });
-    return t('{m} phút', { m });
+    if (d > 0) return t('{d}d {h}h', { d, h });
+    if (h > 0) return t('{h}h {m}m', { h, m });
+    return t('{m}m', { m });
   },
   ago(d) {
     if (!d) return '—';
     const s = (Date.now() - new Date(d)) / 1000;
-    if (s < 60) return t('vừa xong');
-    if (s < 3600) return t('{n} phút trước', { n: Math.floor(s / 60) });
-    if (s < 86400) return t('{n} giờ trước', { n: Math.floor(s / 3600) });
-    if (s < 604800) return t('{n} ngày trước', { n: Math.floor(s / 86400) });
+    if (s < 60) return t('just now');
+    if (s < 3600) return t('{n} min ago', { n: Math.floor(s / 60) });
+    if (s < 86400) return t('{n}h ago', { n: Math.floor(s / 3600) });
+    if (s < 604800) return t('{n}d ago', { n: Math.floor(s / 86400) });
     return fmt.date(d);
   },
 };
@@ -113,19 +134,19 @@ export function initials(nameOrEmail = '?') {
   return ((parts[0]?.[0] || '') + (parts[parts.length - 1]?.[0] || '')).toUpperCase() || '?';
 }
 
-/* ---------- Nhãn tiếng Việt ---------- */
+/* ---------- Display labels ---------- */
 export const LABEL = {
-  status: { ready: 'Sẵn sàng', processing: 'Đang xử lý', ocr_processing: 'Đang nhận dạng', ocr_retry: 'Chờ thử lại', failed: 'Lỗi', active: 'Hoạt động', suspended: 'Tạm khoá', invited: 'Chờ nhận lời mời', disabled: 'Đã khoá' },
-  method: { text: 'Text', ocr: 'OCR', mixed: 'Hỗn hợp' },
-  role: { admin: 'Quản trị', member: 'Thành viên' },
-  billing: { trial: 'Dùng thử', paid: 'Đã thanh toán', overdue: 'Quá hạn' },
-  payment: { paid: 'Đã thu', pending: 'Chờ thu', failed: 'Thất bại', refunded: 'Hoàn tiền' },
-  level: { info: 'Thông tin', warn: 'Cảnh báo', error: 'Lỗi' },
-  scope: { auth: 'Tài khoản', upload: 'Tài liệu', chat: 'Hỏi đáp', billing: 'Thanh toán', system: 'Hệ thống' },
+  status: { ready: 'Ready', processing: 'Processing', ocr_processing: 'Running OCR', ocr_retry: 'Retry pending', failed: 'Failed', active: 'Active', suspended: 'Suspended', invited: 'Invited', disabled: 'Disabled' },
+  method: { text: 'Text', ocr: 'OCR', mixed: 'Mixed' },
+  role: { admin: 'Admin', member: 'Member' },
+  billing: { trial: 'Trial', paid: 'Paid', overdue: 'Overdue' },
+  payment: { paid: 'Received', pending: 'Pending', failed: 'Failed', refunded: 'Refunded' },
+  level: { info: 'Info', warn: 'Warning', error: 'Error' },
+  scope: { auth: 'Account', upload: 'Documents', chat: 'Chat', billing: 'Payments', system: 'System' },
 };
 export const badge = (value, dict) => `<span class="badge ${esc(value)}">${esc(t(dict?.[value] || value || '—'))}</span>`;
 
-/* ---------- Biểu tượng ---------- */
+/* ---------- Icons ---------- */
 const I = (p, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" ${extra}>${p}</svg>`;
 export const icon = {
   dashboard: I('<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>'),
@@ -161,7 +182,7 @@ export const icon = {
   scan: I('<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M3 12h18"/>'),
 };
 
-/* ---------- Thông báo nhanh ---------- */
+/* ---------- Toasts ---------- */
 export function toast(message, type = '') {
   let host = document.querySelector('.toasts');
   if (!host) { host = document.createElement('div'); host.className = 'toasts'; document.body.appendChild(host); }
@@ -172,8 +193,8 @@ export function toast(message, type = '') {
   setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .25s'; setTimeout(() => el.remove(), 260); }, 3600);
 }
 
-/* ---------- Hộp thoại ---------- */
-export function modal({ title, body, okText = 'Lưu', cancelText = 'Huỷ', wide = false, danger = false, onOk }) {
+/* ---------- Dialogs ---------- */
+export function modal({ title, body, okText = 'Save', cancelText = 'Cancel', wide = false, danger = false, onOk }) {
   const back = document.createElement('div');
   back.className = 'modal-backdrop open';
   back.innerHTML = `
@@ -202,7 +223,7 @@ export function modal({ title, body, okText = 'Lưu', cancelText = 'Huỷ', wide
   return { el: back, close };
 }
 
-export function confirmDialog(title, message, okText = 'Xoá') {
+export function confirmDialog(title, message, okText = 'Delete') {
   return new Promise((resolve) => {
     let done = false;
     const finish = (v) => { if (!done) { done = true; resolve(v); } };
@@ -212,7 +233,7 @@ export function confirmDialog(title, message, okText = 'Xoá') {
   });
 }
 
-/* ---------- Biểu đồ cột ---------- */
+/* ---------- Bar chart ---------- */
 export function renderBars(el, series, key = 'questions') {
   const max = Math.max(1, ...series.map((s) => s[key]));
   el.innerHTML = `
@@ -222,18 +243,18 @@ export function renderBars(el, series, key = 'questions') {
     <div class="chart-axis"><span>${esc(fmt.date(series[0]?.day))}</span><span>${esc(fmt.date(series[series.length - 1]?.day))}</span></div>`;
 }
 
-/* ---------- Thanh mức sử dụng ---------- */
+/* ---------- Usage meters ---------- */
 export function meter(used, limit) {
   const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
   const cls = pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : '';
   return `<div class="meter ${cls}"><i style="width:${pct}%"></i></div>`;
 }
 
-/* ---------- Khung điều hướng ---------- */
+/* ---------- Navigation shell ---------- */
 export function buildSidebar({ brandSub, items, user, orgs, currentOrgId, onOrgChange }) {
   const orgBlock = orgs
     ? `<div class="org-switch">
-         <label>Doanh nghiệp</label>
+         <label>Organization</label>
          <select id="orgSwitch" data-no-i18n>${orgs.map((o) => `<option value="${esc(o.id)}" ${o.id === currentOrgId ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select>
        </div>` : '';
 
@@ -254,17 +275,16 @@ export function buildSidebar({ brandSub, items, user, orgs, currentOrgId, onOrgC
       ${orgBlock}
       <nav class="nav">${nav}</nav>
       <div class="sidebar-foot">
-        ${langSwitcherHtml()}
         <div class="user-chip" data-no-i18n>
           <div class="avatar">${esc(initials(user.full_name || user.email))}</div>
           <div class="who"><b>${esc(user.full_name || user.email.split('@')[0])}</b><span>${esc(user.email)}</span></div>
         </div>
-        <button class="nav-item" id="logoutBtn" style="margin-top:6px">${icon.logout}<span>Đăng xuất</span></button>
+        <button class="nav-item" id="logoutBtn" style="margin-top:6px">${icon.logout}<span>Sign out</span></button>
       </div>
     </aside>`;
 }
 
-/* ---------- Bộ định tuyến bằng hash ---------- */
+/* ---------- Hash router ---------- */
 export function router(onChange, fallback) {
   const go = () => {
     const view = location.hash.replace('#', '') || fallback;
@@ -281,8 +301,9 @@ export function router(onChange, fallback) {
 }
 
 /**
- * Dải băng nhắc thời gian dùng thử còn lại.
- * Gắn vào đầu <body> của mọi trang người dùng. Tự ẩn nếu không phải gói dùng thử.
+ * Countdown banner for the free trial.
+ * Mounted at the top of <body> on every customer page; renders nothing when
+ * the organization is not on a trial.
  */
 export function trialBanner(trial, { upgradeHref = '/pricing.html' } = {}) {
   if (!trial?.isTrial) return '';
@@ -291,10 +312,10 @@ export function trialBanner(trial, { upgradeHref = '/pricing.html' } = {}) {
     return `
       <div class="trial-bar danger">
         <span>${icon.alert}</span>
-        <span><b>${esc(t('Hết hạn dùng thử'))}</b> — ${esc(trial.purged
-          ? t('Tài liệu đã bị xoá. Nâng cấp để bắt đầu lại.')
-          : t('Nâng cấp ngay để giữ lại tài liệu của bạn.'))}</span>
-        <a class="btn sm primary" href="${upgradeHref}">${esc(t('Nâng cấp ngay'))}</a>
+        <span><b>${esc(t('Trial ended'))}</b> — ${esc(trial.purged
+          ? t('Your documents were deleted. Upgrade to start again.')
+          : t('Upgrade now to keep your documents.'))}</span>
+        <a class="btn sm primary" href="${upgradeHref}">${esc(t('Upgrade now'))}</a>
       </div>`;
   }
 
@@ -303,8 +324,8 @@ export function trialBanner(trial, { upgradeHref = '/pricing.html' } = {}) {
   return `
     <div class="trial-bar ${urgent ? 'warn' : ''}">
       <span>${icon.info}</span>
-      <span>${esc(t('Bản dùng thử còn {time}', { time: fmt.duration(trial.msLeft) }))} — ${esc(t('hết hạn sẽ xoá toàn bộ tài liệu'))}</span>
-      <a class="btn sm ${urgent ? 'primary' : ''}" href="${upgradeHref}">${esc(t('Nâng cấp ngay'))}</a>
+      <span>${esc(t('{time} left in your trial', { time: fmt.duration(trial.msLeft) }))} — ${esc(t('all documents are deleted when it ends'))}</span>
+      <a class="btn sm ${urgent ? 'primary' : ''}" href="${upgradeHref}">${esc(t('Upgrade now'))}</a>
     </div>`;
 }
 

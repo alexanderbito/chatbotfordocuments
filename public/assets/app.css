@@ -1,5 +1,5 @@
 /* =====================================================================
-   DocBot — hệ thống giao diện dùng chung
+   DocBot — shared design system
    ===================================================================== */
 :root {
   --bg: #f4f5f7;
@@ -52,7 +52,7 @@ h3 { font-size: 15px; }
 p { margin: 0 0 10px; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; }
 
-/* ---------- Bố cục chính ---------- */
+/* ---------- App shell ---------- */
 .shell { display: grid; grid-template-columns: 252px 1fr; min-height: 100vh; }
 .sidebar {
   background: var(--sidebar);
@@ -104,7 +104,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .user-chip .who b { display: block; font-size: 13px; color: #fff; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .user-chip .who span { display: block; font-size: 11.5px; color: var(--sidebar-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* ---------- Vùng nội dung ---------- */
+/* ---------- Content area ---------- */
 .main { min-width: 0; display: flex; flex-direction: column; }
 .topbar {
   background: var(--surface); border-bottom: 1px solid var(--border);
@@ -117,7 +117,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .page-section { display: none; }
 .page-section.active { display: block; }
 
-/* ---------- Thẻ ---------- */
+/* ---------- Cards ---------- */
 .card {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
@@ -132,7 +132,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .card-body { padding: 18px; }
 .card-body.flush { padding: 0; }
 
-/* ---------- Ô số liệu ---------- */
+/* ---------- Stat tiles ---------- */
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 18px; }
 .stat {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
@@ -145,13 +145,13 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .stat .icon { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary); }
 .stat .icon svg { width: 15px; height: 15px; }
 
-/* ---------- Thanh tiến trình ---------- */
+/* ---------- Progress bars ---------- */
 .meter { height: 6px; background: #eceef2; border-radius: 4px; overflow: hidden; margin-top: 8px; }
 .meter > i { display: block; height: 100%; background: var(--primary); border-radius: 4px; transition: width .3s; }
 .meter.warn > i { background: #e0a020; }
 .meter.danger > i { background: var(--danger); }
 
-/* ---------- Bảng ---------- */
+/* ---------- Tables ---------- */
 .table-wrap { overflow-x: auto; }
 table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 table.tbl th {
@@ -167,7 +167,7 @@ table.tbl td.num, table.tbl th.num { text-align: right; font-variant-numeric: ta
 .cell-main { font-weight: 550; }
 .cell-sub { color: var(--muted); font-size: 12px; }
 
-/* ---------- Nhãn trạng thái ---------- */
+/* ---------- Status badges ---------- */
 .badge {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 11.5px; font-weight: 600; padding: 2.5px 9px; border-radius: 20px;
@@ -184,7 +184,7 @@ table.tbl td.num, table.tbl th.num { text-align: right; font-variant-numeric: ta
 .badge.purple { background: var(--primary-soft); color: var(--primary); border-color: transparent; }
 .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
-/* ---------- Nút ---------- */
+/* ---------- Buttons ---------- */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
   font-family: var(--font); font-size: 13.5px; font-weight: 550;
@@ -205,13 +205,13 @@ table.tbl td.num, table.tbl th.num { text-align: right; font-variant-numeric: ta
 .btn.block { width: 100%; }
 .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
 
-/* ---------- Biểu mẫu ---------- */
+/* ---------- Forms ---------- */
 .field { margin-bottom: 14px; }
 .field label { display: block; font-size: 13px; font-weight: 550; margin-bottom: 6px; color: var(--text-2); }
 .field .hint { font-size: 12px; color: var(--muted); margin-top: 5px; }
-/* Dùng :not(...) thay vì liệt kê từng type, vì input KHÔNG khai báo type
-   sẽ không khớp với selector input[type=text] — đây từng là nguyên nhân
-   khiến vài ô nhập bị co hẹp thay vì rộng hết khung. */
+/* Uses :not(...) rather than listing each type: an <input> with no type
+   attribute never matches input[type=text], which is what once left a few
+   fields rendered narrow instead of filling their row. */
 input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=submit]):not([type=button]):not([type=range]):not([type=color]),
 select, textarea {
   width: 100%; font-family: var(--font); font-size: 13.5px; color: var(--text);
@@ -224,25 +224,25 @@ textarea { resize: vertical; min-height: 78px; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 14px; }
 .inline-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .inline-form input:not([type=checkbox]):not([type=radio]), .inline-form select { width: auto; flex: 1; min-width: 150px; }
-/* Viết là "label.check" chứ không phải ".check": các nhãn này nằm trong .field,
-   mà quy tắc ".field label { display:block }" có độ ưu tiên cao hơn ".check"
-   nên sẽ đè mất display:flex và làm ô tick rớt xuống dòng riêng. */
+/* Written as "label.check", not ".check": these labels sit inside .field, and
+   ".field label { display:block }" outranks a bare ".check", which would undo
+   display:flex and drop the checkbox onto its own line. */
 label.check { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 400; margin-bottom: 0; color: var(--text); }
 .check input { width: auto; }
 
-/* ---------- Thanh công cụ / bộ lọc ---------- */
+/* ---------- Toolbars and filters ---------- */
 .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
 .toolbar .grow { flex: 1; min-width: 180px; }
 .search-box { position: relative; flex: 1; min-width: 200px; max-width: 340px; }
 .search-box svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--muted); }
 .search-box input { padding-left: 32px; }
 
-/* ---------- Trạng thái rỗng ---------- */
+/* ---------- Empty states ---------- */
 .empty { text-align: center; padding: 42px 20px; color: var(--muted); }
 .empty svg { width: 34px; height: 34px; opacity: .4; margin-bottom: 10px; }
 .empty b { display: block; color: var(--text-2); font-size: 14px; margin-bottom: 4px; }
 
-/* ---------- Cây thư mục ---------- */
+/* ---------- Folder tree ---------- */
 .tree { font-size: 13.5px; }
 .tree-item {
   display: flex; align-items: center; gap: 8px; padding: 7px 10px;
@@ -312,7 +312,7 @@ label.perm-row { display: flex; align-items: center; gap: 9px; padding: 7px 9px;
 .typing span:nth-child(3) { animation-delay: .4s; }
 @keyframes blink { 0%, 60%, 100% { opacity: .25 } 30% { opacity: 1 } }
 
-/* ---------- Biểu đồ cột đơn giản ---------- */
+/* ---------- Simple bar chart ---------- */
 .bars { display: flex; align-items: flex-end; gap: 3px; height: 130px; padding-top: 8px; }
 .bars .bar { flex: 1; background: var(--primary-soft); border-radius: 3px 3px 0 0; position: relative; min-height: 2px; }
 .bars .bar > i { display: block; width: 100%; background: var(--primary); border-radius: 3px 3px 0 0; height: 100%; }
@@ -347,7 +347,7 @@ label.perm-row { display: flex; align-items: center; gap: 9px; padding: 7px 9px;
 .toast svg { width: 16px; height: 16px; flex: none; margin-top: 1px; }
 @keyframes slideIn { from { opacity: 0; transform: translateX(16px) } }
 
-/* ---------- Trang xác thực ---------- */
+/* ---------- Auth pages ---------- */
 .auth-wrap { min-height: 100vh; display: grid; grid-template-columns: 1fr 1fr; }
 .auth-side {
   background: linear-gradient(150deg, #1e1b4b, #312e81 55%, #4c1d95);
@@ -371,7 +371,7 @@ label.perm-row { display: flex; align-items: center; gap: 9px; padding: 7px 9px;
 .alert.success { background: var(--success-soft); color: var(--success); }
 .alert.info { background: var(--info-soft); color: var(--info); }
 
-/* ---------- Tiện ích ---------- */
+/* ---------- Utilities ---------- */
 .row { display: flex; gap: 10px; align-items: center; }
 .row.between { justify-content: space-between; }
 .row.wrap { flex-wrap: wrap; }
@@ -401,19 +401,17 @@ label.perm-row { display: flex; align-items: center; gap: 9px; padding: 7px 9px;
   .page, .topbar, .chat-scroll, .composer { padding-left: 16px; padding-right: 16px; }
 }
 
-/* ---------- Trang bảng giá ---------- */
+/* ---------- Pricing page ---------- */
 .pricing-head { text-align: center; max-width: 640px; margin: 0 auto 28px; }
 .pricing-head h1 { font-size: 30px; margin-bottom: 10px; }
 .pricing-head p { color: var(--muted); font-size: 15px; }
-.country-switch {
-  display: inline-flex; gap: 4px; padding: 4px; background: var(--surface);
-  border: 1px solid var(--border); border-radius: 10px; margin-top: 18px;
+/* Declared after ".pricing-head p" and with a tag in the selector: the two
+   otherwise tie on specificity and the plain colour would win on source order. */
+.pricing-head p.pricing-cta {
+  display: inline-block; margin: 16px auto 0; padding: 11px 22px;
+  background: var(--primary-soft); color: var(--primary);
+  border-radius: 999px; font-size: 14.5px; font-weight: 600; line-height: 1.5;
 }
-.country-switch button {
-  border: none; background: none; font-family: var(--font); font-size: 13.5px; font-weight: 550;
-  padding: 7px 16px; border-radius: 7px; cursor: pointer; color: var(--text-2);
-}
-.country-switch button.active { background: var(--primary); color: #fff; }
 .plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; align-items: start; }
 .plan-card {
   background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
@@ -441,18 +439,11 @@ label.perm-row { display: flex; align-items: center; gap: 9px; padding: 7px 9px;
 .pay-method .who b { display: block; font-size: 13.5px; }
 .pay-method .who span { font-size: 12px; color: var(--muted); }
 
-/* ---------- Đổi ngôn ngữ ---------- */
-.lang-switch { display: flex; gap: 3px; padding: 3px; background: rgba(255,255,255,.08); border-radius: 8px; margin-bottom: 8px; }
-.lang-switch button {
   flex: 1; border: none; background: none; color: var(--sidebar-text); cursor: pointer;
   font-family: var(--font); font-size: 12px; font-weight: 650; padding: 5px 0; border-radius: 6px; letter-spacing: .03em;
 }
-.lang-switch button.active { background: var(--primary); color: #fff; }
-.lang-switch.light { background: var(--surface-2); border: 1px solid var(--border); margin: 0; }
-.lang-switch.light button { color: var(--text-2); }
-.lang-switch.light button.active { background: var(--primary); color: #fff; }
 
-/* ---------- Dải băng dùng thử ---------- */
+/* ---------- Trial banner ---------- */
 .trial-bar {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 9px 20px; font-size: 13.5px;

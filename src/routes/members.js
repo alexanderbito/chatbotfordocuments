@@ -43,14 +43,15 @@ router.get('/', async (req, res) => {
 
 /**
  * POST /orgs/:orgId/members  { email, role }
- * Tạo lời mời. Nếu email đã có tài khoản trong hệ thống thì thêm thẳng vào tổ chức.
+ * Creates an invitation. If the email already has an account in the system, the
+ * user is added to the organization directly instead.
  */
 router.post('/', async (req, res) => {
   try {
     const email = String(req.body?.email || '').trim().toLowerCase();
     const role = req.body?.role === 'admin' ? 'admin' : 'member';
     if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
-      return res.status(400).json({ error: 'Email không hợp lệ' });
+      return res.status(400).json({ error: 'That email address is not valid' });
     }
 
     const quota = await checkQuota(req.org.id, req.org.plan, 'invite');
@@ -62,7 +63,7 @@ router.post('/', async (req, res) => {
       .eq('organization_id', req.org.id)
       .ilike('email', email)
       .maybeSingle();
-    if (existed) return res.status(400).json({ error: 'Email này đã có trong tổ chức' });
+    if (existed) return res.status(400).json({ error: 'That email is already part of this organization' });
 
     const { data: appUser } = await supabase
       .from('app_users')
@@ -87,7 +88,7 @@ router.post('/', async (req, res) => {
       .single();
     if (error) throw error;
 
-    await logEvent({ scope: 'auth', organizationId: req.org.id, userId: req.user.id, message: `Mời thành viên ${email} (${role})` });
+    await logEvent({ scope: 'auth', organizationId: req.org.id, userId: req.user.id, message: `Invited member ${email} (${role})` });
 
     res.json({
       member: data,
@@ -108,9 +109,9 @@ router.patch('/:memberId', async (req, res) => {
       .eq('id', req.params.memberId)
       .eq('organization_id', req.org.id)
       .maybeSingle();
-    if (!member) return res.status(404).json({ error: 'Không tìm thấy thành viên' });
+    if (!member) return res.status(404).json({ error: 'Member not found' });
     if (member.user_id && member.user_id === req.org.owner_id) {
-      return res.status(400).json({ error: 'Không thể thay đổi quyền của chủ sở hữu tổ chức' });
+      return res.status(400).json({ error: 'The role of the organization owner cannot be changed' });
     }
 
     const patch = {};
@@ -139,23 +140,24 @@ router.delete('/:memberId', async (req, res) => {
       .eq('id', req.params.memberId)
       .eq('organization_id', req.org.id)
       .maybeSingle();
-    if (!member) return res.status(404).json({ error: 'Không tìm thấy thành viên' });
+    if (!member) return res.status(404).json({ error: 'Member not found' });
     if (member.user_id === req.org.owner_id) {
-      return res.status(400).json({ error: 'Không thể gỡ chủ sở hữu tổ chức' });
+      return res.status(400).json({ error: 'The organization owner cannot be removed' });
     }
 
     await supabase.from('organization_members').delete().eq('id', req.params.memberId);
 
-    // Gỡ luôn quyền đọc các thư mục riêng tư, tránh để lại quyền "mồ côi"
-    // sẽ sống lại nếu sau này mời cùng email đó vào tổ chức.
+    // Revoke their read access to private folders as well, so no orphaned grant
+    // is left behind that would silently come back to life if the same email is
+    // invited into the organization again later.
     await supabase
       .from('folder_permissions')
       .delete()
       .eq('organization_id', req.org.id)
       .eq('email', String(member.email).toLowerCase());
 
-    await logEvent({ scope: 'auth', organizationId: req.org.id, userId: req.user.id, message: `Gỡ thành viên ${member.email} và thu hồi quyền thư mục riêng tư` });
-    res.json({ message: 'Đã gỡ thành viên khỏi tổ chức' });
+    await logEvent({ scope: 'auth', organizationId: req.org.id, userId: req.user.id, message: `Removed member ${member.email} and revoked their private folder access` });
+    res.json({ message: 'Member removed from the organization' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

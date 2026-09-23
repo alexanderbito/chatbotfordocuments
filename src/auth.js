@@ -3,7 +3,7 @@ import { trialStatus, EXPIRED_MESSAGE } from './trials.js';
 import { isSystemAdminEmail } from './systemAdmins.js';
 
 /**
- * Lấy access token từ header Authorization: Bearer <token>
+ * Read the access token from the Authorization: Bearer <token> header.
  */
 function getToken(req) {
   const header = req.headers.authorization || '';
@@ -11,16 +11,16 @@ function getToken(req) {
 }
 
 /**
- * Bắt buộc đăng nhập. Gắn req.user = { id, email, full_name, is_system_admin, ... }
+ * Require a signed-in user. Sets req.user = { id, email, full_name, is_system_admin, ... }
  */
 export async function requireAuth(req, res, next) {
   try {
     const token = getToken(req);
-    if (!token) return res.status(401).json({ error: 'Bạn cần đăng nhập để tiếp tục' });
+    if (!token) return res.status(401).json({ error: 'You need to sign in to continue' });
 
     const { data, error } = await supabase.auth.getUser(token);
     if (error || !data?.user) {
-      return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại' });
+      return res.status(401).json({ error: 'Your session has expired, please sign in again' });
     }
 
     const { data: profile } = await supabase
@@ -30,20 +30,21 @@ export async function requireAuth(req, res, next) {
       .maybeSingle();
 
     if (profile?.status === 'disabled') {
-      return res.status(403).json({ error: 'Tài khoản đã bị khoá' });
+      return res.status(403).json({ error: 'This account has been disabled' });
     }
 
-    // Quyền admin hệ thống: cờ trong CSDL HOẶC email nằm trong SYSTEM_ADMIN_EMAILS.
-    // Vế thứ hai là đường "phá kính lấy búa" để lập tài khoản đầu tiên và để
-    // lấy lại quyền nếu lỡ tự gỡ mất.
+    // System admin rights: the flag in the database OR the email being listed in
+    // SYSTEM_ADMIN_EMAILS. The second path is the break-glass route for creating the
+    // very first account, and for getting access back if the flag is removed by mistake.
     const byEnv = isSystemAdminEmail(data.user.email);
     const isSystemAdmin = !!profile?.is_system_admin || byEnv;
 
-    // Nếu được cấp qua biến môi trường mà CSDL chưa ghi nhận thì đồng bộ lại,
-    // để các trang liệt kê người dùng hiển thị đúng.
+    // If the right comes from the environment variable but the database has not
+    // recorded it yet, sync the flag back so the user listing pages show the correct
+    // state.
     if (byEnv && profile && !profile.is_system_admin) {
       supabase.from('app_users').update({ is_system_admin: true }).eq('id', data.user.id)
-        .then(() => {}, (err) => console.error('không đồng bộ được cờ admin:', err.message));
+        .then(() => {}, (err) => console.error('could not sync the admin flag:', err.message));
     }
 
     req.user = {
@@ -56,22 +57,22 @@ export async function requireAuth(req, res, next) {
     next();
   } catch (err) {
     console.error('requireAuth error:', err);
-    res.status(500).json({ error: 'Lỗi xác thực: ' + err.message });
+    res.status(500).json({ error: 'Authentication failed: ' + err.message });
   }
 }
 
 /**
- * Chỉ cho phép admin hệ thống (super admin).
+ * Allow system admins (super admins) only.
  */
 export function requireSystemAdmin(req, res, next) {
   if (!req.user?.is_system_admin) {
-    return res.status(403).json({ error: 'Chỉ admin hệ thống mới được truy cập khu vực này' });
+    return res.status(403).json({ error: 'Only system admins can access this area' });
   }
   next();
 }
 
 /**
- * Tìm organization_id trong params / body / query / header.
+ * Find the organization_id in the params / body / query / headers.
  */
 function resolveOrgId(req) {
   return (
@@ -85,13 +86,13 @@ function resolveOrgId(req) {
 }
 
 /**
- * Bắt buộc là thành viên của tổ chức. Gắn req.org và req.membership.
- * Admin hệ thống luôn đi qua được (role = 'system').
+ * Require membership of the organization. Sets req.org and req.membership.
+ * System admins always pass through (role = 'system').
  */
 export async function requireOrgMember(req, res, next) {
   try {
     const orgId = resolveOrgId(req);
-    if (!orgId) return res.status(400).json({ error: 'Thiếu mã tổ chức (organization_id)' });
+    if (!orgId) return res.status(400).json({ error: 'Missing organization id (organization_id)' });
 
     const { data: org, error: orgErr } = await supabase
       .from('organizations')
@@ -100,7 +101,7 @@ export async function requireOrgMember(req, res, next) {
       .maybeSingle();
 
     if (orgErr) throw orgErr;
-    if (!org) return res.status(404).json({ error: 'Không tìm thấy tổ chức' });
+    if (!org) return res.status(404).json({ error: 'Organization not found' });
 
     if (req.user.is_system_admin) {
       req.org = org;
@@ -110,7 +111,7 @@ export async function requireOrgMember(req, res, next) {
     }
 
     if (org.status === 'suspended') {
-      return res.status(403).json({ error: 'Tổ chức đang bị tạm khoá. Vui lòng liên hệ quản trị hệ thống.' });
+      return res.status(403).json({ error: 'This organization is suspended. Please contact your system administrator.' });
     }
 
     const { data: membership } = await supabase
@@ -121,7 +122,7 @@ export async function requireOrgMember(req, res, next) {
       .maybeSingle();
 
     if (!membership || membership.status !== 'active') {
-      return res.status(403).json({ error: 'Bạn không thuộc tổ chức này' });
+      return res.status(403).json({ error: 'You are not a member of this organization' });
     }
 
     req.org = org;
@@ -135,14 +136,14 @@ export async function requireOrgMember(req, res, next) {
 }
 
 /**
- * Chặn các hành động chính khi gói dùng thử đã hết hạn.
+ * Block the main actions once the trial has expired.
  *
- * Cố ý KHÔNG chặn ở requireOrgMember: admin vẫn phải vào được trang gói cước
- * và thiết lập để nâng cấp. Chỉ chặn những việc tiêu tốn tài nguyên:
- * tải tài liệu lên và hỏi chatbot.
+ * This deliberately does NOT block inside requireOrgMember: admins still need to
+ * reach the billing and settings pages in order to upgrade. Only the actions that
+ * consume resources are blocked: uploading documents and querying the chatbot.
  */
 export function blockIfTrialExpired(req, res, next) {
-  if (req.membership?.system) return next();      // admin hệ thống luôn qua
+  if (req.membership?.system) return next();      // system admins always pass
   if (req.trial?.isTrial && req.trial.expired) {
     return res.status(402).json({
       error: EXPIRED_MESSAGE,
@@ -154,11 +155,11 @@ export function blockIfTrialExpired(req, res, next) {
 }
 
 /**
- * Bắt buộc là admin của tổ chức (chạy sau requireOrgMember).
+ * Require an organization admin (runs after requireOrgMember).
  */
 export function requireOrgAdmin(req, res, next) {
   if (req.membership?.role !== 'admin') {
-    return res.status(403).json({ error: 'Chỉ admin của tổ chức mới được thực hiện thao tác này' });
+    return res.status(403).json({ error: 'Only organization admins can do this' });
   }
   next();
 }

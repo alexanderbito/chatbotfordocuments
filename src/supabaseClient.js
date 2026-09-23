@@ -2,8 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 import 'dotenv/config';
 
 /**
- * Client quyền quản trị (service_role) — dùng cho mọi thao tác đọc/ghi ở backend.
- * TUYỆT ĐỐI không đưa key này ra frontend.
+ * Service-role client, used for every backend read and write.
+ * This key must NEVER be exposed to the browser.
  */
 export const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -12,8 +12,8 @@ export const supabase = createClient(
 );
 
 /**
- * Client dùng cho đăng nhập (anon key). Nếu chưa khai báo SUPABASE_ANON_KEY
- * thì tạm dùng service_role — vẫn chạy được nhưng nên khai báo anon key cho đúng chuẩn.
+ * Client used for sign-in (anon key). Falls back to the service-role key when
+ * SUPABASE_ANON_KEY is missing: it works, but the anon key is the correct one.
  */
 export const supabaseAuth = createClient(
   process.env.SUPABASE_URL,

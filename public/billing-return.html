@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Kết quả thanh toán — DocBot</title>
+<title>Payment result — DocBot</title>
 <link rel="stylesheet" href="/assets/app.css" />
 </head>
 <body>
@@ -11,14 +11,13 @@
   <div class="card" style="max-width:460px;width:100%;margin:0">
     <div class="card-body" id="box" style="text-align:center;padding:36px 28px">
       <div class="loading-line"></div>
-      <p class="muted mt-2 mb-0">Đang kiểm tra kết quả thanh toán…</p>
+      <p class="muted mt-2 mb-0">Checking your payment…</p>
     </div>
   </div>
 </div>
 
 <script type="module">
-import { api, Session, requireSession, fmt, esc, icon, t, money, observeAndTranslate } from '/assets/app.js';
-observeAndTranslate();
+import {api, Session, requireSession, fmt, esc, icon, t, money} from '/assets/app.js';
 
 const params = new URLSearchParams(location.search);
 const paymentId = params.get('payment');
@@ -40,52 +39,52 @@ function show(kind, title, detail, actions) {
     <div class="btn-row mt-2" style="justify-content:center">${actions}</div>`;
 }
 
-const backBtns = '<a class="btn primary" href="/admin.html#billing">Về trang gói cước</a><a class="btn" href="/pricing.html">Xem bảng giá</a>';
+const backBtns = '<a class="btn primary" href="/admin.html#billing">Back to billing</a><a class="btn" href="/pricing.html">See pricing</a>';
 
 if (!paymentId) {
-  show('err', 'Thiếu thông tin giao dịch', 'Đường dẫn không hợp lệ.', backBtns);
+  show('err', 'Missing transaction details', 'This link is not valid.', backBtns);
 } else if (cancelled) {
-  show('warn', 'Bạn đã huỷ thanh toán', 'Không có khoản tiền nào bị trừ. Bạn có thể chọn lại gói bất kỳ lúc nào.', backBtns);
+  show('warn', 'Payment cancelled', 'Nothing was charged. You can pick a plan again at any time.', backBtns);
 } else {
-  // Tìm tổ chức chứa giao dịch này
+  // Find which organization this payment belongs to.
   let orgId = null, payment = null;
   for (const id of orgIds) {
     try {
       payment = await api(`/orgs/${id}/billing/payments/${paymentId}`);
       orgId = id; break;
-    } catch { /* thử tổ chức tiếp theo */ }
+    } catch { /* try the next organization */ }
   }
 
   if (!payment) {
-    show('err', 'Không tìm thấy giao dịch', 'Giao dịch không tồn tại hoặc không thuộc doanh nghiệp của bạn.', backBtns);
+    show('err', 'Transaction not found', 'This transaction does not exist or does not belong to your organization.', backBtns);
   } else {
-    // PayPal cần gọi thu tiền sau khi khách bấm đồng ý
+    // PayPal needs an explicit capture once the payer approves.
     if (payment.provider === 'paypal' && payment.status !== 'paid') {
       try { await api(`/orgs/${orgId}/billing/payments/${paymentId}/capture`, { method: 'POST' }); }
       catch (err) { console.error('capture:', err.message); }
     }
 
-    // payOS báo qua webhook nên có độ trễ — hỏi lại vài lần
+    // The webhook can land a moment after the redirect, so poll a few times.
     let tries = 0;
     const poll = async () => {
       tries++;
-      try { payment = await api(`/orgs/${orgId}/billing/payments/${paymentId}`); } catch { /* giữ dữ liệu cũ */ }
+      try { payment = await api(`/orgs/${orgId}/billing/payments/${paymentId}`); } catch { /* keep the previous snapshot */ }
 
       if (payment.status === 'paid') {
-        const amount = money(payment.amount, payment.currency);
-        show('ok', 'Thanh toán thành công',
-          `Gói <b>${esc(payment.plan?.name || '')}</b> đã được kích hoạt.<br>Số tiền: <b>${esc(amount)}</b>`,
+        const amount = money(payment.amount);
+        show('ok', 'Payment successful',
+          `The <b>${esc(payment.plan?.name || '')}</b> plan is now active.<br>Amount paid: <b>${esc(amount)}</b>`,
           backBtns);
         return;
       }
       if (['failed', 'expired', 'cancelled'].includes(payment.status)) {
-        show('err', 'Thanh toán chưa hoàn tất', 'Giao dịch không thành công. Bạn có thể thử lại.', backBtns);
+        show('err', 'Payment not completed', 'The transaction did not go through. You can try again.', backBtns);
         return;
       }
       if (tries >= 12) {
-        show('warn', 'Chưa nhận được xác nhận',
-          'Nếu bạn đã chuyển tiền, hệ thống sẽ tự cập nhật trong vài phút. Tải lại trang này để kiểm tra.',
-          `<button class="btn primary" onclick="location.reload()">Kiểm tra lại</button>` + backBtns);
+        show('warn', 'Still waiting for confirmation',
+          'If you have already paid, this will update within a few minutes. Reload to check.',
+          `<button class="btn primary" onclick="location.reload()">Check again</button>` + backBtns);
         return;
       }
       setTimeout(poll, 2500);

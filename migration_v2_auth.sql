@@ -1,14 +1,14 @@
 -- =====================================================================
--- MIGRATION V2 — Auth, phân quyền, thư mục, thành viên, gói cước, nhật ký
--- Chạy toàn bộ file này trong Supabase Dashboard > SQL Editor > New query > Run
--- An toàn khi chạy lại nhiều lần (idempotent).
+-- MIGRATION V2 — Auth, permissions, folders, members, plans, and logs
+-- Run this entire file in Supabase Dashboard > SQL Editor > New query > Run
+-- Safe to run more than once (idempotent).
 -- =====================================================================
 
 create extension if not exists vector;
 create extension if not exists pgcrypto;
 
 -- ---------------------------------------------------------------------
--- 1. Hồ sơ người dùng (ánh xạ 1-1 với auth.users của Supabase Auth)
+-- 1. User profiles (mapped one-to-one onto auth.users from Supabase Auth)
 -- ---------------------------------------------------------------------
 create table if not exists app_users (
   id uuid primary key,
@@ -24,14 +24,14 @@ create table if not exists app_users (
 create index if not exists app_users_email_idx on app_users (lower(email));
 
 -- ---------------------------------------------------------------------
--- 2. Gói cước
+-- 2. Subscription plans
 -- ---------------------------------------------------------------------
 create table if not exists plans (
   id uuid primary key default gen_random_uuid(),
   code text unique not null,               -- free | pro | business ...
   name text not null,
   description text,
-  price_vnd bigint not null default 0,     -- giá / tháng
+  price_vnd bigint not null default 0,     -- price per month
   max_documents int not null default 20,
   max_members int not null default 5,
   max_storage_mb int not null default 100,
@@ -43,13 +43,13 @@ create table if not exists plans (
 
 insert into plans (code, name, description, price_vnd, max_documents, max_members, max_storage_mb, max_questions_per_month, sort_order)
 values
-  ('free',     'Dùng thử',  'Miễn phí, dùng để trải nghiệm hệ thống',        0,        20,   5,   100,   500, 1),
-  ('pro',      'Chuyên nghiệp', 'Phù hợp doanh nghiệp nhỏ và vừa',      490000,       500,  30,  5000, 10000, 2),
-  ('business', 'Doanh nghiệp',  'Không giới hạn thực tế, hỗ trợ ưu tiên', 1990000,   10000, 300, 50000, 100000, 3)
+  ('free',     'Free trial',   'Free of charge, for trying the system out',   0,        20,   5,   100,   500, 1),
+  ('pro',      'Professional', 'A good fit for small and medium businesses', 490000,   500,  30,  5000, 10000, 2),
+  ('business', 'Business',     'No practical limits, priority support',   1990000,   10000, 300, 50000, 100000, 3)
 on conflict (code) do nothing;
 
 -- ---------------------------------------------------------------------
--- 3. Bổ sung cột cho bảng organizations
+-- 3. Additional columns on the organizations table
 -- ---------------------------------------------------------------------
 alter table organizations add column if not exists owner_id uuid;
 alter table organizations add column if not exists plan_id uuid references plans(id);
@@ -61,13 +61,13 @@ alter table organizations add column if not exists tax_code text;
 alter table organizations add column if not exists contact_email text;
 alter table organizations add column if not exists note text;
 
--- Gán gói Dùng thử cho các tổ chức cũ chưa có gói
+-- Assign the free trial plan to existing organizations that have no plan yet
 update organizations
 set plan_id = (select id from plans where code = 'free')
 where plan_id is null;
 
 -- ---------------------------------------------------------------------
--- 4. Thành viên tổ chức
+-- 4. Organization members
 -- ---------------------------------------------------------------------
 create table if not exists organization_members (
   id uuid primary key default gen_random_uuid(),
@@ -89,7 +89,7 @@ create unique index if not exists organization_members_invite_token_idx
   on organization_members (invite_token) where invite_token is not null;
 
 -- ---------------------------------------------------------------------
--- 5. Thư mục tài liệu (cây lồng nhau)
+-- 5. Document folders (a nested tree)
 -- ---------------------------------------------------------------------
 create table if not exists folders (
   id uuid primary key default gen_random_uuid(),
@@ -104,7 +104,7 @@ create index if not exists folders_org_idx on folders (organization_id);
 create index if not exists folders_parent_idx on folders (parent_id);
 
 -- ---------------------------------------------------------------------
--- 6. Bổ sung cột cho documents / document_chunks
+-- 6. Additional columns on documents / document_chunks
 -- ---------------------------------------------------------------------
 alter table documents add column if not exists folder_id uuid references folders(id) on delete set null;
 alter table documents add column if not exists uploaded_by uuid;
@@ -120,7 +120,7 @@ alter table document_chunks add column if not exists folder_id uuid;
 create index if not exists document_chunks_folder_idx on document_chunks (folder_id);
 
 -- ---------------------------------------------------------------------
--- 7. Lịch sử hỏi đáp
+-- 7. Question and answer history
 -- ---------------------------------------------------------------------
 create table if not exists chat_messages (
   id uuid primary key default gen_random_uuid(),
@@ -138,7 +138,7 @@ create table if not exists chat_messages (
 create index if not exists chat_messages_org_idx on chat_messages (organization_id, created_at desc);
 
 -- ---------------------------------------------------------------------
--- 8. Nhật ký hệ thống
+-- 8. System logs
 -- ---------------------------------------------------------------------
 create table if not exists system_logs (
   id uuid primary key default gen_random_uuid(),
@@ -155,7 +155,7 @@ create index if not exists system_logs_created_idx on system_logs (created_at de
 create index if not exists system_logs_level_idx on system_logs (level);
 
 -- ---------------------------------------------------------------------
--- 9. Thanh toán
+-- 9. Payments
 -- ---------------------------------------------------------------------
 create table if not exists payments (
   id uuid primary key default gen_random_uuid(),
@@ -175,7 +175,7 @@ create table if not exists payments (
 create index if not exists payments_org_idx on payments (organization_id, created_at desc);
 
 -- ---------------------------------------------------------------------
--- 10. Hàm tìm kiếm ngữ nghĩa (có thêm lọc theo thư mục)
+-- 10. Semantic search function (with optional folder filtering)
 -- ---------------------------------------------------------------------
 create or replace function match_document_chunks(
   query_embedding vector(1024),
@@ -212,7 +212,7 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------
--- 11. Thống kê nhanh cho console admin hệ thống
+-- 11. Quick statistics for the system admin console
 -- ---------------------------------------------------------------------
 create or replace function admin_daily_stats(days_back int default 30)
 returns table (day date, questions bigint, documents bigint, organizations bigint)
@@ -232,7 +232,7 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------
--- 12. RLS — backend dùng service_role nên bypass; bật để chặn truy cập trực tiếp
+-- 12. RLS — the backend uses service_role and therefore bypasses it; enabled to block direct access
 -- ---------------------------------------------------------------------
 alter table documents           enable row level security;
 alter table document_chunks     enable row level security;
@@ -244,8 +244,8 @@ alter table system_logs         enable row level security;
 alter table app_users           enable row level security;
 
 -- =====================================================================
--- SAU KHI CHẠY XONG: tạo tài khoản admin hệ thống đầu tiên bằng cách
--- đăng ký trên giao diện /register.html rồi chạy lệnh dưới đây:
+-- AFTER THIS FILE HAS RUN: create the first system admin account by
+-- signing up through /register.html, then running the statement below:
 --
---   update app_users set is_system_admin = true where email = 'email-cua-ban@example.com';
+--   update app_users set is_system_admin = true where email = 'your-email@example.com';
 -- =====================================================================

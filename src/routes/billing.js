@@ -2,43 +2,30 @@ import express from 'express';
 import { supabase } from '../supabaseClient.js';
 import { requireAuth, requireOrgMember, requireOrgAdmin } from '../auth.js';
 import { logEvent } from '../logger.js';
-import {
-  availableProviders, startCheckout, markPaid, findPayment, getProvider, payos, paypal,
-} from '../payments/index.js';
+import { availableProviders, startCheckout, markPaid, findPayment, paypal } from '../payments/index.js';
 
 const router = express.Router({ mergeParams: true });
 
 // =====================================================================
-// PHẦN CÔNG KHAI — không cần đăng nhập
+// PUBLIC — no authentication required
 // =====================================================================
 
-/** GET /billing/plans?country=VN — bảng giá theo quốc gia */
+/** GET /public/billing/plans — the price list shown on the marketing page. */
 export const publicRouter = express.Router();
 
 publicRouter.get('/plans', async (req, res) => {
   try {
-    // Tiền tệ đi theo NGÔN NGỮ người dùng đang chọn: tiếng Việt -> VNĐ, tiếng Anh -> USD.
-    // Vẫn nhận tham số country cũ để không phá link đã lưu ở đâu đó.
-    const currency = String(req.query.currency || (String(req.query.country || 'VN').toUpperCase() === 'VN' ? 'VND' : 'USD')).toUpperCase();
-    const isVND = currency !== 'USD';
-
     const { data, error } = await supabase
       .from('plans')
-      .select('id, code, name, name_en, description, description_en, price_vnd, price_usd, trial_days, ocr_enabled, max_documents, max_members, max_storage_mb, max_questions_per_month, max_ocr_pages_per_month')
+      .select('id, code, name, description, price_usd, trial_days, ocr_enabled, max_documents, max_members, max_storage_mb, max_questions_per_month, max_ocr_pages_per_month')
       .eq('is_active', true)
       .order('sort_order');
     if (error) throw error;
 
     res.json({
-      currency: isVND ? 'VND' : 'USD',
-      providers: availableProviders(isVND ? 'VN' : 'INTERNATIONAL'),
-      plans: (data || []).map((p) => ({
-        ...p,
-        // Tiếng Anh dùng name_en nếu admin đã điền, không thì giữ tên tiếng Việt
-        name: isVND ? p.name : (p.name_en || p.name),
-        description: isVND ? p.description : (p.description_en || p.description),
-        price: isVND ? Number(p.price_vnd) : Number(p.price_usd),
-      })),
+      currency: 'USD',
+      providers: availableProviders(),
+      plans: (data || []).map((p) => ({ ...p, price: Number(p.price_usd) })),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -46,22 +33,22 @@ publicRouter.get('/plans', async (req, res) => {
 });
 
 // =====================================================================
-// PHẦN CẦN ĐĂNG NHẬP — admin tổ chức
+// AUTHENTICATED — organization admins only
 // =====================================================================
 router.use(requireAuth, requireOrgMember, requireOrgAdmin);
 
 /**
  * POST /orgs/:orgId/billing/checkout { plan_id, provider }
- * Lưu ý: KHÔNG nhận số tiền từ trình duyệt. Giá lấy từ bảng plans.
+ * The browser never sends an amount. Prices always come from the plans table.
  */
 router.post('/checkout', async (req, res) => {
   try {
     const { plan_id, provider } = req.body || {};
-    if (!plan_id || !provider) return res.status(400).json({ error: 'Thiếu gói hoặc phương thức thanh toán' });
+    if (!plan_id || !provider) return res.status(400).json({ error: 'Plan and payment method are required' });
 
     const { data: plan } = await supabase.from('plans').select('*').eq('id', plan_id).maybeSingle();
-    if (!plan) return res.status(404).json({ error: 'Không tìm thấy gói cước' });
-    if (!plan.is_active) return res.status(400).json({ error: 'Gói này đã ngừng bán' });
+    if (!plan) return res.status(404).json({ error: 'Plan not found' });
+    if (!plan.is_active) return res.status(400).json({ error: 'This plan is no longer on sale' });
 
     const result = await startCheckout({
       org: req.org,
@@ -71,10 +58,6 @@ router.post('/checkout', async (req, res) => {
       userId: req.user.id,
     });
 
-    // Ghi nhớ quốc gia thanh toán để lần sau gợi ý đúng
-    const country = provider === 'payos' ? 'VN' : 'INTERNATIONAL';
-    await supabase.from('organizations').update({ billing_country: country }).eq('id', req.org.id);
-
     res.json(result);
   } catch (err) {
     console.error('checkout error:', err);
@@ -82,7 +65,7 @@ router.post('/checkout', async (req, res) => {
   }
 });
 
-/** GET /orgs/:orgId/billing/payments/:paymentId — trạng thái một giao dịch (trang chờ gọi) */
+/** GET /orgs/:orgId/billing/payments/:paymentId — status of one transaction. */
 router.get('/payments/:paymentId', async (req, res) => {
   try {
     const { data: payment } = await supabase
@@ -91,7 +74,7 @@ router.get('/payments/:paymentId', async (req, res) => {
       .eq('id', req.params.paymentId)
       .eq('organization_id', req.org.id)
       .maybeSingle();
-    if (!payment) return res.status(404).json({ error: 'Không tìm thấy giao dịch' });
+    if (!payment) return res.status(404).json({ error: 'Transaction not found' });
 
     res.json(payment);
   } catch (err) {
@@ -101,8 +84,8 @@ router.get('/payments/:paymentId', async (req, res) => {
 
 /**
  * POST /orgs/:orgId/billing/payments/:paymentId/capture
- * PayPal cần bước thu tiền sau khi khách bấm đồng ý. Gọi khi khách quay về.
- * Webhook vẫn là đường dự phòng nếu khách đóng tab trước khi quay lại.
+ * PayPal needs an explicit capture once the payer approves, so the return page
+ * calls this. The webhook remains the fallback if the payer closes the tab.
  */
 router.post('/payments/:paymentId/capture', async (req, res) => {
   try {
@@ -112,8 +95,8 @@ router.post('/payments/:paymentId/capture', async (req, res) => {
       .eq('id', req.params.paymentId)
       .eq('organization_id', req.org.id)
       .maybeSingle();
-    if (!payment) return res.status(404).json({ error: 'Không tìm thấy giao dịch' });
-    if (payment.provider !== 'paypal') return res.status(400).json({ error: 'Chỉ áp dụng cho PayPal' });
+    if (!payment) return res.status(404).json({ error: 'Transaction not found' });
+    if (payment.provider !== 'paypal') return res.status(400).json({ error: 'Only PayPal transactions can be captured' });
 
     if (payment.status === 'paid') return res.json({ status: 'paid', activated: false });
 
@@ -131,57 +114,15 @@ router.post('/payments/:paymentId/capture', async (req, res) => {
 export default router;
 
 // =====================================================================
-// WEBHOOK — công khai, KHÔNG có middleware đăng nhập.
-// Bảo vệ bằng chữ ký của chính cổng thanh toán.
+// WEBHOOK — public, with NO authentication middleware.
+// Protected by the gateway's own request signature instead.
 // =====================================================================
 export const webhookRouter = express.Router();
 
-/** payOS gọi vào đây mỗi khi có biến động thanh toán. */
-webhookRouter.post('/payos', express.json(), async (req, res) => {
-  try {
-    // payOS gửi một request kiểm tra khi đăng ký URL — trả 200 để nó chấp nhận
-    if (!req.body?.signature) return res.json({ success: true });
-
-    const info = await payos.verifyWebhook({ body: req.body });
-
-    const payment = await findPayment({ orderCode: info.orderCode, provider: 'payos' });
-    if (!payment) {
-      await logEvent({ level: 'warn', scope: 'billing', message: `Webhook payOS cho đơn lạ: ${info.orderCode}` });
-      return res.json({ success: true });   // vẫn trả 200 để payOS thôi gọi lại
-    }
-
-    if (!info.paid) {
-      await logEvent({ scope: 'billing', organizationId: payment.organization_id, message: `Giao dịch payOS chưa thành công (${info.raw?.desc || ''})` });
-      return res.json({ success: true });
-    }
-
-    // Kiểm tra số tiền khớp với số máy chủ đã chốt — chặn trường hợp bị sửa
-    if (Math.round(Number(payment.amount)) !== Math.round(info.amount)) {
-      await logEvent({
-        level: 'error',
-        scope: 'billing',
-        organizationId: payment.organization_id,
-        message: 'Số tiền webhook payOS không khớp với đơn đã tạo',
-        detail: { expected: payment.amount, received: info.amount, payment_id: payment.id },
-      });
-      return res.json({ success: true });
-    }
-
-    await markPaid({ payment, providerRef: info.providerRef, raw: info.raw });
-    res.json({ success: true });
-  } catch (err) {
-    if (err.invalidSignature) {
-      await logEvent({ level: 'error', scope: 'billing', message: 'Webhook payOS có chữ ký không hợp lệ — đã từ chối' });
-      return res.status(401).json({ error: 'invalid signature' });
-    }
-    console.error('payos webhook error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 /**
- * PayPal gọi vào đây. Dùng express.raw() vì phải gửi lại thân request
- * NGUYÊN VĂN cho API xác thực chữ ký của PayPal.
+ * PayPal posts here. Uses express.raw() because the signature check has to be
+ * given the request body VERBATIM — re-serializing a parsed object can reorder
+ * keys or change how numbers are written, and the signature then fails.
  */
 webhookRouter.post('/paypal', express.raw({ type: '*/*' }), async (req, res) => {
   try {
@@ -191,7 +132,7 @@ webhookRouter.post('/paypal', express.raw({ type: '*/*' }), async (req, res) => 
 
     const payment = await findPayment({ id: info.paymentId, provider: 'paypal' });
     if (!payment) {
-      await logEvent({ level: 'warn', scope: 'billing', message: `Webhook PayPal cho giao dịch lạ: ${info.paymentId}` });
+      await logEvent({ level: 'warn', scope: 'billing', message: `PayPal webhook for an unknown transaction: ${info.paymentId}` });
       return res.json({ received: true });
     }
 
@@ -200,7 +141,7 @@ webhookRouter.post('/paypal', express.raw({ type: '*/*' }), async (req, res) => 
         level: 'error',
         scope: 'billing',
         organizationId: payment.organization_id,
-        message: 'Số tiền webhook PayPal không khớp với đơn đã tạo',
+        message: 'PayPal webhook amount does not match the amount on the order',
         detail: { expected: payment.amount, received: info.amount, payment_id: payment.id },
       });
       return res.json({ received: true });
@@ -210,7 +151,7 @@ webhookRouter.post('/paypal', express.raw({ type: '*/*' }), async (req, res) => 
     res.json({ received: true });
   } catch (err) {
     if (err.invalidSignature) {
-      await logEvent({ level: 'error', scope: 'billing', message: 'Webhook PayPal có chữ ký không hợp lệ — đã từ chối' });
+      await logEvent({ level: 'error', scope: 'billing', message: 'Rejected a PayPal webhook with an invalid signature' });
       return res.status(401).json({ error: 'invalid signature' });
     }
     console.error('paypal webhook error:', err);

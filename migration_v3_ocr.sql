@@ -1,43 +1,43 @@
 -- =====================================================================
--- MIGRATION V3 — OCR cho PDF scan (dùng Gemini)
--- Chạy trong Supabase Dashboard > SQL Editor > New query > Run
--- An toàn khi chạy lại nhiều lần.
--- Yêu cầu: đã chạy migration_v2_auth.sql trước đó.
+-- MIGRATION V3 — OCR for scanned PDFs (uses Gemini)
+-- Run in Supabase Dashboard > SQL Editor > New query > Run
+-- Safe to run more than once.
+-- Requires: migration_v2_auth.sql must already have been run.
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
--- KIỂM TRA ĐIỀU KIỆN: dừng sớm với thông báo rõ ràng nếu chạy sai thứ tự
+-- PRECONDITION CHECK: stop early with a clear message if the files are run out of order
 -- ---------------------------------------------------------------------
 do $guard$
 begin
   if to_regclass('public.plans') is null then
-    raise exception E'Thieu bang "plans".\n=> Ban chua chay migration_v2_auth.sql. Hay chay file do truoc, roi quay lai file nay.\n=> Neu chac chan da chay roi: kiem tra xem SQL Editor co dang mo dung project Supabase ma Render dang dung khong.';
+    raise exception E'Missing table "plans".\n=> You have not run migration_v2_auth.sql yet. Run that file first, then come back to this one.\n=> If you are certain you already ran it: check that the SQL Editor is open on the same Supabase project that Render is using.';
   end if;
   if to_regclass('public.documents') is null then
-    raise exception E'Thieu bang "documents".\n=> Ban chua chay supabase_schema.sql. Hay chay file do truoc.';
+    raise exception E'Missing table "documents".\n=> You have not run supabase_schema.sql yet. Run that file first.';
   end if;
 end
 $guard$;
 
--- 1. Hạn mức số trang OCR mỗi tháng theo gói cước
+-- 1. Monthly OCR page allowance per plan
 alter table plans add column if not exists max_ocr_pages_per_month int not null default 50;
 
 update plans set max_ocr_pages_per_month = 50    where code = 'free'     and max_ocr_pages_per_month = 50;
 update plans set max_ocr_pages_per_month = 2000  where code = 'pro';
 update plans set max_ocr_pages_per_month = 20000 where code = 'business';
 
--- 2. Thông tin OCR trên từng tài liệu
---    extraction_method: text (đọc text thật) | ocr (nhận dạng ảnh) | mixed
+-- 2. Per-document OCR information
+--    extraction_method: text (real embedded text) | ocr (recognised from images) | mixed
 alter table documents add column if not exists extraction_method text default 'text';
 alter table documents add column if not exists ocr_pages int default 0;
 alter table documents add column if not exists page_count int default 0;
 
--- Trạng thái documents.status nay có thêm giá trị 'ocr_processing'
--- (cột là text không có ràng buộc check nên không cần đổi gì thêm)
+-- documents.status now has one more possible value, 'ocr_processing'
+-- (the column is plain text with no check constraint, so nothing else has to change)
 
 create index if not exists documents_status_idx on documents (status);
 
--- 3. Đếm số trang OCR đã dùng trong tháng của một tổ chức
+-- 3. Count the OCR pages an organization has used during the current month
 create or replace function org_ocr_pages_this_month(match_org_id uuid)
 returns bigint
 language sql stable
@@ -48,7 +48,7 @@ as $$
     and created_at >= date_trunc('month', now());
 $$;
 
--- 4. Thống kê OCR toàn hệ thống cho console admin hệ thống
+-- 4. System-wide OCR statistics for the system admin console
 create or replace function admin_ocr_summary()
 returns table (
   total_ocr_documents bigint,

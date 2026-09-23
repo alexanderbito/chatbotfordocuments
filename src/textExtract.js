@@ -2,11 +2,11 @@ import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 
 /**
- * Trích xuất text thô từ buffer file.
- * Trả về { text, pages } — pages chỉ có giá trị với PDF (0 với định dạng khác).
+ * Extract raw text from a file buffer.
+ * Returns { text, pages } — pages is only meaningful for PDFs (0 for other formats).
  *
- * PDF dạng scan/ảnh sẽ cho text rỗng ở đây; phía gọi dùng needsOcr() trong
- * src/ocr.js để quyết định có chuyển sang nhận dạng ký tự hay không.
+ * A scanned or image-based PDF produces empty text here; the caller uses needsOcr()
+ * in src/ocr.js to decide whether to fall back to character recognition.
  */
 export async function extractText(buffer, mimeType) {
   if (mimeType === 'application/pdf') {
@@ -23,5 +23,5 @@ export async function extractText(buffer, mimeType) {
     return { text: buffer.toString('utf-8'), pages: 0 };
   }
 
-  throw new Error(`Định dạng file chưa hỗ trợ: ${mimeType}`);
+  throw new Error(`Unsupported file type: ${mimeType}`);
 }

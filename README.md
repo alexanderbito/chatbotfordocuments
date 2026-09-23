@@ -1,449 +1,595 @@
-# DocBot — SaaS chatbot hỏi đáp tài liệu doanh nghiệp
+# DocBot — a SaaS chatbot that answers questions about company documents
 
-Mỗi doanh nghiệp đăng ký một tài khoản quản trị, tải tài liệu lên (có chia thư mục),
-hệ thống lập chỉ mục và tạo chatbot trả lời **chỉ trong phạm vi tài liệu của doanh nghiệp đó**.
-Admin mời thành viên vào tổ chức; thành viên chỉ trò chuyện với chatbot.
+Each company signs up for an administrator account, uploads its documents (organized
+into folders), and the system indexes them and serves a chatbot that answers
+**only from that company's own documents**. The administrator invites colleagues into
+the organization; ordinary members can do nothing but talk to the chatbot.
 
-Stack: Node/Express · Supabase (Postgres + pgvector) · Cloudflare R2 · Voyage AI (embedding) ·
-DeepSeek (LLM) · Render/Railway (hosting). Giao diện là HTML/CSS/JS thuần, **không cần build step**.
+Stack: Node/Express · Supabase (Postgres + pgvector) · Cloudflare R2 · Voyage AI (embeddings) ·
+DeepSeek (LLM) · Gemini (OCR) · Render/Railway (hosting). The front end is plain HTML/CSS/JS,
+**with no build step**.
+
+The product is English-only: the interface, the plan names and the chatbot's replies are all
+in English, whatever language the uploaded documents happen to be written in.
 
 ---
 
-## 1. Ba vai trò trong hệ thống
+## 1. Architecture and data flow
 
-| Vai trò | Truy cập | Làm được gì |
+One Express process serves both the static front end from `public/` and the JSON API from
+`src/routes/`. There is no separate worker service; document processing runs in the same
+process behind a small in-memory queue (`src/queue.js`).
+
+**Upload and indexing** (`POST /orgs/:orgId/documents`):
+
+1. The file arrives through multer, capped at 25 MB, and is stored in Cloudflare R2
+   (`src/storage.js`). The bucket does not need to be public: downloads are served through
+   signed URLs that expire after 5 minutes, and only organization administrators can request one.
+2. Text is extracted in `src/textExtract.js` — `pdf-parse` for PDF, `mammoth` for `.docx`,
+   plain UTF-8 for `.txt`. Any other MIME type is rejected.
+3. If a PDF yields almost no text it is treated as a scan and handed to the OCR path in
+   `src/ocr.js`, which sends page batches to Gemini (section 11).
+4. The text is split into overlapping chunks (`src/chunk.js`, 1000 characters with 150 of
+   overlap) and embedded with Voyage AI `voyage-4-lite`, 1024 dimensions (`src/embed.js`).
+5. Chunks and vectors land in the `document_chunks` table, which is indexed with pgvector.
+
+**Asking a question** (`POST /orgs/:orgId/chat`):
+
+1. `src/access.js` computes the exact set of folders the caller is allowed to read, taking
+   private folders and inherited restrictions into account.
+2. That set is passed to the SQL function `match_document_chunks_acl`, so the similarity
+   search itself is scoped both by organization and by folder permission. This fails closed:
+   a mistake in the permission calculation returns nothing rather than returning a document
+   the user should not see.
+3. The matching chunks become the context for DeepSeek (`src/llm.js`), which is instructed to
+   answer only from that context, to cite its sources, and to reply in `BOT_REPLY_LANGUAGE`.
+4. The question, the answer and the sources are written to the chat history.
+
+**Payments** run through PayPal only (section 10). The PayPal webhook route is mounted in
+`src/index.js` **before** `express.json()`, because signature verification needs the request
+body verbatim.
+
+---
+
+## 2. The three roles
+
+| Role | Entry point | What it can do |
 |---|---|---|
-| **Admin hệ thống** (super admin) | `/sysadmin.html` | Quản lý toàn bộ doanh nghiệp, gói cước, thanh toán, người dùng, nhật ký, sức khoẻ hệ thống |
-| **Admin tổ chức** | `/admin.html` | Tải lên / xoá / tải xuống tài liệu, quản lý thư mục, mời & phân quyền thành viên, xem lịch sử hỏi đáp, xem hạn mức gói |
-| **Thành viên** | `/chat.html` | Chỉ trò chuyện với chatbot **trong phạm vi thư mục được cấp quyền**, và xem lịch sử của chính mình |
+| **System administrator** (super admin) | `/sysadmin.html` | Manage every organization, plan, payment, user, log entry, and check system health |
+| **Organization administrator** | `/admin.html` | Upload / delete / download documents, manage folders, invite members and set their permissions, read the chat history, see plan usage |
+| **Member** | `/chat.html` | Talk to the chatbot **within the folders they are allowed to read**, and read their own history |
 
-Toàn bộ API đều kiểm tra quyền ở backend, không chỉ ẩn nút trên giao diện.
+Every API route enforces these rules on the server. Hiding a button in the interface is never
+the only check.
 
 ---
 
-## 2. Các trang giao diện
+## 3. Interface pages
 
-| Đường dẫn | Mục đích |
+| Path | Purpose |
 |---|---|
-| `/login.html` | Đăng nhập |
-| `/register.html` | Đăng ký doanh nghiệp mới, hoặc tham gia qua link mời (`?invite=<token>`) |
-| `/chat.html` | Không gian hỏi đáp cho mọi thành viên |
-| `/admin.html` | Console admin tổ chức: Tổng quan · Tài liệu & thư mục · Thành viên · Lịch sử hỏi đáp · Gói cước · Thiết lập |
-| `/sysadmin.html` | Console admin hệ thống: Bảng điều khiển · Tổ chức · Gói cước · Thanh toán · Người dùng · Nhật ký · Sức khoẻ hệ thống |
-| `/pricing.html` | Bảng giá công khai, tiền tệ đi theo ngôn ngữ đang chọn |
-| `/billing-return.html` | Trang kết quả sau khi khách thanh toán xong |
-| `/` | Tự chuyển hướng theo vai trò của người đang đăng nhập |
+| `/login.html` | Sign in |
+| `/register.html` | Register a new company, or accept an invitation (`?invite=<token>`) |
+| `/chat.html` | The question-and-answer workspace, for every member |
+| `/admin.html` | Organization admin console: Overview · Documents & folders · Members · Chat history · Plan & billing · Settings |
+| `/sysadmin.html` | System admin console: Dashboard · Organizations · Plan & billing · Payments · Users · Activity log · System health |
+| `/pricing.html` | The public price list, in USD |
+| `/billing-return.html` | Where the payer lands after checking out |
+| `/` | Redirects to the right console for whoever is signed in |
 
 ---
 
-## 3. Cài đặt lần đầu
+## 4. First-time setup
 
-### Bước 1 — Cơ sở dữ liệu
+### Step 1 — The database
 
-Trong **Supabase Dashboard → SQL Editor → New query**, chạy lần lượt:
+In **Supabase Dashboard -> SQL Editor -> New query**, run these files in order:
 
-1. `supabase_schema.sql` — chỉ cần chạy nếu đây là project mới (tạo `organizations`, `documents`, `document_chunks`, bật pgvector).
-2. `migration_v2_auth.sql` — **bắt buộc**, tạo phần auth/phân quyền/thư mục/gói cước/nhật ký và cập nhật hàm tìm kiếm.
-3. `migration_v3_ocr.sql` — **bắt buộc**, thêm hạn mức và cột theo dõi OCR.
-4. `migration_v4_ocr_retry.sql` — **bắt buộc**, thêm bộ đếm lần thử và bảng lưu tạm kết quả OCR.
-5. `migration_v5_folder_acl.sql` — **bắt buộc**, thêm chế độ thư mục công khai/riêng tư và phân quyền theo email.
-6. `migration_v6_payments.sql` — **bắt buộc**, thêm giá USD và thanh toán qua cổng.
-7. `migration_v7_trial.sql` — **bắt buộc**, đặt gói miễn phí thành dùng thử 3 ngày không có OCR.
+1. `supabase_schema.sql` — only needed on a brand-new project. Creates `organizations`,
+   `documents`, `document_chunks` and enables pgvector.
+2. `migration_v2_auth.sql` — **required**. Creates the auth, permission, folder, member,
+   plan and log tables, and updates the search function.
+3. `migration_v3_ocr.sql` — **required**. Adds the OCR quota and the OCR tracking columns.
+4. `migration_v4_ocr_retry.sql` — **required**. Adds the retry counters and the table that
+   caches finished OCR batches.
+5. `migration_v5_folder_acl.sql` — **required**. Adds public/private folder visibility and
+   per-email folder permissions.
+6. `migration_v6_payments.sql` — **required**. Adds USD pricing and gateway checkout.
+7. `migration_v7_trial.sql` — **required**. Turns the free plan into a 3-day trial with no OCR.
 
-**Chạy đúng thứ tự.** Mỗi file từ v3 trở đi có bước kiểm tra điều kiện ở đầu và sẽ dừng
-kèm thông báo nếu file trước chưa chạy.
+**Run them in that order.** Every file from v3 onwards starts with a precondition check and
+stops with a clear message if an earlier file has not been run.
 
-Nếu gặp lỗi `relation "..." does not exist`, chạy `kiem_tra_migration.sql` — file này liệt kê
-database đang ở giai đoạn nào và những bảng hiện có. Nguyên nhân thường gặp:
+If you hit `relation "..." does not exist`, run `kiem_tra_migration.sql`. It is a read-only
+diagnostic that prints which migration stage the database is at and which tables exist.
+The two usual causes:
 
-- Chưa chạy file migration trước đó.
-- **SQL Editor đang mở nhầm project Supabase.** Nếu ứng dụng trên Render vẫn chạy bình thường
-  mà SQL Editor báo thiếu bảng, gần như chắc chắn là trường hợp này — đối chiếu `SUPABASE_URL`
-  trong tab Environment của Render với project đang mở trên dashboard.
+- An earlier migration file was never run.
+- **The SQL Editor is open on the wrong Supabase project.** If the app on Render works fine
+  but the SQL Editor claims tables are missing, this is almost always it — compare the
+  `SUPABASE_URL` in Render's Environment tab against the project open in the dashboard.
 
-File `migration_v2_auth.sql` chạy lại nhiều lần vẫn an toàn (dùng `if not exists`).
+`migration_v2_auth.sql` is safe to run repeatedly; it uses `if not exists` throughout.
 
-> Nếu project đang dùng embedding 1536 chiều (OpenAI cũ), chạy `migration_to_voyage.sql` trước.
+> If the project still stores 1536-dimension embeddings from an older OpenAI setup, run
+> `migration_to_voyage.sql` first. It wipes documents and chunks, so everything has to be
+> re-uploaded and re-indexed afterwards.
 
-### Bước 2 — Biến môi trường
+### Step 2 — Environment variables
 
 ```bash
-cp .env.example .env    # rồi điền giá trị thật
+cp .env.example .env    # then fill in the real values
 ```
 
-So với bản gốc có **thêm các biến**:
+**Supabase**
 
-| Biến | Bắt buộc | Ý nghĩa |
+| Variable | Required | Meaning |
 |---|---|---|
-| `SUPABASE_ANON_KEY` | Nên có | Supabase → Project Settings → API → `anon public` |
-| `GEMINI_API_KEY` | Chỉ khi cần OCR | Lấy tại https://aistudio.google.com/apikey |
-| `GEMINI_OCR_MODELS` | Không | Chuỗi model dự phòng, mặc định `gemini-3.5-flash,gemini-3.5-flash-lite` |
-| `OCR_RETRY_ROUNDS` | Không | Số vòng thử lại mỗi lô trang, mặc định 5 |
-| `OCR_DOC_RETRIES` | Không | Số lần tự hẹn chạy lại cả tài liệu, mặc định 3 |
-| `OCR_MAX_PAGES` | Không | Mặc định 30 trang/file |
-| `WORKER_CONCURRENCY` | Không | Mặc định 1 — giữ nguyên trên Render Free |
-| `PAYOS_CLIENT_ID` / `PAYOS_API_KEY` / `PAYOS_CHECKSUM_KEY` | Nếu bán cho khách VN | Lấy tại payos.vn |
-| `PAYPAL_CLIENT_ID` / `PAYPAL_SECRET` / `PAYPAL_WEBHOOK_ID` | Nếu bán cho khách nước ngoài | Lấy tại developer.paypal.com |
-| `APP_BASE_URL` | Không | URL công khai; trên Render tự đọc `RENDER_EXTERNAL_URL` |
-| `SYSTEM_ADMIN_EMAILS` | Nên có | Email luôn có quyền quản trị hệ thống, ngăn cách bằng dấu phẩy |
-| `CRON_SECRET` | Nên có | Bảo vệ endpoint dọn dữ liệu hết hạn dùng thử |
-| `TRIAL_GRACE_HOURS` | Không | Số giờ ân hạn trước khi xoá, mặc định 0 |
+| `SUPABASE_URL` | Yes | Supabase -> Project Settings -> API |
+| `SUPABASE_SERVICE_ROLE_KEY` | Yes | The service role key. Server-side only, never sent to the browser |
+| `SUPABASE_ANON_KEY` | Recommended | The `anon public` key, used for the sign-in call. If left empty the service role key is used instead |
 
-Bucket R2 giờ **không cần để public**: hệ thống tạo link tải có chữ ký, hết hạn sau 5 phút,
-và chỉ admin tổ chức mới lấy được link.
+**Cloudflare R2**
 
-### Bước 3 — Chạy thử
+| Variable | Required | Meaning |
+|---|---|---|
+| `R2_ACCOUNT_ID` | Yes | Cloudflare Dashboard -> R2 |
+| `R2_ACCESS_KEY_ID` | Yes | R2 -> Manage API Tokens |
+| `R2_SECRET_ACCESS_KEY` | Yes | As above |
+| `R2_BUCKET_NAME` | Yes | The bucket that holds uploaded files |
+| `R2_PUBLIC_URL` | No | Only needed if the bucket is public. Downloads use signed 5-minute URLs, so a private bucket is fine |
+
+**Voyage AI (embeddings)**
+
+| Variable | Required | Meaning |
+|---|---|---|
+| `VOYAGE_API_KEY` | Yes | The free tier includes 200 million tokens |
+| `VOYAGE_BASE_URL` | No | Point at an internal proxy or gateway instead of calling `api.voyageai.com` directly |
+
+**DeepSeek (answer generation)**
+
+| Variable | Required | Meaning |
+|---|---|---|
+| `DEEPSEEK_API_KEY` | Yes | |
+| `DEEPSEEK_BASE_URL` | Yes | `https://api.deepseek.com` |
+| `BOT_REPLY_LANGUAGE` | No | The language the chatbot replies in, regardless of what language the documents are written in. Defaults to `English`. Set it to any language name, for example `Spanish` |
+
+**Gemini (OCR for scanned PDFs)**
+
+| Variable | Required | Meaning |
+|---|---|---|
+| `GEMINI_API_KEY` | Only for OCR | From https://aistudio.google.com/apikey. Leave it empty and the app still runs, but scanned PDFs fail on upload |
+| `GEMINI_OCR_MODELS` | No | Comma-separated fallback chain. Default `gemini-3.5-flash,gemini-3.5-flash-lite` |
+| `OCR_RETRY_ROUNDS` | No | Retry rounds per page batch. Default 5 |
+| `OCR_DOC_RETRIES` | No | How many times a whole document reschedules itself. Default 3 |
+| `OCR_MAX_PAGES` | No | Hard cap per file. Default 30 pages |
+| `OCR_PAGES_PER_BATCH` | No | Pages per API call. Default 5. Small batches avoid truncated output |
+| `OCR_TIMEOUT_MS` | No | Per-request timeout. Default 120000 |
+| `OCR_MAX_OUTPUT_TOKENS` | No | Default 32768 |
+| `OCR_RETRY_BASE_MS` / `OCR_RETRY_MAX_MS` | No | Backoff floor and ceiling. Defaults 1000 and 60000 |
+
+**Document processing queue**
+
+| Variable | Required | Meaning |
+|---|---|---|
+| `WORKER_CONCURRENCY` | No | Default 1 — leave it there on Render Free, which has 512 MB of RAM |
+| `WORKER_MAX_QUEUE` | No | Default 20 |
+
+**Payments (PayPal)**
+
+| Variable | Required | Meaning |
+|---|---|---|
+| `PAYPAL_CLIENT_ID` | To sell | developer.paypal.com -> Apps & Credentials |
+| `PAYPAL_SECRET` | To sell | As above |
+| `PAYPAL_ENV` | **Read the warning below** | `sandbox` or `live`. Defaults to `sandbox` |
+| `PAYPAL_WEBHOOK_ID` | To sell | Created when you add the webhook in the PayPal Developer Dashboard. Without it webhooks are rejected, so a payer can pay without getting their plan |
+| `APP_BASE_URL` | Recommended | The app's public URL, used for the return links after checkout. On Render it falls back to `RENDER_EXTERNAL_URL` |
+
+> ### `PAYPAL_ENV` must match the credentials
+>
+> `PAYPAL_ENV` defaults to `sandbox`. **A Live PayPal app REQUIRES `PAYPAL_ENV=live`.**
+>
+> If you paste Live credentials while the variable is still `sandbox`, those credentials are
+> sent to `api-m.sandbox.paypal.com`, which does not know them, and PayPal answers with
+> `Client Authentication failed`. That message looks exactly like a mistyped key, so it is
+> easy to spend an afternoon re-copying a Client ID that was correct all along.
+>
+> The system health page detects this specific case: when the credentials fail in the
+> configured environment but succeed in the other one, it says so and names the value
+> `PAYPAL_ENV` should have.
+>
+> A related trap: pasting values into Render often picks up a trailing space or newline,
+> which corrupts the Basic auth string and produces the same `Client Authentication failed`.
+> The credentials are trimmed in `src/payments/paypal.js` for exactly this reason.
+
+**System administration**
+
+| Variable | Required | Meaning |
+|---|---|---|
+| `SYSTEM_ADMIN_EMAILS` | Recommended | Comma-separated emails that always hold system admin rights. See step 4 |
+
+**Trial cleanup**
+
+| Variable | Required | Meaning |
+|---|---|---|
+| `CRON_SECRET` | Recommended | Protects `POST /cron/purge-trials`. Leave it empty and that endpoint is disabled |
+| `TRIAL_GRACE_HOURS` | No | Hours of grace after expiry before data is deleted. Default 0 |
+| `TRIAL_SWEEP_INTERVAL_MS` | No | How often the traffic-driven sweep may run. Default 6 hours |
+
+**Server**
+
+| Variable | Required | Meaning |
+|---|---|---|
+| `PORT` | No | Default 3000 |
+
+### Step 3 — Run it
 
 ```bash
 npm install
 npm run dev        # http://localhost:3000
 ```
 
-### Bước 4 — Tạo tài khoản quản trị hệ thống đầu tiên
+### Step 4 — Create the first system administrator
 
-Có ba cách, chọn một.
+There are three ways. Pick one.
 
-**Cách 1 — biến môi trường (khuyến nghị).** Đặt `SYSTEM_ADMIN_EMAILS` trên Render
-(hoặc trong `.env` khi chạy local), rồi vào `/register.html` đăng ký bằng đúng email đó:
+**Way 1 — the environment variable (recommended).** Set `SYSTEM_ADMIN_EMAILS` on Render (or in
+`.env` locally), then sign up at `/register.html` with exactly that email:
 
 ```
-SYSTEM_ADMIN_EMAILS=ban@congty.vn
+SYSTEM_ADMIN_EMAILS=you@company.com
 ```
 
-Email nằm trong biến này **không bị bắt nhập tên doanh nghiệp** và không tạo tổ chức rác —
-tài khoản quản trị hệ thống đứng ngoài mọi tổ chức. Đăng nhập xong vào thẳng `/sysadmin.html`.
+An email in this list is **not asked for a company name** and creates no throwaway
+organization — a system administrator account sits outside every organization. After signing
+in you land straight on `/sysadmin.html`.
 
-Biến này cũng là đường "phá kính lấy búa": quyền hiệu lực = cờ trong CSDL **hoặc** email
-nằm trong danh sách. Nếu lỡ tự gỡ quyền hay mất tài khoản, thêm email vào đây là vào lại được.
+This variable is also the break-glass route: effective rights are the database flag **or**
+membership of this list. If the flag is ever cleared by accident, adding the email here gets
+you back in.
 
-**Cách 2 — dòng lệnh.** Đăng ký tài khoản bình thường trước, rồi chạy ở máy có `.env`:
+Note that the database flag is switched on at the first sign-in to keep the two in sync, so
+**taking an email back out of the variable does not revoke anything**. Revoke it explicitly
+with `npm run make-admin -- you@company.com --revoke` or from the Users page of the system
+admin console — and remove the email from the variable first, otherwise the revoke is blocked.
+
+**Way 2 — the admin console.** Once one system administrator exists, every further one is
+created from `/sysadmin.html` -> **Users** -> **Create system administrator**
+(`POST /admin/users`). This is the normal way to add colleagues.
+
+**Way 3 — the command line.** Register the account normally first, then run this on a machine
+that has a populated `.env` (it needs `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`):
 
 ```bash
-npm run make-admin -- ban@congty.vn          # cấp quyền
-npm run make-admin -- ban@congty.vn --revoke # gỡ quyền
-npm run make-admin -- --list                 # xem ai đang có quyền
+npm run make-admin -- admin@company.com          # grant
+npm run make-admin -- admin@company.com --revoke # revoke
+npm run make-admin -- --list                     # show who currently has the rights
 ```
 
-**Cách 3 — SQL.** Đăng ký trước, rồi chạy trong Supabase SQL Editor:
+The script refuses to revoke the last remaining system administrator, so the system can never
+be left with nobody able to manage it.
 
-```sql
-update app_users set is_system_admin = true where email = 'ban@congty.vn';
-```
-
-Khi đã có một tài khoản quản trị, những tài khoản sau tạo thẳng trong
-`/sysadmin.html → Người dùng → Tạo tài khoản quản trị`.
-
-⚠️ Quản trị hệ thống **đọc được tài liệu và lịch sử hỏi đáp của mọi doanh nghiệp**.
-Chỉ cấp cho người thực sự cần.
+⚠️ **A system administrator can read the documents and chat history of EVERY organization on
+the platform.** This is not scoped to one tenant and there is no audit gate in front of it.
+Grant the role only to people who genuinely need it.
 
 ---
 
-## 4. Deploy lên Render
-
-Cấu hình **không đổi** so với bản cũ:
+## 5. Deploying on Render
 
 - Build command: `npm install`
 - Start command: `npm start`
-- Tab **Environment**: dán toàn bộ biến trong `.env` (nhớ **thêm `SUPABASE_ANON_KEY`** khi deploy bản này).
+- **Environment** tab: paste in every variable from `.env`. Double-check `SUPABASE_ANON_KEY`,
+  `APP_BASE_URL` and `PAYPAL_ENV` — those three are the ones most often forgotten.
 
-Sau khi deploy, nhớ chạy `migration_v2_auth.sql` trên Supabase **trước** khi mở giao diện,
-nếu không các trang sẽ báo lỗi thiếu bảng.
+Run the migrations on Supabase **before** opening the interface for the first time, or every
+page will fail with a missing-table error.
 
-Gói Free của Render "ngủ" sau một thời gian không có traffic — request đầu tiên sau khi ngủ
-sẽ chậm vài chục giây.
+Render's Free plan puts the service to sleep after about 15 minutes without traffic. The first
+request after that takes tens of seconds. It also means the traffic-driven trial sweep may not
+run for an abandoned organization, which is why the external cron route exists (section 9).
 
 ---
 
-## 5. Bản đồ API
+## 6. API map
 
 ```
-POST   /auth/register                         đăng ký doanh nghiệp mới hoặc nhận lời mời
-POST   /auth/login                            đăng nhập
-GET    /auth/me                               hồ sơ + danh sách tổ chức
+POST   /auth/register                         register a company, or accept an invitation
+POST   /auth/login                            sign in
+GET    /auth/me                               profile plus the caller's organizations
 POST   /auth/change-password
 PATCH  /auth/profile
-GET    /auth/invite/:token                    xem thông tin lời mời (công khai)
+GET    /auth/invite/:token                    look up an invitation (public)
 
-GET    /orgs/:orgId                           thông tin tổ chức + vai trò
-PATCH  /orgs/:orgId                           sửa hồ sơ doanh nghiệp          (admin tổ chức)
-GET    /orgs/:orgId/overview                  số liệu dashboard               (admin tổ chức)
-GET    /orgs/:orgId/billing                   gói cước + lịch sử thanh toán   (admin tổ chức)
-POST   /orgs/:orgId/billing/checkout          tạo phiên thanh toán            (admin tổ chức)
-GET    /orgs/:orgId/billing/payments/:id      trạng thái giao dịch            (admin tổ chức)
-POST   /orgs/:orgId/billing/payments/:id/capture  thu tiền PayPal             (admin tổ chức)
+GET    /orgs/:orgId                           organization details plus the caller's role
+PATCH  /orgs/:orgId                           edit the company profile             (org admin)
+GET    /orgs/:orgId/overview                  dashboard figures                    (org admin)
+GET    /orgs/:orgId/billing                   plan and payment history             (org admin)
+POST   /orgs/:orgId/billing/checkout          open a checkout session              (org admin)
+GET    /orgs/:orgId/billing/payments/:id      status of one transaction            (org admin)
+POST   /orgs/:orgId/billing/payments/:id/capture  capture a PayPal order           (org admin)
 
-GET    /public/billing/plans?currency=VND     bảng giá công khai (VND | USD)
-POST   /cron/purge-trials                     dọn dữ liệu hết hạn (header x-cron-secret)
-POST   /admin/maintenance/purge-trials        dọn thủ công        (admin hệ thống)
-POST   /webhooks/payos                        webhook payOS  (xác thực bằng chữ ký)
-POST   /webhooks/paypal                       webhook PayPal (xác thực bằng chữ ký)
+GET    /public/billing/plans                  the public price list, in USD, plus the
+                                              gateways that are currently configured
+GET    /public/plans                          older, leaner plan list kept for compatibility
+GET    /healthz                               liveness probe
+POST   /cron/purge-trials                     purge expired trial data (header x-cron-secret)
+POST   /admin/maintenance/purge-trials        purge on demand                    (system admin)
+POST   /webhooks/paypal                       PayPal webhook (signature-verified)
 
-GET    /orgs/:orgId/folders                   cây thư mục (đã lọc theo quyền của người gọi)
-POST   | PATCH | DELETE  /orgs/:orgId/folders quản lý thư mục                 (admin tổ chức)
-GET    /orgs/:orgId/folders/:id/permissions   email đang được đọc thư mục     (admin tổ chức)
-PUT    /orgs/:orgId/folders/:id/permissions   đặt lại danh sách email         (admin tổ chức)
+GET    /orgs/:orgId/folders                   the folder tree, filtered by the caller's rights
+POST   | PATCH | DELETE  /orgs/:orgId/folders manage folders                       (org admin)
+GET    /orgs/:orgId/folders/:id/permissions   emails allowed to read a folder      (org admin)
+PUT    /orgs/:orgId/folders/:id/permissions   replace that list of emails          (org admin)
 
-GET    /orgs/:orgId/documents                 danh sách tài liệu              (admin tổ chức)
-POST   /orgs/:orgId/documents                 tải lên (multipart: file, folder_id)
-PATCH  /orgs/:orgId/documents/:id             đổi tên / chuyển thư mục
-GET    /orgs/:orgId/documents/:id/download    link tải có chữ ký (5 phút)
-POST   /orgs/:orgId/documents/:id/reindex     xử lý lại tài liệu lỗi
-DELETE /orgs/:orgId/documents/:id             xoá tài liệu + chunk + file R2
+GET    /orgs/:orgId/documents                 list documents                       (org admin)
+POST   /orgs/:orgId/documents                 upload (multipart: file, folder_id)  (org admin)
+PATCH  /orgs/:orgId/documents/:id             rename or move to another folder     (org admin)
+GET    /orgs/:orgId/documents/:id/download    signed download link, valid 5 minutes (org admin)
+POST   /orgs/:orgId/documents/:id/reindex     reprocess a failed document          (org admin)
+DELETE /orgs/:orgId/documents/:id             delete the document, its chunks and the R2 object
 
-GET    | POST | PATCH | DELETE  /orgs/:orgId/members   quản lý thành viên     (admin tổ chức)
+GET    | POST | PATCH | DELETE  /orgs/:orgId/members   manage members              (org admin)
 
-POST   /orgs/:orgId/chat                      hỏi chatbot (mọi thành viên)
-GET    /orgs/:orgId/chat/mine                 lịch sử của chính mình
-GET    /orgs/:orgId/chat/history              toàn bộ lịch sử                 (admin tổ chức)
+POST   /orgs/:orgId/chat                      ask the chatbot (any member)
+GET    /orgs/:orgId/chat/mine                 the caller's own history
+GET    /orgs/:orgId/chat/history              the whole organization's history     (org admin)
 
-/admin/*                                      toàn bộ khu vực admin hệ thống
-       overview · organizations · users · plans · payments · logs
-       failed-documents · health · maintenance/fix-filenames
-POST   /admin/users                           tạo tài khoản quản trị hệ thống mới
-GET    /admin/system-admins                   ai đang có quyền quản trị hệ thống
+/admin/*                                      the entire system admin area
+       overview · organizations · organizations/:id · users · system-admins
+       plans · payments · logs · failed-documents · health
+       maintenance/fix-filenames · maintenance/purge-trials
+       organizations/:id/purge-data
+POST   /admin/users                           create a new system administrator
+GET    /admin/system-admins                   who currently holds system admin rights
 ```
 
-Xác thực: header `Authorization: Bearer <access_token>` (token do Supabase Auth cấp).
+Authentication: the `Authorization: Bearer <access_token>` header, with a token issued by
+Supabase Auth.
 
 ---
 
-## 6. Hạn mức theo gói cước
+## 7. Plan quotas
 
-Backend chặn ở mức API, không chỉ hiển thị:
+The backend enforces quotas at the API level, not merely in the interface:
 
-- Tải tài liệu: kiểm tra số tài liệu và dung lượng còn lại → trả `402` nếu vượt.
-- Mời thành viên: kiểm tra số thành viên tối đa.
-- Hỏi chatbot: kiểm tra số lượt hỏi trong tháng.
-- Nhận dạng PDF scan: kiểm tra số trang OCR còn lại trong tháng (xem mục 8).
+- Uploading a document: checks the document count and the remaining storage, and returns `402`
+  when either is exceeded.
+- Inviting a member: checks the member ceiling.
+- Asking the chatbot: checks the number of questions used this month.
+- OCR on a scanned PDF: checks the OCR pages left this month (section 11).
 
-Ba gói mặc định (Dùng thử / Chuyên nghiệp / Doanh nghiệp) được tạo sẵn bởi migration
-và có thể sửa trong `/sysadmin.html → Gói cước`.
+Three plans are seeded by the migrations — `free` (the 3-day trial), `pro` (Professional,
+$19) and `business` (Business, $79) — and every limit and price is editable in
+`/sysadmin.html` -> **Plan & billing**.
 
 ---
 
-## 7. Xử lý sự cố thường gặp
+## 8. Public and private folders
 
-**PDF scan không đọc được / báo lỗi OCR**
+Every folder has an access mode:
 
-Kiểm tra `/sysadmin.html` → **Sức khoẻ hệ thống** → dòng "Gemini (nhận dạng PDF scan)".
-Nếu báo "Chưa bật" nghĩa là thiếu `GEMINI_API_KEY`. Nếu tài liệu bị chặn vì hạn mức,
-lỗi sẽ ghi rõ trong cột trạng thái ở trang Tài liệu của admin tổ chức.
+- **Public** (the default): everyone in the organization can ask the chatbot about the
+  documents inside it.
+- **Private**: only the emails the administrator has granted can read it.
 
-**Tên tài liệu hiển thị lỗi font** (`Quy định` thành `Quy Ä‘á»‹nh`)
+### Four rules worth knowing
 
-Nguyên nhân: multer 1.x đọc tên file trong header multipart theo latin-1, còn macOS
-gửi tên ở dạng NFD (ký tự và dấu tách rời). Đã xử lý trong `src/utils/filename.js`:
-tên hiển thị được giải mã lại và chuẩn hoá NFC, còn key lưu trên R2 dùng bản không dấu
-thuần ASCII cho an toàn khi ký URL.
+**1. Restrictions are inherited from parent folders.** To read a folder you must have access to
+*every* private folder on the path down to it. A public folder nested inside a private one
+stays restricted, so nobody can leak data by accident just by creating a subfolder.
 
-Tài liệu đã tải lên **trước** bản vá vẫn giữ tên sai trong CSDL. Để sửa:
-`/sysadmin.html` → **Sức khoẻ hệ thống** → **Bảo trì dữ liệu** → "Xem trước danh sách"
-rồi "Sửa tên tài liệu". (Tương đương `POST /admin/maintenance/fix-filenames`,
-thêm `?dry_run=1` để chỉ xem trước.)
+**2. Hidden completely.** A member without access never sees the folder's name anywhere,
+including in the scope picker on the chat page. A folder name ("Executive salaries") is
+sensitive in itself.
 
-## 8. Thư mục công khai và riêng tư
+**3. The chatbot cannot read what the asker cannot read.** The backend computes the list of
+folders the asker may read and passes it into the `match_document_chunks_acl` search function.
+This fails closed: if the permission calculation is ever wrong, the user sees nothing rather
+than seeing a confidential document. If the client asks for `folder_ids` outside its own
+scope, the API returns `403`.
 
-Mỗi thư mục có một chế độ truy cập:
+**4. Organization administrators read everything.** They already manage every document, so
+there is nothing to grant them.
 
-- **Công khai** (mặc định): mọi thành viên trong tổ chức đều hỏi chatbot được về tài liệu bên trong.
-- **Riêng tư**: chỉ những email được admin cấp quyền mới đọc được.
+### Operational notes
 
-### Bốn quy tắc cần nhớ
+- Permissions can only be granted to emails that are **already members** of the organization.
+  Unknown addresses are skipped and reported back, so a typo cannot look like a successful grant.
+- Removing someone from the organization also revokes their access to private folders.
+- Switching a folder from private back to public clears its permission list.
+- Deleting a private folder that still holds documents returns `409` and asks for confirmation,
+  because those documents would fall back to "Uncategorized" and become readable
+  organization-wide.
+- Uncategorized documents (`folder_id = null`) count as public within the organization.
 
-**1. Kế thừa hạn chế từ thư mục cha.** Muốn đọc một thư mục thì phải có quyền ở *tất cả*
-thư mục cha riêng tư nằm trên đường đi tới nó. Một thư mục công khai đặt bên trong thư mục
-riêng tư vẫn bị hạn chế — nhờ vậy không thể vô tình lộ dữ liệu bằng cách tạo thư mục con.
+---
 
-**2. Ẩn hoàn toàn.** Thành viên không có quyền sẽ không thấy tên thư mục ở bất kỳ đâu,
-kể cả trong ô chọn phạm vi khi chat. Bản thân tên thư mục ("Lương ban giám đốc") cũng là
-thông tin nhạy cảm.
+## 9. The 3-day trial
 
-**3. Chatbot không đọc được nội dung không được phép.** Backend tính danh sách thư mục
-người hỏi được đọc, rồi truyền vào hàm tìm kiếm `match_document_chunks_acl`. Cách này
-"fail closed": nếu việc tính quyền có sai sót thì người dùng không thấy gì, thay vì thấy
-nhầm tài liệu mật. Nếu người dùng tự chỉ định `folder_ids` ngoài phạm vi, API trả `403`.
+The free plan is a **3-day trial** with every feature **except OCR for scanned PDFs**. If the
+organization does not upgrade within three days its documents are deleted.
 
-**4. Admin tổ chức đọc được tất cả.** Họ vốn đã quản lý toàn bộ tài liệu nên không cần
-cấp quyền riêng.
+### Three stages
 
-### Vài điểm vận hành
+**During the three days.** The clock runs from sign-up (`organizations.plan_expires_at`). The
+interface shows a countdown banner on every page, turning amber under 24 hours.
 
-- Chỉ cấp quyền được cho email **đã là thành viên** của tổ chức. Email lạ bị bỏ qua và
-  giao diện báo lại, tránh trường hợp gõ nhầm rồi tưởng đã cấp quyền.
-- Gỡ một thành viên khỏi tổ chức sẽ thu hồi luôn quyền đọc các thư mục riêng tư của họ.
-- Chuyển một thư mục từ riêng tư về công khai sẽ xoá danh sách quyền cũ.
-- Xoá một thư mục riêng tư còn tài liệu bên trong: API trả `409` bắt xác nhận, vì tài liệu
-  sẽ rơi về mục "Chưa phân loại" và cả tổ chức đọc được.
-- Tài liệu chưa phân loại (`folder_id = null`) được coi là công khai trong tổ chức.
+**Expired.** Asking the chatbot and uploading documents are blocked with `402`, but the plan
+and settings pages **stay reachable** so the customer can upgrade. The block is deliberately
+not applied globally: blocking everything would leave the customer no way to pay.
 
-## 9. Dùng thử 3 ngày
+**After expiry.** The purge removes documents, R2 objects, indexed chunks, cached OCR batches
+and chat history. It **keeps** the account, the organization, the members and the folder tree,
+so a customer who comes back to upgrade can pick up where they left off instead of registering
+again.
 
-Gói miễn phí nay là **bản dùng thử 3 ngày**: đủ mọi tính năng **trừ nhận dạng PDF scan**.
-Hết 3 ngày mà không nâng cấp thì tài liệu bị xoá.
+### When the purge runs
 
-### Ba mốc
+Two independent paths, so nothing depends on a single mechanism:
 
-**Trong 3 ngày.** Đồng hồ chạy từ lúc đăng ký (`organizations.plan_expires_at`).
-Giao diện hiện dải băng đếm ngược ở mọi trang, chuyển vàng khi còn dưới 24 giờ.
+1. **Traffic-driven** — on any incoming request, if more than `TRIAL_SWEEP_INTERVAL_MS`
+   (6 hours by default) has passed since the last sweep, one runs in the background. No
+   configuration needed.
+2. **External cron** — `POST /cron/purge-trials` with the `x-cron-secret` header. Point a free
+   cron service at it once a day. This matters because Render Free sleeps after 15 minutes
+   without traffic, so path 1 may never fire for an abandoned organization.
 
-**Hết hạn.** Chặn hỏi chatbot và tải tài liệu lên (trả mã `402`), nhưng **vẫn vào được
-trang gói cước và thiết lập** để nâng cấp. Cố ý không chặn ở tầng chung, vì chặn hết
-thì khách không còn đường trả tiền.
+A system administrator can also purge on demand with `POST /admin/maintenance/purge-trials`
+(add `?dry_run=1` to only list what would go).
 
-**Sau khi hết hạn.** Dọn tài liệu, file trên R2, các đoạn đã lập chỉ mục, bản OCR tạm
-và lịch sử hỏi đáp. **Giữ lại** tài khoản, tổ chức, thành viên và cây thư mục — khách
-quay lại nâng cấp là dùng được ngay, không phải đăng ký từ đầu.
+### Which plans get OCR
 
-### Việc dọn chạy khi nào
+The `plans.ocr_enabled` column, toggled in `/sysadmin.html` -> **Plan & billing**. A plan with
+OCR disabled reports a clear error with an upgrade hint when it meets a scanned PDF, and
+**never calls Gemini**, so no cost is incurred.
 
-Hai đường, để không phụ thuộc vào một thứ duy nhất:
+---
 
-1. **Bám theo lưu lượng** — mỗi khi có request, nếu đã quá 6 giờ kể từ lần dọn trước
-   thì chạy một lượt ở chế độ nền. Không cần cấu hình gì.
-2. **Cron ngoài** — `POST /cron/purge-trials` kèm header `x-cron-secret`. Nên trỏ một
-   dịch vụ cron miễn phí vào đây chạy mỗi ngày, vì Render Free ngủ sau 15 phút không
-   có traffic nên đường (1) có thể không chạy với tổ chức bị bỏ hoang.
+## 10. Payments
 
-Admin hệ thống cũng dọn thủ công được: `POST /admin/maintenance/purge-trials`
-(thêm `?dry_run=1` để chỉ xem danh sách).
+PayPal is the only gateway and USD the only currency. Prices live in `plans.price_usd` and are
+editable in `/sysadmin.html` -> **Plan & billing**. The public price list is served from
+`GET /public/billing/plans`, which also reports which gateways are actually configured on the
+server, so the pricing page never offers a checkout that cannot complete.
 
-### Gói nào có OCR
+### The flow
 
-Cột `plans.ocr_enabled`, bật/tắt trong `/sysadmin.html → Gói cước`. Gói tắt OCR mà
-gặp PDF scan sẽ báo lỗi kèm gợi ý nâng cấp và **không gọi Gemini**, nên không phát
-sinh chi phí.
+1. The organization admin picks a plan -> `POST /orgs/:orgId/billing/checkout {plan_id, provider}`
+2. The server inserts a `payments` row with status `pending`, then asks PayPal for a checkout link
+3. The payer approves on PayPal's own pages
+4. On return, `/billing-return.html` calls the capture endpoint; the webhook independently
+   verifies its signature, then `activate_paid_plan()` runs and the plan takes effect immediately
+5. The return page polls the transaction status a few times and reports the outcome
 
-## 10. Song ngữ Việt / Anh
+Capture and webhook are two routes to the same result on purpose: capture handles the normal
+case, and the webhook covers a payer who closes the tab mid-way.
 
-Nút **VI / EN** nằm ở thanh bên (trang nội bộ) và góc trên bên phải (trang công khai).
-Lựa chọn lưu trong trình duyệt; lần đầu vào thì đoán theo ngôn ngữ hệ điều hành.
+### Four safety measures
 
-**Ngôn ngữ quyết định tiền tệ:** tiếng Việt xem giá VNĐ và thanh toán VietQR,
-tiếng Anh xem giá USD và thanh toán PayPal. Không còn nút chọn quốc gia riêng.
+**1. The amount is always computed on the server.** The browser only ever sends `plan_id` and
+`provider`. An `amount` in the request body is ignored.
 
-### Cách dịch hoạt động
+**2. Webhook signatures are verified.** Verification goes through PayPal's own
+`verify-webhook-signature` API, which is why the webhook route is mounted **before**
+`express.json()` in `src/index.js` and uses `express.raw()`: PayPal checks the signature
+against the request body verbatim, and re-serializing a parsed object can reorder keys or
+change how numbers are written.
 
-`public/assets/i18n.js` dùng **chính chuỗi tiếng Việt làm khoá**. Thiếu bản dịch thì
-giao diện hiện tiếng Việt chứ không vỡ thành mã khoá.
+**3. The amount is reconciled.** A webhook reporting an amount that differs from the order by
+more than a cent is ignored and logged at `error` level.
 
-Có hai đường: `t('...')` gọi trực tiếp khi dựng chuỗi, và `translateDOM()` quét DOM
-sau mỗi lần render (cần thiết vì các trang dựng HTML bằng `innerHTML`). Phần quét chỉ
-dịch khi nội dung khớp **chính xác** một khoá, và bỏ qua mọi thứ nằm trong phần tử
-đánh dấu `data-no-i18n` — tên tài liệu, tên thư mục, email, nội dung chat.
+**4. A plan cannot be extended twice.** Gateways retry webhooks on a flaky connection, so
+there are three layers: an application-level guard (`payments.paid_at`), a guard inside the
+SQL function `activate_paid_plan()` (which locks the row with `for update`), and `unique`
+constraints on `order_code` and on `(provider, provider_ref)`. `paid_at` is the single marker
+for "already handled", because that column is only ever written inside that SQL function.
 
-Tên và mô tả gói cước lấy từ CSDL nên có cột riêng `plans.name_en` và
-`plans.description_en`, sửa trong `/sysadmin.html`. Bỏ trống thì hiện bản tiếng Việt.
+If the current plan has time left on it, the remaining time is **added** rather than lost.
 
-Console admin hệ thống (`/sysadmin.html`) giữ nguyên tiếng Việt vì chỉ nội bộ dùng.
+### Not built yet
 
-## 11. Thanh toán
+- **No recurring billing.** The customer has to pay again each period.
+- **No invoicing.** Selling to companies at scale needs an invoicing integration.
+- **No refunds in the interface.** Refunds have to be issued from PayPal directly.
 
-Khách chọn quốc gia ở `/pricing.html`; trang tự đoán theo múi giờ trình duyệt và
-người dùng đổi lại được.
+---
 
-| Khách | Tiền tệ | Cổng | Vì sao |
-|---|---|---|---|
-| Việt Nam | VNĐ | **payOS** (VietQR) | Miễn phí giao dịch, quét mã bằng app ngân hàng bất kỳ |
-| Ngoài Việt Nam | USD | **PayPal** | Stripe không hỗ trợ doanh nghiệp đặt tại Việt Nam |
+## 11. OCR for scanned PDFs
 
-Giá mỗi gói lưu hai cột: `plans.price_vnd` và `plans.price_usd`, sửa được trong
-`/sysadmin.html → Gói cước`.
+When a PDF is uploaded the real text layer is read first. If that yields fewer than roughly
+60 characters per page, the file is treated as a scan and handed to Gemini.
 
-### Luồng
+How it works:
 
-1. Admin tổ chức chọn gói → `POST /orgs/:orgId/billing/checkout {plan_id, provider}`
-2. Máy chủ tạo bản ghi `payments` trạng thái `pending` rồi gọi cổng tạo link
-3. Khách thanh toán trên trang của cổng
-4. Cổng gọi webhook → hệ thống xác thực chữ ký → gọi `activate_paid_plan()` → gói có hiệu lực ngay
-5. Khách quay về `/billing-return.html`, trang này hỏi lại trạng thái vài lần rồi báo kết quả
+1. `pdf-lib` splits the file into batches of `OCR_PAGES_PER_BATCH` pages (5 by default). Pure
+   JS, no native libraries.
+2. Each batch is sent as a PDF straight to `generativelanguage.googleapis.com` — there is
+   **no** page-to-image rendering step, which is what keeps the Render deploy a plain Node
+   service with no Docker image.
+3. The recognized text is reassembled and continues through the normal chunking and embedding
+   pipeline.
+4. Transient failures are retried in three tiers, described below.
 
-Với PayPal còn một bước thu tiền (`capture`) gọi khi khách quay lại; webhook là
-đường dự phòng nếu khách đóng tab giữa chừng.
+### Surviving "model is overloaded"
 
-### Bốn chốt chặn an toàn
+Gemini frequently returns 503 *"This model is currently experiencing high demand"* at peak
+hours. Three tiers handle it:
 
-**1. Số tiền luôn tính ở máy chủ.** Trình duyệt chỉ gửi `plan_id` và `provider`.
-Gửi kèm `amount` cũng bị bỏ qua.
+**Tier 1 — switch model.** When the primary model reports an overload, the next model in
+`GEMINI_OCR_MODELS` is tried immediately. Overload tends to hit individual models, so a
+lighter one usually still answers — this tier normally resolves the problem with no waiting
+at all.
 
-**2. Xác thực chữ ký webhook.** payOS dùng SDK chính thức `@payos/node`
-(thuật toán HMAC của họ có vài chi tiết dễ sai, tự ký là rủi ro không cần thiết).
-PayPal xác thực qua chính API `verify-webhook-signature` của họ — vì vậy tuyến
-webhook PayPal phải nằm **trước** `express.json()` trong `src/index.js` và dùng
-`express.raw()`, do PayPal yêu cầu gửi lại thân request nguyên văn.
+**Tier 2 — exponential backoff with jitter.** If the whole model chain is busy, wait
+1s -> 2s -> 4s -> 8s and so on, capped at `OCR_RETRY_MAX_MS` (60s) with a random spread so
+that concurrent processes do not all retry in lockstep, for up to `OCR_RETRY_ROUNDS` rounds.
+This is Google's own documented recommendation.
 
-**3. Đối chiếu số tiền.** Webhook báo số tiền khác với đơn đã tạo thì bị bỏ qua
-và ghi nhật ký mức `error`.
+**Tier 3 — reschedule the whole document.** If the overload persists, the document moves to
+**Waiting to retry** and reschedules itself after 2 -> 5 -> 10 minutes, up to `OCR_DOC_RETRIES`
+times. The interface shows when the next attempt is due, and the administrator can still
+press "Retry now".
 
-**4. Chống cộng gói hai lần.** Cổng thanh toán hay gọi webhook lặp khi mạng lỗi.
-Có ba lớp: chốt chặn ở ứng dụng (`payments.paid_at`), chốt chặn trong hàm SQL
-`activate_paid_plan()` (khoá dòng bằng `for update`), và ràng buộc `unique` trên
-`order_code` cùng `(provider, provider_ref)`. Mốc duy nhất xác định "đã xử lý" là
-`paid_at`, vì cột này chỉ được ghi bên trong hàm SQL đó.
+**Finished work is never redone.** Each successfully recognized batch is stored in
+`document_ocr_batches`. A retry only calls Gemini for the batches still missing, which saves
+both time and quota. The cache is cleared once the document completes.
 
-Nếu gói hiện tại còn hạn, thời gian còn lại được **cộng dồn** chứ không mất.
+Errors that are *not* transient — a bad API key, a malformed request, a blocked document —
+fail immediately rather than burning retries.
 
-### Chưa làm
+A document being recognized shows as **Processing** (or **Waiting to retry**) in the
+organization admin console, and the number of recognized pages is written to
+`documents.ocr_pages` for quota accounting.
 
-- **Chưa tự động trừ tiền định kỳ.** Mỗi kỳ khách phải chủ động thanh toán lại.
-- **Chưa xuất hoá đơn VAT.** payOS đăng ký bằng CCCD nghĩa là tiền vào tài khoản
-  cá nhân. Bán thật cho doanh nghiệp cần pháp nhân và kết nối hoá đơn điện tử —
-  payOS có sẵn API hoá đơn (`invoices`) để nối sau.
-- **Chưa hoàn tiền trong giao diện**; phải xử lý bên trang của cổng thanh toán.
+**Per-plan quota** (`plans.max_ocr_pages_per_month`, editable in `/sysadmin.html`):
+trial 0 pages (OCR is off) · Professional 2,000 · Business 20,000.
 
-## 12. OCR cho PDF scan
+**Queueing**: OCR runs sequentially (`WORKER_CONCURRENCY=1`) because Render Free has only
+512 MB of RAM. Several files uploaded at once queue rather than running in parallel. Queue
+depth is visible on the System health page. With real customers, move this to a dedicated
+Background Worker on Render.
 
-Khi tải lên một PDF, hệ thống đọc text thật trước. Nếu thu được dưới ~60 ký tự mỗi trang
-thì coi đó là bản scan và chuyển sang nhận dạng bằng Gemini.
+---
 
-Cách hoạt động:
+## 12. Troubleshooting
 
-1. `pdf-lib` tách file thành từng lô 5 trang (thuần JS, không cần thư viện native).
-2. Mỗi lô gửi thẳng dưới dạng PDF tới `generativelanguage.googleapis.com` — **không cần**
-   bước render trang thành ảnh, nên deploy Render giữ nguyên, không cần Docker.
-3. Text nhận được ghép lại rồi đi tiếp vào pipeline chia đoạn và tạo embedding như bình thường.
-4. Gặp lỗi tạm thời sẽ thử lại theo ba tầng (xem bên dưới).
+**The system health page.** `/sysadmin.html` -> **System health** probes every dependency:
+Supabase, Cloudflare R2, Voyage AI, DeepSeek, Gemini (each model in the fallback chain), the
+payment gateway, and `APP_BASE_URL`. Start here.
 
-### Chống lỗi "model is overloaded"
+**Scanned PDFs fail.** Check the Gemini row on that page. "Not configured" means
+`GEMINI_API_KEY` is missing. If a document was blocked by a quota instead, the reason is
+spelled out in the status column of the organization admin's Documents page. Remember the
+trial plan has OCR switched off entirely.
 
-Gemini hay trả 503 *"This model is currently experiencing high demand"* vào giờ cao điểm.
-Hệ thống xử lý ở ba tầng:
+**PayPal says "Client Authentication failed".** Almost always `PAYPAL_ENV`. See the warning in
+step 2. The health page will tell you outright when the credentials work in the other
+environment.
 
-**Tầng 1 — đổi model.** Khi model chính báo quá tải, thử ngay model kế tiếp trong
-`GEMINI_OCR_MODELS`. Quá tải thường xảy ra trên từng model riêng lẻ, nên model nhẹ hơn
-vẫn chạy được — tầng này thường giải quyết xong mà không phải chờ giây nào.
+**`APP_BASE_URL` shows a warning.** The health page compares the configured value against the
+address the request actually arrived on. A mismatch breaks the post-checkout return links.
+Leaving it unset makes the app guess from the request, which works until the domain changes.
 
-**Tầng 2 — backoff luỹ thừa có jitter.** Nếu cả chuỗi model đều bận, chờ 1s → 2s → 4s → 8s…
-(trần 60s, dao động ngẫu nhiên ±30% để nhiều tiến trình không cùng gọi lại một lúc),
-tối đa `OCR_RETRY_ROUNDS` vòng. Đây đúng khuyến nghị chính thức của Google.
+**Document names show mojibake** (`Quy dinh` rendered as garbage characters). multer 1.x reads
+the filename out of the multipart header as latin-1, and macOS sends names in NFD form with
+combining marks split off. This is handled in `src/utils/filename.js`: the display name is
+decoded again and normalized to NFC, while the R2 object key uses a plain ASCII form so URL
+signing stays safe.
 
-**Tầng 3 — hẹn giờ chạy lại cả tài liệu.** Quá tải kéo dài thì tài liệu chuyển sang trạng thái
-**Chờ thử lại** và tự chạy lại sau 2 → 5 → 10 phút, tối đa `OCR_DOC_RETRIES` lần.
-Giao diện hiển thị thời điểm sẽ chạy lại; admin vẫn có thể bấm "Chạy lại ngay".
+Documents uploaded **before** that fix keep the broken name in the database. To repair them:
+`/sysadmin.html` -> **System health** -> **Data maintenance** -> "Preview" then "Fix document
+names". That is `POST /admin/maintenance/fix-filenames`; add `?dry_run=1` to preview only.
 
-**Không nhận dạng lại phần đã xong.** Mỗi lô trang OCR thành công được lưu vào
-`document_ocr_batches`. Lần thử lại chỉ gọi Gemini cho những lô còn thiếu — tiết kiệm cả
-thời gian lẫn hạn mức. Bảng tạm được xoá khi tài liệu hoàn tất.
+---
 
-Lỗi *không* tạm thời (sai API key, request hỏng, tài liệu bị chặn) báo hỏng ngay,
-không thử lại vô ích.
+## 13. Known limitations
 
-Tài liệu đang OCR hiển thị trạng thái **Đang nhận dạng** (hoặc **Chờ thử lại**) trên giao diện admin tổ chức,
-và số trang đã nhận dạng được ghi vào cột `documents.ocr_pages` để tính hạn mức.
-
-**Hạn mức theo gói** (`plans.max_ocr_pages_per_month`, sửa được trong `/sysadmin.html`):
-Dùng thử 50 trang/tháng · Chuyên nghiệp 2.000 · Doanh nghiệp 20.000.
-
-**Hàng đợi**: OCR chạy tuần tự (`WORKER_CONCURRENCY=1`) vì Render Free chỉ có 512 MB RAM.
-Nhiều file tải lên cùng lúc sẽ xếp hàng chứ không chạy song song. Trạng thái hàng đợi
-xem được ở trang Sức khoẻ hệ thống. Khi có khách hàng thật nên tách thành
-Background Worker riêng trên Render.
-
-## 13. Giới hạn đã biết
-
-- **Xử lý tài liệu đồng bộ trong tiến trình web**: file rất lớn có thể timeout trên Render Free.
-  Khi có khách hàng thật nên tách thành worker riêng.
-- **OCR giới hạn 30 trang mỗi file** (đổi bằng `OCR_MAX_PAGES`). File dài hơn cần tách nhỏ.
-  Giới hạn này có chủ đích: OCR tính tiền theo trang và chạy lâu.
-- **Lời mời gửi bằng link thủ công**: hệ thống tạo link mời để admin tự gửi, chưa gắn dịch vụ email.
-- **Thanh toán ghi nhận thủ công**: admin hệ thống nhập giao dịch, chưa tích hợp cổng thanh toán.
-- **Supabase Free tự pause sau 7 ngày không hoạt động.**
+- **Documents are processed inside the web process.** Very large files can time out on Render
+  Free. With real customers, split this into a dedicated worker.
+- **OCR is capped at 30 pages per file** (`OCR_MAX_PAGES`). Longer files have to be split. The
+  cap is deliberate: OCR is billed per page and is slow.
+- **Invitations are plain links.** The system generates an invite link for the administrator to
+  send by hand; no email service is wired up.
+- **No recurring billing.** Each period has to be paid for explicitly.
+- **Supabase Free pauses a project after 7 days of inactivity.**

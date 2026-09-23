@@ -1,41 +1,41 @@
 -- =====================================================================
--- MIGRATION V7 — Dùng thử 3 ngày, gói dùng thử không có OCR
--- Chạy trong Supabase Dashboard > SQL Editor > New query > Run
--- An toàn khi chạy lại nhiều lần. Yêu cầu đã chạy migration_v6_payments.sql.
+-- MIGRATION V7 — 3-day trial; the trial plan has no OCR
+-- Run in Supabase Dashboard > SQL Editor > New query > Run
+-- Safe to run more than once. Requires migration_v6_payments.sql to have been run.
 -- =====================================================================
 
 do $guard$
 begin
   if to_regclass('public.plans') is null then
-    raise exception E'Thieu bang "plans".\n=> Ban chua chay migration_v2_auth.sql.';
+    raise exception E'Missing table "plans".\n=> You have not run migration_v2_auth.sql yet.';
   end if;
   if not exists (select 1 from information_schema.columns
                  where table_schema='public' and table_name='plans' and column_name='price_usd') then
-    raise exception E'Thieu cot "plans.price_usd".\n=> Ban chua chay migration_v6_payments.sql.';
+    raise exception E'Missing column "plans.price_usd".\n=> You have not run migration_v6_payments.sql yet.';
   end if;
 end
 $guard$;
 
--- 1. Số ngày dùng thử của gói (0 = không phải gói dùng thử)
+-- 1. Number of trial days the plan grants (0 = not a trial plan)
 alter table plans add column if not exists trial_days int not null default 0;
 
--- 2. Gói có được dùng nhận dạng PDF scan hay không
+-- 2. Whether the plan is allowed to use scanned-PDF recognition
 alter table plans add column if not exists ocr_enabled boolean not null default true;
 
--- 3. Gói Dùng thử: 3 ngày, KHÔNG có OCR
+-- 3. The trial plan: 3 days, NO OCR
 update plans
 set trial_days = 3,
     ocr_enabled = false,
     max_ocr_pages_per_month = 0,
-    name = 'Dùng thử 3 ngày',
-    description = 'Trải nghiệm đầy đủ tính năng trong 3 ngày. Không bao gồm nhận dạng PDF scan. Hết 3 ngày, tài liệu sẽ bị xoá nếu không nâng cấp.'
+    name = '3-day free trial',
+    description = 'Every feature for 3 days. Scanned-PDF OCR is not included. After 3 days documents are deleted unless you upgrade.'
 where code = 'free';
 
--- Các gói trả phí giữ nguyên OCR
+-- Paid plans keep OCR enabled
 update plans set ocr_enabled = true, trial_days = 0 where code <> 'free';
 
--- 3b. Tên và mô tả gói bằng tiếng Anh (hiện khi người dùng chọn English).
---     Để trống thì giao diện dùng lại bản tiếng Việt.
+-- 3b. English plan name and description (shown when the user selects English).
+--     If these are left empty, the UI falls back to the default name and description.
 alter table plans add column if not exists name_en text;
 alter table plans add column if not exists description_en text;
 
@@ -54,11 +54,11 @@ update plans set
   description_en = 'Generous limits and priority support'
 where code = 'business' and name_en is null;
 
--- 4. Đánh dấu tổ chức đã bị dọn dữ liệu sau khi hết hạn dùng thử
+-- 4. Mark organizations whose data was purged after their trial expired
 alter table organizations add column if not exists trial_data_purged_at timestamptz;
 alter table organizations add column if not exists trial_started_at timestamptz;
 
--- Tổ chức cũ đang ở trạng thái dùng thử mà chưa có hạn thì cho 3 ngày kể từ bây giờ
+-- Existing organizations still on trial with no expiry date get 3 days from now
 update organizations o
 set plan_expires_at = now() + interval '3 days',
     trial_started_at = coalesce(trial_started_at, now())
@@ -72,9 +72,9 @@ create index if not exists organizations_trial_expiry_idx
   on organizations (billing_status, plan_expires_at)
   where billing_status = 'trial';
 
--- 5. Liệt kê các tổ chức đã hết hạn dùng thử và cần dọn dữ liệu.
---    Chỉ trả về danh sách; việc xoá file trên R2 phải do ứng dụng làm,
---    nên phần xoá thật nằm ở src/trials.js chứ không nằm trong SQL.
+-- 5. List the organizations whose trial has expired and whose data needs purging.
+--    This only returns the list; deleting the files on R2 has to be done by the app,
+--    so the real deletion lives in src/trials.js rather than in SQL.
 create or replace function list_expired_trials(grace_hours int default 0)
 returns table (
   organization_id uuid,
@@ -97,7 +97,7 @@ as $$
 $$;
 
 -- =====================================================================
--- LƯU Ý: gói Dùng thử nay giới hạn 3 ngày. Các tổ chức đang dùng gói này
--- mà chưa có hạn sẽ được tính 3 ngày kể từ lúc chạy migration, chứ không
--- bị xoá dữ liệu ngay.
+-- NOTE: the trial plan is now limited to 3 days. Organizations already on this plan
+-- without an expiry date get 3 days counted from the moment the migration runs; their
+-- data is not deleted straight away.
 -- =====================================================================

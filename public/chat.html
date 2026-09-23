@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Hỏi đáp tài liệu — DocBot</title>
+<title>Ask your documents — DocBot</title>
 <link rel="stylesheet" href="/assets/app.css" />
 </head>
 <body>
@@ -11,15 +11,14 @@
 <div class="shell" id="shell"></div>
 
 <script type="module">
-import { api, Session, requireSession, buildSidebar, logout, icon, esc, fmt, toast, emptyState,
-  t, trialBanner, bindLangSwitcher, observeAndTranslate } from '/assets/app.js';
+import {api, Session, requireSession, buildSidebar, logout, icon, esc, fmt, toast, emptyState, t, trialBanner} from '/assets/app.js';
 
 const me = await requireSession();
 if (!me.organizations.length) {
   document.body.innerHTML = `<div style="min-height:100vh;display:grid;place-items:center;text-align:center;padding:24px">
-    <div><h1>Bạn chưa thuộc doanh nghiệp nào</h1>
-    <p class="muted mt-1">Hãy liên hệ quản trị viên doanh nghiệp để được mời vào tổ chức.</p>
-    <button class="btn mt-2" onclick="localStorage.clear();location.href='/login.html'">Đăng xuất</button></div></div>`;
+    <div><h1>You are not part of any organization</h1>
+    <p class="muted mt-1">Ask your company administrator to invite you.</p>
+    <button class="btn mt-2" onclick="localStorage.clear();location.href='/login.html'">Sign out</button></div></div>`;
   throw new Error('no org');
 }
 
@@ -33,39 +32,39 @@ function render() {
   const isAdmin = currentOrg.role === 'admin' || me.user.is_system_admin;
   document.getElementById('shell').innerHTML = `
     ${buildSidebar({
-      brandSub: 'Không gian hỏi đáp',
+      brandSub: 'Workspace',
       user: me.user,
       orgs: me.organizations,
       currentOrgId: orgId,
       items: [
-        { group: 'Trò chuyện' },
-        { view: 'chat', icon: 'chat', label: 'Hỏi đáp tài liệu' },
-        { view: 'history', icon: 'history', label: 'Lịch sử của tôi' },
+        { group: 'Chat' },
+        { view: 'chat', icon: 'chat', label: 'Ask your documents' },
+        { view: 'history', icon: 'history', label: 'My history' },
       ],
     })}
     <div class="main">
       <div class="topbar">
         <div class="title">
-          <h1 id="pageTitle">Hỏi đáp tài liệu</h1>
-          <p id="pageDesc">${esc(t('Chatbot chỉ trả lời dựa trên tài liệu đã được duyệt của {org}.', { org: currentOrg.name }))}</p>
+          <h1 id="pageTitle">Ask your documents</h1>
+          <p id="pageDesc">${esc(t('The chatbot answers only from documents approved for {org}.', { org: currentOrg.name }))}</p>
         </div>
-        ${isAdmin ? `<a class="btn" href="/admin.html">${icon.settings} Bảng quản trị</a>` : ''}
-        ${me.user.is_system_admin ? `<a class="btn" href="/sysadmin.html">${icon.shield} Quản trị hệ thống</a>` : ''}
+        ${isAdmin ? `<a class="btn" href="/admin.html">${icon.settings} Admin console</a>` : ''}
+        ${me.user.is_system_admin ? `<a class="btn" href="/sysadmin.html">${icon.shield} System admin</a>` : ''}
       </div>
 
       <div class="page-section active" data-view="chat">
         <div class="chat-layout">
-          <div class="chat-scroll" id="chatScroll"><div class="chat-inner" id="chatInner" data-no-i18n></div></div>
+          <div class="chat-scroll" id="chatScroll"><div class="chat-inner" id="chatInner"></div></div>
           <div class="composer">
             <div class="composer-inner">
               <div class="composer-box">
-                <textarea id="q" rows="1" placeholder="Đặt câu hỏi về tài liệu của doanh nghiệp…"></textarea>
-                <button class="btn primary" id="sendBtn">${icon.send} Gửi</button>
+                <textarea id="q" rows="1" placeholder="Ask a question about your company documents…"></textarea>
+                <button class="btn primary" id="sendBtn">${icon.send} Send</button>
               </div>
               <div class="meta">
-                <span>Enter để gửi · Shift+Enter xuống dòng</span>
+                <span>Enter to send · Shift+Enter for a new line</span>
                 <span class="spacer"></span>
-                <label class="row" style="gap:6px">Phạm vi:
+                <label class="row" style="gap:6px">Scope:
                   <select id="folderScope" style="width:auto;padding:3px 8px;font-size:12px"></select>
                 </label>
               </div>
@@ -75,13 +74,11 @@ function render() {
       </div>
 
       <div class="page-section" data-view="history">
-        <div class="page"><div class="card"><div class="card-body" id="historyBox" data-no-i18n>Đang tải…</div></div></div>
+        <div class="page"><div class="card"><div class="card-body" id="historyBox">Loading…</div></div></div>
       </div>
     </div>`;
 
   document.getElementById('trialBar').innerHTML = trialBanner(trial);
-  bindLangSwitcher();
-  observeAndTranslate();
 
   document.getElementById('logoutBtn').onclick = logout;
   document.getElementById('orgSwitch').onchange = (e) => { Session.orgId = e.target.value; location.reload(); };
@@ -92,10 +89,10 @@ function render() {
       b.classList.add('active');
       document.querySelectorAll('.page-section').forEach((s) => s.classList.toggle('active', s.dataset.view === b.dataset.view));
       const isChat = b.dataset.view === 'chat';
-      document.getElementById('pageTitle').textContent = isChat ? t('Hỏi đáp tài liệu') : t('Lịch sử của tôi');
+      document.getElementById('pageTitle').textContent = isChat ? t('Ask your documents') : t('My history');
       document.getElementById('pageDesc').textContent = isChat
-        ? t('Chatbot chỉ trả lời dựa trên tài liệu đã được duyệt của {org}.', { org: currentOrg.name })
-        : t('50 câu hỏi gần nhất bạn đã gửi.');
+        ? t('The chatbot answers only from documents approved for {org}.', { org: currentOrg.name })
+        : t('Your 50 most recent questions.');
       if (!isChat) loadHistory();
     };
   });
@@ -114,10 +111,10 @@ function greet() {
   document.getElementById('chatInner').innerHTML = `
     <div style="text-align:center;padding:48px 10px" data-greet>
       <div class="brand-mark" style="margin:0 auto 14px;width:42px;height:42px;font-size:19px">D</div>
-      <h2>${esc(t('Xin chào'))} <span data-no-i18n>${esc(me.user.full_name || me.user.email.split('@')[0])}</span></h2>
-      <p class="muted mt-1">Hãy đặt câu hỏi về tài liệu nội bộ. Câu trả lời luôn kèm tên tài liệu nguồn.</p>
+      <h2>${esc(t('Hello'))} <span>${esc(me.user.full_name || me.user.email.split('@')[0])}</span></h2>
+      <p class="muted mt-1">Ask about your internal documents. Every answer cites the source file.</p>
       <div class="row wrap mt-2" style="justify-content:center">
-        ${[t('Tóm tắt nội dung chính của tài liệu mới nhất'), t('Quy trình xin nghỉ phép được quy định thế nào?'), t('Chính sách bảo mật thông tin gồm những điểm gì?')]
+        ${[t('Summarise the main points of the latest document'), t('How does the leave request process work?'), t('What does the information security policy cover?')]
           .map((s) => `<button class="btn sm" data-suggest="${esc(s)}">${esc(s)}</button>`).join('')}
       </div>
     </div>`;
@@ -131,9 +128,9 @@ async function loadFolders() {
     const res = await api(`/orgs/${orgId}/folders`);
     folders = res.folders;
     const sel = document.getElementById('folderScope');
-    sel.innerHTML = `<option value="">${esc(t('Tất cả tài liệu tôi được xem'))}</option>` +
-      folders.map((f) => `<option value="${esc(f.id)}" data-no-i18n>${f.visibility === 'private' ? '🔒 ' : ''}${esc(f.name)} (${f.document_count})</option>`).join('');
-  } catch { /* thư mục không lấy được thì vẫn hỏi trên toàn bộ phạm vi được phép */ }
+    sel.innerHTML = `<option value="">${esc(t('All documents I can access'))}</option>` +
+      folders.map((f) => `<option value="${esc(f.id)}">${f.visibility === 'private' ? '🔒 ' : ''}${esc(f.name)} (${f.document_count})</option>`).join('');
+  } catch { /* folder list unavailable: fall back to asking across everything in scope */ }
 }
 
 function bubble(role, html) {
@@ -144,7 +141,7 @@ function bubble(role, html) {
   el.innerHTML = `
     <div class="bubble-avatar">${role === 'user' ? esc((me.user.full_name || me.user.email)[0].toUpperCase()) : 'D'}</div>
     <div class="body">
-      <div class="who" ${role === 'user' ? 'data-no-i18n' : ''}>${role === 'user' ? esc(me.user.full_name || t('Bạn')) : 'DocBot'}</div>
+      <div class="who" ${role === 'user' ? 'data-no-i18n' : ''}>${role === 'user' ? esc(me.user.full_name || t('You')) : 'DocBot'}</div>
       <div class="text">${html}</div>
       <div class="srcs"></div>
     </div>`;
@@ -189,10 +186,10 @@ async function ask() {
 
 async function loadHistory() {
   const box = document.getElementById('historyBox');
-  box.innerHTML = 'Đang tải…';
+  box.innerHTML = 'Loading…';
   try {
     const items = await api(`/orgs/${orgId}/chat/mine`);
-    if (!items.length) return (box.innerHTML = emptyState('Chưa có câu hỏi nào', 'Lịch sử sẽ hiện ở đây sau khi bạn bắt đầu hỏi.'));
+    if (!items.length) return (box.innerHTML = emptyState('No questions yet', 'Your history appears here once you start asking.'));
     box.innerHTML = items.reverse().map((m) => `
       <div style="padding:14px 0;border-bottom:1px solid var(--border)">
         <div class="row between"><b>${esc(m.question)}</b><span class="small muted nowrap">${esc(fmt.ago(m.created_at))}</span></div>

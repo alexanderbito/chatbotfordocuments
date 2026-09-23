@@ -1,26 +1,26 @@
 -- =====================================================================
--- MIGRATION V5 — Thư mục công khai / riêng tư và phân quyền theo email
--- Chạy trong Supabase Dashboard > SQL Editor > New query > Run
--- An toàn khi chạy lại nhiều lần. Yêu cầu đã chạy migration_v4_ocr_retry.sql.
+-- MIGRATION V5 — Public / private folders and per-email access control
+-- Run in Supabase Dashboard > SQL Editor > New query > Run
+-- Safe to run more than once. Requires migration_v4_ocr_retry.sql to have been run.
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
--- KIỂM TRA ĐIỀU KIỆN: dừng sớm với thông báo rõ ràng nếu chạy sai thứ tự
+-- PRECONDITION CHECK: stop early with a clear message if the files are run out of order
 -- ---------------------------------------------------------------------
 do $guard$
 begin
   if to_regclass('public.folders') is null then
-    raise exception E'Thieu bang "folders".\n=> Bang nay duoc tao boi migration_v2_auth.sql. Hay chay file do truoc, roi moi chay file nay.\n=> Neu ung dung tren Render dang chay binh thuong voi thu muc, thi rat co the SQL Editor dang mo NHAM project Supabase. Kiem tra o goc tren ben trai dashboard.\n=> Chay file kiem_tra_migration.sql de xem database dang o giai doan nao.';
+    raise exception E'Missing table "folders".\n=> This table is created by migration_v2_auth.sql. Run that file first, and only then run this one.\n=> If the app on Render is working fine with folders, the SQL Editor is most likely open on the WRONG Supabase project. Check the top left corner of the dashboard.\n=> Run kiem_tra_migration.sql to see which stage the database is at.';
   end if;
   if to_regclass('public.organization_members') is null then
-    raise exception E'Thieu bang "organization_members".\n=> Ban chua chay migration_v2_auth.sql.';
+    raise exception E'Missing table "organization_members".\n=> You have not run migration_v2_auth.sql yet.';
   end if;
 end
 $guard$;
 
--- 1. Chế độ hiển thị của thư mục
---    public  : mọi thành viên trong tổ chức đều hỏi được tài liệu bên trong
---    private : chỉ những email được cấp quyền (và admin tổ chức) mới đọc được
+-- 1. Folder visibility mode
+--    public  : every member of the organization can ask about the documents inside
+--    private : only explicitly granted emails (and organization admins) can read it
 alter table folders add column if not exists visibility text not null default 'public';
 
 alter table folders drop constraint if exists folders_visibility_check;
@@ -29,7 +29,7 @@ alter table folders add constraint folders_visibility_check
 
 create index if not exists folders_visibility_idx on folders (organization_id, visibility);
 
--- 2. Danh sách email được đọc từng thư mục riêng tư
+-- 2. The list of emails allowed to read each private folder
 create table if not exists folder_permissions (
   id uuid primary key default gen_random_uuid(),
   folder_id uuid not null references folders(id) on delete cascade,
@@ -39,7 +39,7 @@ create table if not exists folder_permissions (
   created_at timestamptz not null default now()
 );
 
--- Email luôn lưu dạng chữ thường để so khớp không phân biệt hoa thường
+-- Emails are always stored in lower case so that matching is case-insensitive
 create unique index if not exists folder_permissions_unique_idx
   on folder_permissions (folder_id, email);
 create index if not exists folder_permissions_email_idx
@@ -47,11 +47,11 @@ create index if not exists folder_permissions_email_idx
 
 alter table folder_permissions enable row level security;
 
--- 3. Hàm tìm kiếm ngữ nghĩa CÓ KIỂM TRA QUYỀN.
---    Khác với match_document_chunks_scoped ở chỗ: phía backend truyền vào
---    danh sách thư mục mà người hỏi ĐƯỢC PHÉP đọc. Cách này "fail closed" —
---    nếu tính quyền sai sót thì người dùng không thấy gì, thay vì thấy nhầm
---    tài liệu mật.
+-- 3. Semantic search function WITH PERMISSION CHECKING.
+--    It differs from match_document_chunks_scoped in that the backend passes in the
+--    list of folders the asker is ALLOWED to read. This approach "fails closed" —
+--    if the permission calculation goes wrong the user sees nothing, instead of
+--    accidentally seeing confidential documents.
 create or replace function match_document_chunks_acl(
   query_embedding vector(1024),
   match_org_id uuid,
@@ -74,7 +74,7 @@ as $$
   limit match_count;
 $$;
 
--- 4. Dọn quyền của những email đã bị gỡ khỏi tổ chức
+-- 4. Clean up grants belonging to emails that were removed from the organization
 create or replace function cleanup_orphan_folder_permissions()
 returns int
 language sql
@@ -92,6 +92,6 @@ as $$
 $$;
 
 -- =====================================================================
--- LƯU Ý: các thư mục đang có đều mặc định là 'public', nghĩa là hành vi
--- hiện tại không đổi cho tới khi admin chủ động đặt một thư mục thành riêng tư.
+-- NOTE: all existing folders default to 'public', which means current behaviour
+-- does not change until an admin deliberately makes a folder private.
 -- =====================================================================

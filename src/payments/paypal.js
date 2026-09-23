@@ -1,19 +1,21 @@
 import 'dotenv/config';
 
 /**
- * Cổng thanh toán cho khách ngoài Việt Nam — PayPal.
+ * Payment gateway for customers outside Vietnam — PayPal.
  *
- * Dùng REST trực tiếp thay vì SDK: chỉ cần 3 lệnh gọi (lấy token, tạo đơn,
- * thu tiền) và một lệnh xác thực webhook, nên không đáng thêm phụ thuộc.
+ * We call the REST API directly instead of pulling in the SDK: only three calls
+ * are needed (get a token, create an order, capture the money) plus one webhook
+ * verification call, which is not worth an extra dependency.
  */
 
 const LIVE = 'https://api-m.paypal.com';
 const SANDBOX = 'https://api-m.sandbox.paypal.com';
 
 /**
- * Dán biến môi trường trên Render rất hay dính khoảng trắng hoặc xuống dòng ở
- * cuối. Chuỗi Basic auth vì thế sai và PayPal trả 401 "Client Authentication
- * failed" — nhìn hệt như nhập sai khoá. Cắt sạch ngay từ đầu.
+ * Pasting environment variables into Render very often leaves a trailing space
+ * or newline behind. That corrupts the Basic auth string and PayPal answers with
+ * a 401 "Client Authentication failed" — which looks exactly like a mistyped
+ * credential. Trim them here, at the source.
  */
 function creds() {
   return {
@@ -37,7 +39,7 @@ export function isEnabled() {
 
 export const meta = {
   id: 'paypal',
-  name: 'PayPal / Thẻ quốc tế',
+  name: 'PayPal / Credit or debit card',
   currency: 'USD',
   description: 'Pay with PayPal balance, credit or debit card',
   countries: 'INTERNATIONAL',
@@ -46,7 +48,7 @@ export const meta = {
 let tokenCache = { value: null, expiresAt: 0 };
 
 async function accessToken() {
-  if (!isEnabled()) throw new Error('Chưa cấu hình PayPal (PAYPAL_CLIENT_ID / PAYPAL_SECRET)');
+  if (!isEnabled()) throw new Error('PayPal is not configured (PAYPAL_CLIENT_ID / PAYPAL_SECRET)');
   if (tokenCache.value && Date.now() < tokenCache.expiresAt) return tokenCache.value;
 
   const { value: token } = await fetchToken(env());
@@ -55,8 +57,9 @@ async function accessToken() {
 }
 
 /**
- * Lấy token cho MỘT môi trường cụ thể. Tách riêng để phần chẩn đoán có thể thử
- * cả hai môi trường mà không đụng vào bộ nhớ đệm đang dùng để thu tiền thật.
+ * Get a token for ONE specific environment. Kept separate so that the diagnostics
+ * can probe both environments without disturbing the token cache used for real
+ * payments.
  */
 async function fetchToken(forEnv) {
   const { id, secret } = creds();
@@ -71,30 +74,31 @@ async function fetchToken(forEnv) {
   if (!res.ok) {
     const why = data?.error_description || data?.error || `HTTP ${res.status}`;
     const err = new Error(
-      `PayPal: không lấy được access token — ${why} ` +
-      `(PAYPAL_ENV=${forEnv}, máy chủ ${apiBase(forEnv)}, client id bắt đầu bằng "${id.slice(0, 8)}…", dài ${id.length} ký tự)`
+      `PayPal: could not obtain an access token — ${why} ` +
+      `(PAYPAL_ENV=${forEnv}, server ${apiBase(forEnv)}, client id starts with "${id.slice(0, 8)}…", ${id.length} characters long)`
     );
     err.status = res.status;
     throw err;
   }
 
-  // Trừ hao 60 giây để không dùng token vừa hết hạn
+  // Take 60 seconds off the lifetime so we never send a token that just expired
   return { value: { value: data.access_token, expiresAt: Date.now() + (data.expires_in - 60) * 1000 } };
 }
 
 /**
- * Chẩn đoán cấu hình PayPal cho trang Sức khoẻ hệ thống.
+ * Diagnose the PayPal configuration for the System health page.
  *
- * Khi khoá không dùng được ở môi trường đang đặt, thử nốt môi trường còn lại.
- * Lý do: lỗi phổ biến nhất là tạo app Live trên PayPal nhưng quên đặt
- * PAYPAL_ENV=live, nên khoá Live bị gửi tới máy chủ sandbox và nhận đúng một
- * câu "Client Authentication failed" chẳng nói lên điều gì. Đây chỉ là lệnh
- * xin token, không tạo đơn và không đụng tới tiền.
+ * When the credentials do not work in the environment that is configured, try
+ * the other environment as well. The reason: the most common mistake is creating
+ * a Live app on PayPal but forgetting to set PAYPAL_ENV=live, so Live credentials
+ * are sent to the sandbox server and all that comes back is a bare "Client
+ * Authentication failed" that explains nothing. This only asks for a token; it
+ * creates no order and never touches money.
  */
 export async function diagnose() {
   const current = env();
   if (!isEnabled()) {
-    return { ok: false, env: current, detail: 'Chưa đặt PAYPAL_CLIENT_ID / PAYPAL_SECRET' };
+    return { ok: false, env: current, detail: 'PAYPAL_CLIENT_ID / PAYPAL_SECRET are not set' };
   }
 
   try {
@@ -102,7 +106,7 @@ export async function diagnose() {
   } catch (err) {
     const other = current === 'live' ? 'sandbox' : 'live';
     let otherWorks = false;
-    try { await fetchToken(other); otherWorks = true; } catch { /* khoá sai ở cả hai nơi */ }
+    try { await fetchToken(other); otherWorks = true; } catch { /* the credentials are wrong in both environments */ }
 
     if (otherWorks) {
       return {
@@ -110,28 +114,28 @@ export async function diagnose() {
         env: current,
         mismatch: other,
         detail:
-          `Khoá này KHÔNG dùng được ở môi trường "${current}" nhưng dùng được ở "${other}". ` +
-          `Sửa biến PAYPAL_ENV thành "${other}" trên Render rồi deploy lại.`,
+          `These credentials do NOT work in the "${current}" environment, but they do work in "${other}". ` +
+          `Change PAYPAL_ENV to "${other}" on Render and redeploy the service.`,
       };
     }
     return {
       ok: false,
       env: current,
-      detail: `${err.message}. Khoá cũng không dùng được ở môi trường "${other}" — nhiều khả năng Client ID hoặc Secret bị sai, thiếu ký tự hoặc dính khoảng trắng.`,
+      detail: `${err.message}. The credentials do not work in the "${other}" environment either — most likely the Client ID or Secret is wrong, missing characters, or has whitespace stuck to it.`,
     };
   }
 
   const warnings = [];
   if (!process.env.PAYPAL_WEBHOOK_ID) {
-    warnings.push('Chưa đặt PAYPAL_WEBHOOK_ID — webhook sẽ bị từ chối, khách trả tiền mà không được nâng gói');
+    warnings.push('PAYPAL_WEBHOOK_ID is not set — webhooks will be rejected, so customers will pay without their plan being upgraded');
   }
   if (current === 'sandbox') {
-    warnings.push('Đang chạy ở môi trường sandbox — tiền không có thật');
+    warnings.push('Running in the sandbox environment — the money is not real');
   }
   return {
     ok: true,
     env: current,
-    detail: warnings.length ? warnings.join(' · ') : `Lấy token thành công ở môi trường ${current}`,
+    detail: warnings.length ? warnings.join(' · ') : `Successfully obtained a token in the ${current} environment`,
     warning: warnings.length > 0,
   };
 }
@@ -158,7 +162,8 @@ async function callPaypal(path, { method = 'POST', body, headers = {} } = {}) {
 }
 
 /**
- * Tạo đơn hàng PayPal. Số tiền lấy từ bản ghi payment do máy chủ tạo.
+ * Create a PayPal order. The amount comes from the payment record the server
+ * created.
  */
 export async function createCheckout({ payment, plan, org, baseUrl }) {
   const order = await callPaypal('/v2/checkout/orders', {
@@ -166,7 +171,7 @@ export async function createCheckout({ payment, plan, org, baseUrl }) {
       intent: 'CAPTURE',
       purchase_units: [
         {
-          // custom_id là cầu nối để webhook tìm lại đúng giao dịch trong hệ thống
+          // custom_id is the link that lets the webhook find this transaction again in our system
           custom_id: payment.id,
           invoice_id: `${payment.order_code}`,
           description: `${plan.name} — ${org.name}`.slice(0, 127),
@@ -187,18 +192,19 @@ export async function createCheckout({ payment, plan, org, baseUrl }) {
         },
       },
     },
-    headers: { 'PayPal-Request-Id': payment.id },  // chống tạo trùng đơn
+    headers: { 'PayPal-Request-Id': payment.id },  // guards against creating duplicate orders
   });
 
   const approve = (order.links || []).find((l) => l.rel === 'approve' || l.rel === 'payer-action');
-  if (!approve) throw new Error('PayPal không trả về link thanh toán');
+  if (!approve) throw new Error('PayPal did not return a checkout link');
 
   return { checkoutUrl: approve.href, providerRef: order.id, raw: order };
 }
 
 /**
- * Thu tiền sau khi khách bấm đồng ý và quay lại.
- * Idempotent: nếu đơn đã thu rồi, PayPal trả ORDER_ALREADY_CAPTURED và ta coi là thành công.
+ * Capture the money after the customer approves the payment and returns.
+ * Idempotent: if the order was already captured, PayPal returns
+ * ORDER_ALREADY_CAPTURED and we treat that as success.
  */
 export async function capture(orderId) {
   try {
@@ -216,16 +222,17 @@ export async function capture(orderId) {
 }
 
 /**
- * Xác thực webhook bằng chính API của PayPal.
+ * Verify a webhook through PayPal's own API.
  *
- * Quan trọng: phải gửi lại NGUYÊN VĂN phần thân request như lúc nhận được.
- * Vì vậy tuyến webhook phải dùng express.raw() chứ không phải express.json(),
- * rồi mới parse — JSON.stringify lại một object đã parse có thể đổi thứ tự
- * khoá hoặc cách biểu diễn số và làm chữ ký sai.
+ * Important: the request body has to be sent back VERBATIM, byte for byte as it
+ * arrived. That is why the webhook route must use express.raw() rather than
+ * express.json() and parse the body itself — calling JSON.stringify() on an
+ * already-parsed object can change the key order or the way numbers are
+ * rendered, which makes the signature check fail.
  */
 export async function verifyWebhook({ headers, rawBody }) {
   if (!process.env.PAYPAL_WEBHOOK_ID) {
-    throw new Error('Chưa cấu hình PAYPAL_WEBHOOK_ID nên không xác thực được webhook');
+    throw new Error('PAYPAL_WEBHOOK_ID is not configured, so the webhook cannot be verified');
   }
 
   const event = JSON.parse(rawBody.toString('utf8'));
@@ -243,7 +250,7 @@ export async function verifyWebhook({ headers, rawBody }) {
   });
 
   if (res.verification_status !== 'SUCCESS') {
-    const e = new Error('Chữ ký webhook PayPal không hợp lệ');
+    const e = new Error('Invalid PayPal webhook signature');
     e.invalidSignature = true;
     throw e;
   }
@@ -251,7 +258,7 @@ export async function verifyWebhook({ headers, rawBody }) {
   const resource = event.resource || {};
   const paidEvents = ['PAYMENT.CAPTURE.COMPLETED', 'CHECKOUT.ORDER.COMPLETED'];
 
-  // custom_id nằm ở vị trí khác nhau tuỳ loại sự kiện
+  // custom_id sits in a different place depending on the event type
   const paymentId =
     resource.custom_id ||
     resource.purchase_units?.[0]?.custom_id ||

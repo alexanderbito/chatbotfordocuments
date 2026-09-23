@@ -12,16 +12,16 @@ import billingRouter from './billing.js';
 
 const router = express.Router();
 
-// Các nhóm chức năng con của một tổ chức
+// Sub-routers for the feature areas that live under an organization
 router.use('/:orgId/folders', foldersRouter);
 router.use('/:orgId/documents', documentsRouter);
 router.use('/:orgId/members', membersRouter);
 router.use('/:orgId/chat', chatRouter);
 router.use('/:orgId/billing', billingRouter);
 
-/** GET /orgs/:orgId — thông tin tổ chức + vai trò của người đang đăng nhập */
+/** GET /orgs/:orgId — organization details plus the signed-in user's role */
 router.get('/:orgId', requireAuth, requireOrgMember, async (req, res) => {
-  // Bám vào lưu lượng thật để dọn dữ liệu hết hạn, không cần cron ngoài
+  // Ride on real traffic to purge expired data, so no external cron is needed
   maybeSweep();
 
   res.json({
@@ -41,7 +41,7 @@ router.get('/:orgId', requireAuth, requireOrgMember, async (req, res) => {
   });
 });
 
-/** PATCH /orgs/:orgId — cập nhật hồ sơ doanh nghiệp (admin tổ chức) */
+/** PATCH /orgs/:orgId — update the company profile (organization admins only) */
 router.patch('/:orgId', requireAuth, requireOrgMember, requireOrgAdmin, async (req, res) => {
   try {
     const patch = {};
@@ -61,7 +61,7 @@ router.patch('/:orgId', requireAuth, requireOrgMember, requireOrgAdmin, async (r
   }
 });
 
-/** GET /orgs/:orgId/overview — số liệu cho dashboard admin tổ chức */
+/** GET /orgs/:orgId/overview — the figures behind the organization admin dashboard */
 router.get('/:orgId/overview', requireAuth, requireOrgMember, requireOrgAdmin, async (req, res) => {
   try {
     const usage = await getUsage(req.org.id, req.org.plan);
@@ -94,7 +94,7 @@ router.get('/:orgId/overview', requireAuth, requireOrgMember, requireOrgAdmin, a
     const byStatus = { ready: 0, processing: 0, failed: 0 };
     for (const r of statusRows || []) byStatus[r.status] = (byStatus[r.status] || 0) + 1;
 
-    // Chuỗi 30 ngày gần nhất cho biểu đồ
+    // Series covering the last 30 days, for the chart
     const series = [];
     for (let i = 0; i < 30; i++) {
       const d = new Date(since);
@@ -119,7 +119,7 @@ router.get('/:orgId/overview', requireAuth, requireOrgMember, requireOrgAdmin, a
   }
 });
 
-/** GET /orgs/:orgId/billing — gói cước hiện tại + lịch sử thanh toán */
+/** GET /orgs/:orgId/billing — the current plan plus the payment history */
 router.get('/:orgId/billing', requireAuth, requireOrgMember, requireOrgAdmin, async (req, res) => {
   try {
     const [{ data: payments }, { data: plans }] = await Promise.all([

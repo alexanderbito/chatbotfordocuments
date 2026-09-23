@@ -1,65 +1,51 @@
 import { supabase } from '../supabaseClient.js';
 import { logEvent } from '../logger.js';
-import * as payos from './payos.js';
 import * as paypal from './paypal.js';
 
 /**
- * Lớp điều phối cổng thanh toán.
+ * Payment gateway registry.
  *
- * Thêm cổng mới (ví dụ Paddle) chỉ cần viết một module có đủ
- * isEnabled / meta / createCheckout / verifyWebhook rồi khai báo ở đây.
+ * Adding a gateway means writing a module that exports
+ * isEnabled / meta / createCheckout / verifyWebhook and listing it here.
  */
-const PROVIDERS = { payos, paypal };
+const PROVIDERS = { paypal };
 
 export function getProvider(id) {
   const p = PROVIDERS[id];
-  if (!p) throw new Error(`Cổng thanh toán không hợp lệ: ${id}`);
-  if (!p.isEnabled()) throw new Error(`Cổng ${p.meta.name} chưa được cấu hình trên máy chủ`);
+  if (!p) throw new Error(`Unknown payment method: ${id}`);
+  if (!p.isEnabled()) throw new Error(`${p.meta.name} is not configured on the server`);
   return p;
 }
 
-/** Danh sách cổng đang bật, kèm cổng gợi ý theo quốc gia. */
-export function availableProviders(country) {
-  const isVN = String(country || 'VN').toUpperCase() === 'VN';
-  return Object.values(PROVIDERS)
-    .filter((p) => p.isEnabled())
-    .map((p) => ({
-      ...p.meta,
-      recommended: isVN ? p.meta.id === 'payos' : p.meta.id === 'paypal',
-    }))
-    .sort((a, b) => Number(b.recommended) - Number(a.recommended));
+/** Gateways that are currently configured and can accept a payment. */
+export function availableProviders() {
+  return Object.values(PROVIDERS).filter((p) => p.isEnabled()).map((p) => ({ ...p.meta }));
 }
 
 export function baseUrl(req) {
   if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.replace(/\/$/, '');
-  // Render đặt sẵn RENDER_EXTERNAL_URL
+  // Render sets RENDER_EXTERNAL_URL for us
   if (process.env.RENDER_EXTERNAL_URL) return process.env.RENDER_EXTERNAL_URL.replace(/\/$/, '');
   const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
   return `${proto}://${req.headers.host}`;
 }
 
-/** Tỷ giá chỉ dùng để quy đổi cho báo cáo doanh thu, không dùng để tính tiền khách. */
-export function usdToVnd(usd) {
-  const rate = Number(process.env.USD_TO_VND_RATE || 26000);
-  return Math.round(Number(usd) * rate);
-}
-
 /**
- * Tạo một phiên thanh toán.
+ * Open a payment session.
  *
- * Nguyên tắc bảo mật: số tiền LUÔN lấy từ bảng plans ở máy chủ.
- * Trình duyệt chỉ được chọn gói và cổng, không bao giờ gửi lên số tiền.
+ * Security rule: the amount ALWAYS comes from the plans table on the server.
+ * The browser only ever picks a plan and a gateway, never a price.
  */
 export async function startCheckout({ org, plan, providerId, req, userId }) {
   const provider = getProvider(providerId);
   const currency = provider.meta.currency;
 
-  const amount = currency === 'USD' ? Number(plan.price_usd) : Number(plan.price_vnd);
+  const amount = Number(plan.price_usd);
   if (!(amount > 0)) {
-    throw new Error(`Gói "${plan.name}" chưa đặt giá cho ${currency}. Liên hệ quản trị hệ thống.`);
+    throw new Error(`The "${plan.name}" plan has no price set. Contact the system administrator.`);
   }
 
-  // payOS yêu cầu orderCode là số nguyên duy nhất; dùng mốc thời gian + phần ngẫu nhiên
+  // A unique integer order reference: timestamp tail plus a random suffix.
   const orderCode = Number(`${Date.now()}`.slice(-10) + String(Math.floor(Math.random() * 100)).padStart(2, '0'));
 
   const { data: payment, error } = await supabase
@@ -70,7 +56,6 @@ export async function startCheckout({ org, plan, providerId, req, userId }) {
       provider: providerId,
       currency,
       amount,
-      amount_vnd: currency === 'USD' ? usdToVnd(amount) : Math.round(amount),
       order_code: orderCode,
       status: 'pending',
       method: providerId,
@@ -92,29 +77,30 @@ export async function startCheckout({ org, plan, providerId, req, userId }) {
       scope: 'billing',
       organizationId: org.id,
       userId,
-      message: `Tạo phiên thanh toán ${plan.name} qua ${provider.meta.name}`,
+      message: `Opened a checkout for ${plan.name} via ${provider.meta.name}`,
       detail: { payment_id: payment.id, amount, currency },
     });
 
     return { payment_id: payment.id, checkout_url: result.checkoutUrl, amount, currency };
   } catch (err) {
-    // Tạo link thất bại thì đánh dấu hỏng để không để lại phiên treo
+    // If the gateway would not give us a link, close the row so no session is left hanging.
     await supabase.from('payments').update({ status: 'failed', note: err.message }).eq('id', payment.id);
     throw err;
   }
 }
 
 /**
- * Ghi nhận thanh toán thành công và nâng gói.
+ * Record a successful payment and extend the plan.
  *
- * Idempotent: gọi lại nhiều lần cho cùng một giao dịch chỉ có tác dụng ở lần
- * đầu — cổng thanh toán thường gọi webhook lặp khi mạng chập chờn.
- * Trả về true nếu lần gọi này thực sự kích hoạt gói.
+ * Idempotent: calling it repeatedly for one transaction only has an effect the
+ * first time, because gateways retry their webhooks on a flaky connection.
+ * Returns true when this call is the one that actually activated the plan.
  */
 export async function markPaid({ payment, providerRef, raw, months = 1 }) {
-  // paid_at là mốc duy nhất xác định "đã xử lý" — xét thêm status sẽ tạo kẽ hở
+  // paid_at is the single marker for "already handled" — also checking status
+  // would leave a gap through which a plan could be extended twice.
   if (payment.paid_at) {
-    return { activated: false, reason: 'đã ghi nhận trước đó' };
+    return { activated: false, reason: 'already recorded' };
   }
 
   if (providerRef && !payment.provider_ref) {
@@ -124,8 +110,8 @@ export async function markPaid({ payment, providerRef, raw, months = 1 }) {
     await supabase.from('payments').update({ raw }).eq('id', payment.id);
   }
 
-  // Hàm SQL khoá dòng payments rồi cập nhật cả payments lẫn organizations,
-  // nên không thể xảy ra cảnh ghi nhận tiền mà quên gia hạn gói.
+  // The SQL function locks the payments row and updates both payments and
+  // organizations, so money can never be recorded without the plan being extended.
   const { data, error } = await supabase.rpc('activate_paid_plan', {
     p_payment_id: payment.id,
     p_months: months,
@@ -136,7 +122,7 @@ export async function markPaid({ payment, providerRef, raw, months = 1 }) {
     await logEvent({
       scope: 'billing',
       organizationId: payment.organization_id,
-      message: `Đã nhận thanh toán và gia hạn gói (${payment.amount} ${payment.currency})`,
+      message: `Payment received and plan extended (${payment.amount} ${payment.currency})`,
       detail: { payment_id: payment.id, provider: payment.provider },
     });
   }
@@ -144,7 +130,7 @@ export async function markPaid({ payment, providerRef, raw, months = 1 }) {
   return { activated: !!data };
 }
 
-/** Tìm giao dịch theo mã đơn hoặc theo id, giới hạn trong đúng cổng đó. */
+/** Find a transaction by order code or id, scoped to one gateway. */
 export async function findPayment({ id, orderCode, provider }) {
   let query = supabase.from('payments').select('*');
   if (id) query = query.eq('id', id);
@@ -156,4 +142,4 @@ export async function findPayment({ id, orderCode, provider }) {
   return data || null;
 }
 
-export { payos, paypal };
+export { paypal };

@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Quản trị doanh nghiệp — DocBot</title>
+<title>Organization admin — DocBot</title>
 <link rel="stylesheet" href="/assets/app.css" />
 </head>
 <body>
@@ -11,11 +11,7 @@
 <div class="shell" id="shell"></div>
 
 <script type="module">
-import {
-  api, Session, requireSession, buildSidebar, logout, icon, esc, fmt, toast,
-  modal, confirmDialog, emptyState, badge, LABEL, meter, renderBars, debounce, router,
-  t, money, currency, preferredProvider, trialBanner, bindLangSwitcher, observeAndTranslate,
-} from '/assets/app.js';
+import {api, Session, requireSession, buildSidebar, logout, icon, esc, fmt, toast, modal, confirmDialog, emptyState, badge, LABEL, meter, renderBars, debounce, router, t, money, trialBanner} from '/assets/app.js';
 
 const me = await requireSession();
 const adminOrgs = me.user.is_system_admin ? me.organizations : me.organizations.filter((o) => o.role === 'admin');
@@ -28,37 +24,37 @@ let trial = adminOrgs.find((o) => o.id === orgId)?.trial || null;
 let state = { folder: null, folders: [], unfiled: 0, historyPage: 1 };
 
 const TITLES = {
-  overview: ['Tổng quan', 'Bức tranh nhanh về tài liệu, thành viên và mức sử dụng.'],
-  documents: ['Tài liệu & thư mục', 'Tải lên, sắp xếp và kiểm soát tài liệu được đưa vào chatbot.'],
-  members: ['Thành viên', 'Mời đồng nghiệp và phân quyền sử dụng chatbot.'],
-  history: ['Lịch sử hỏi đáp', 'Toàn bộ câu hỏi thành viên đã gửi và câu trả lời của chatbot.'],
-  billing: ['Gói cước', 'Hạn mức đang dùng và lịch sử thanh toán.'],
-  settings: ['Thiết lập', 'Hồ sơ doanh nghiệp và tài khoản của bạn.'],
+  overview: ['Overview', 'A quick picture of documents, members and usage.'],
+  documents: ['Documents & folders', 'Upload, organise and control what the chatbot can read.'],
+  members: ['Members', 'Invite colleagues and set who can use the chatbot.'],
+  history: ['Chat history', 'Every question members asked and how the chatbot answered.'],
+  billing: ['Plan & billing', 'Current usage and payment history.'],
+  settings: ['Settings', 'Company profile and your account.'],
 };
 
 function shell() {
   document.getElementById('shell').innerHTML = `
     ${buildSidebar({
-      brandSub: 'Quản trị doanh nghiệp',
+      brandSub: 'Organization admin',
       user: me.user,
       orgs: adminOrgs,
       currentOrgId: orgId,
       items: [
-        { group: 'Vận hành' },
-        { view: 'overview', icon: 'dashboard', label: 'Tổng quan' },
-        { view: 'documents', icon: 'folder', label: 'Tài liệu & thư mục' },
-        { view: 'members', icon: 'users', label: 'Thành viên' },
-        { view: 'history', icon: 'history', label: 'Lịch sử hỏi đáp' },
-        { group: 'Tài khoản' },
-        { view: 'billing', icon: 'card', label: 'Gói cước' },
-        { view: 'settings', icon: 'settings', label: 'Thiết lập' },
+        { group: 'Operations' },
+        { view: 'overview', icon: 'dashboard', label: 'Overview' },
+        { view: 'documents', icon: 'folder', label: 'Documents & folders' },
+        { view: 'members', icon: 'users', label: 'Members' },
+        { view: 'history', icon: 'history', label: 'Chat history' },
+        { group: 'Account' },
+        { view: 'billing', icon: 'card', label: 'Plan & billing' },
+        { view: 'settings', icon: 'settings', label: 'Settings' },
       ],
     })}
     <div class="main">
       <div class="topbar">
-        <div class="title"><h1 id="ttl">Tổng quan</h1><p id="dsc"></p></div>
-        <a class="btn" href="/pricing.html">${icon.card} Bảng giá</a>
-        <a class="btn" href="/chat.html">${icon.chat} Mở chatbot</a>
+        <div class="title"><h1 id="ttl">Overview</h1><p id="dsc"></p></div>
+        <a class="btn" href="/pricing.html">${icon.card} Pricing</a>
+        <a class="btn" href="/chat.html">${icon.chat} Open chatbot</a>
       </div>
       <div class="page">
         ${['overview', 'documents', 'members', 'history', 'billing', 'settings']
@@ -66,14 +62,12 @@ function shell() {
       </div>
     </div>`;
 
-  bindLangSwitcher();
-  observeAndTranslate();
 
   document.getElementById('logoutBtn').onclick = logout;
   document.getElementById('orgSwitch').onchange = (e) => { Session.orgId = e.target.value; location.reload(); };
 }
 
-/* =================== TỔNG QUAN =================== */
+/* =================== OVERVIEW =================== */
 async function viewOverview() {
   const el = document.getElementById('view-overview');
   el.innerHTML = '<div class="loading-line"></div>';
@@ -90,52 +84,52 @@ async function viewOverview() {
 
   el.innerHTML = `
     <div class="stat-grid">
-      ${stat('Tài liệu', `${fmt.num(u.documents)} <small>/ ${fmt.num(L.max_documents)}</small>`, 'file', t('{ready} sẵn sàng · {failed} lỗi', { ready: d.documents_by_status.ready || 0, failed: d.documents_by_status.failed || 0 }), u.documents, L.max_documents)}
-      ${stat('Thành viên', `${fmt.num(u.members)} <small>/ ${fmt.num(L.max_members)}</small>`, 'users', '', u.members, L.max_members)}
-      ${stat('Lượt hỏi tháng này', `${fmt.num(u.questions_this_month)} <small>/ ${fmt.num(L.max_questions_per_month)}</small>`, 'chat', '', u.questions_this_month, L.max_questions_per_month)}
-      ${stat('Dung lượng', `${fmt.mb(u.storage_mb)} <small>/ ${fmt.num(L.max_storage_mb)} MB</small>`, 'db', t('{n} đoạn đã lập chỉ mục', { n: fmt.num(u.chunks) }), u.storage_mb, L.max_storage_mb)}
-      ${stat('Trang nhận dạng (OCR)', `${fmt.num(u.ocr_pages_this_month)} <small>/ ${fmt.num(L.max_ocr_pages_per_month)}</small>`, 'scan', 'trong tháng này', u.ocr_pages_this_month, L.max_ocr_pages_per_month)}
+      ${stat('Documents', `${fmt.num(u.documents)} <small>/ ${fmt.num(L.max_documents)}</small>`, 'file', t('{ready} ready · {failed} failed', { ready: d.documents_by_status.ready || 0, failed: d.documents_by_status.failed || 0 }), u.documents, L.max_documents)}
+      ${stat('Members', `${fmt.num(u.members)} <small>/ ${fmt.num(L.max_members)}</small>`, 'users', '', u.members, L.max_members)}
+      ${stat('Questions this month', `${fmt.num(u.questions_this_month)} <small>/ ${fmt.num(L.max_questions_per_month)}</small>`, 'chat', '', u.questions_this_month, L.max_questions_per_month)}
+      ${stat('Size', `${fmt.mb(u.storage_mb)} <small>/ ${fmt.num(L.max_storage_mb)} MB</small>`, 'db', t('{n} chunks indexed', { n: fmt.num(u.chunks) }), u.storage_mb, L.max_storage_mb)}
+      ${stat('OCR pages', `${fmt.num(u.ocr_pages_this_month)} <small>/ ${fmt.num(L.max_ocr_pages_per_month)}</small>`, 'scan', 'this month', u.ocr_pages_this_month, L.max_ocr_pages_per_month)}
     </div>
 
     <div class="card">
-      <div class="card-head"><h2>${esc(t('Lượt hỏi 30 ngày gần nhất'))}</h2><span class="sub">${esc(t('Tổng {n} câu hỏi', { n: fmt.num(d.questions_series.reduce((s, x) => s + x.questions, 0)) }))}</span></div>
+      <div class="card-head"><h2>${esc(t('Questions over the last 30 days'))}</h2><span class="sub">${esc(t('{n} questions total', { n: fmt.num(d.questions_series.reduce((s, x) => s + x.questions, 0)) }))}</span></div>
       <div class="card-body"><div id="chart"></div></div>
     </div>
 
     <div class="split" style="grid-template-columns:1fr 1fr">
       <div class="card">
-        <div class="card-head"><h3>Tài liệu mới nhất</h3><a href="#documents" class="small">Xem tất cả</a></div>
+        <div class="card-head"><h3>Latest documents</h3><a href="#documents" class="small">View all</a></div>
         <div class="card-body flush">${d.recent_documents.length ? `<div class="table-wrap"><table class="tbl"><tbody>
           ${d.recent_documents.map((x) => `<tr><td><div class="cell-main truncate">${esc(x.filename)}</div><div class="cell-sub">${esc(fmt.ago(x.created_at))}</div></td><td style="width:1%">${badge(x.status, LABEL.status)}</td></tr>`).join('')}
-        </tbody></table></div>` : emptyState(t('Chưa có tài liệu nào'))}</div>
+        </tbody></table></div>` : emptyState(t('No documents yet'))}</div>
       </div>
       <div class="card">
-        <div class="card-head"><h3>Câu hỏi gần đây</h3><a href="#history" class="small">Xem tất cả</a></div>
+        <div class="card-head"><h3>Recent questions</h3><a href="#history" class="small">View all</a></div>
         <div class="card-body flush">${d.recent_chats.length ? `<div class="table-wrap"><table class="tbl"><tbody>
           ${d.recent_chats.map((x) => `<tr><td><div class="cell-main truncate">${esc(x.question)}</div><div class="cell-sub">${esc(x.user_email || '')} · ${esc(fmt.ago(x.created_at))}</div></td></tr>`).join('')}
-        </tbody></table></div>` : emptyState(t('Chưa có câu hỏi nào'))}</div>
+        </tbody></table></div>` : emptyState(t('No questions yet'))}</div>
       </div>
     </div>`;
 
   renderBars(document.getElementById('chart'), d.questions_series, 'questions');
 }
 
-/* =================== TÀI LIỆU & THƯ MỤC =================== */
+/* =================== DOCUMENTS & FOLDERS =================== */
 async function viewDocuments() {
   const el = document.getElementById('view-documents');
   el.innerHTML = `
     <div class="split">
       <div class="card" style="margin:0">
-        <div class="card-head"><h3>Thư mục</h3><button class="icon-btn" id="addFolder" title="${esc(t('Thêm thư mục'))}">${icon.plus}</button></div>
-        <div class="card-body" id="tree" data-no-i18n>Đang tải…</div>
+        <div class="card-head"><h3>Folders</h3><button class="icon-btn" id="addFolder" title="${esc(t('Add folder'))}">${icon.plus}</button></div>
+        <div class="card-body" id="tree">Loading…</div>
       </div>
       <div>
         <div class="toolbar">
-          <div class="search-box">${icon.search}<input type="search" id="docSearch" placeholder="Tìm theo tên tài liệu…" /></div>
+          <div class="search-box">${icon.search}<input type="search" id="docSearch" placeholder="Search by file name…" /></div>
           <span class="spacer"></span>
-          <button class="btn primary" id="uploadBtn">${icon.upload} Tải tài liệu lên</button>
+          <button class="btn primary" id="uploadBtn">${icon.upload} Upload documents</button>
         </div>
-        <div class="card"><div class="card-body flush" id="docTable" data-no-i18n>Đang tải…</div></div>
+        <div class="card"><div class="card-body flush" id="docTable">Loading…</div></div>
       </div>
     </div>`;
 
@@ -156,20 +150,20 @@ async function loadFolders() {
   const row = (f, depth) => `
     <div class="tree-item ${state.folder === f.id ? 'active' : ''}" data-folder="${esc(f.id)}" style="padding-left:${10 + depth * 14}px">
       ${icon.folder}<span class="name">${esc(f.name)}</span>
-      ${f.visibility === 'private' ? `<span class="lock" title="${esc(t('Riêng tư — {n} người được đọc', { n: f.permission_count }))}">${icon.lock}</span>` : ''}
+      ${f.visibility === 'private' ? `<span class="lock" title="${esc(t('Private — {n} people can read', { n: f.permission_count }))}">${icon.lock}</span>` : ''}
       <span class="count">${f.document_count}</span>
       <span class="row-act">
-        <button class="icon-btn" data-edit="${esc(f.id)}" title="Sửa thư mục và quyền">${icon.edit}</button>
-        <button class="icon-btn" data-del="${esc(f.id)}" title="Xoá">${icon.trash}</button>
+        <button class="icon-btn" data-edit="${esc(f.id)}" title="Edit folder and access">${icon.edit}</button>
+        <button class="icon-btn" data-del="${esc(f.id)}" title="Delete">${icon.trash}</button>
       </span>
     </div>
     ${state.folders.filter((c) => c.parent_id === f.id).map((c) => row(c, depth + 1)).join('')}`;
 
   document.getElementById('tree').innerHTML = `
     <div class="tree">
-      <div class="tree-item ${state.folder === null ? 'active' : ''}" data-folder="">${icon.inbox}<span class="name">Tất cả tài liệu</span><span class="count">${total}</span></div>
+      <div class="tree-item ${state.folder === null ? 'active' : ''}" data-folder="">${icon.inbox}<span class="name">All documents</span><span class="count">${total}</span></div>
       ${roots.map((f) => row(f, 0)).join('')}
-      <div class="tree-item ${state.folder === 'none' ? 'active' : ''}" data-folder="none">${icon.file}<span class="name">Chưa phân loại</span><span class="count">${state.unfiled}</span></div>
+      <div class="tree-item ${state.folder === 'none' ? 'active' : ''}" data-folder="none">${icon.file}<span class="name">Unfiled</span><span class="count">${state.unfiled}</span></div>
     </div>`;
 
   document.querySelectorAll('[data-folder]').forEach((n) => {
@@ -185,28 +179,28 @@ async function loadFolders() {
   document.querySelectorAll('[data-del]').forEach((b) => {
     b.onclick = async () => {
       const f = state.folders.find((x) => x.id === b.dataset.del);
-      if (!(await confirmDialog(t('Xoá thư mục'), t('Xoá "{name}"? Tài liệu bên trong sẽ chuyển về mục Chưa phân loại, không bị mất.', { name: f.name })))) return;
+      if (!(await confirmDialog(t('Delete folder'), t('Delete "{name}"? Files inside move to Unfiled — nothing is lost.', { name: f.name })))) return;
       try {
         await api(`/orgs/${orgId}/folders/${f.id}`, { method: 'DELETE' });
       } catch (err) {
-        // Thư mục riêng tư còn tài liệu -> backend bắt xác nhận lần nữa
+        // A private folder that still holds documents: the server asks to confirm twice.
         if (!/needs_confirmation/.test(err.message)) throw err;
         const ok = await confirmDialog(
-          t('Cảnh báo: tài liệu sẽ thành công khai'),
-          t('"{name}" đang ở chế độ riêng tư. Xoá thư mục sẽ đẩy tài liệu bên trong về mục Chưa phân loại, và MỌI thành viên trong tổ chức sẽ hỏi được nội dung đó. Vẫn tiếp tục?', { name: f.name }),
-          t('Vẫn xoá')
+          t('Warning: these documents will become public'),
+          t('"{name}" is private. Deleting it moves its files to Unfiled, where EVERY member of the organization can ask about them. Continue?', { name: f.name }),
+          t('Delete anyway')
         );
         if (!ok) return;
         await api(`/orgs/${orgId}/folders/${f.id}?confirm=move-to-public`, { method: 'DELETE' });
       }
-      toast(t('Đã xoá thư mục'), 'ok');
+      toast(t('Folder deleted'), 'ok');
       state.folder = null; loadFolders(); loadDocs();
     };
   });
 }
 
 async function folderModal(folder) {
-  // Lấy danh sách thành viên và quyền hiện tại của thư mục
+  // Load the member list together with the folder's current grants.
   let members = [];
   let granted = [];
   try {
@@ -220,7 +214,7 @@ async function folderModal(folder) {
 
   const grantedSet = new Set(granted);
   const opts = state.folders.filter((f) => f.id !== folder?.id)
-    .map((f) => `<option value="${esc(f.id)}" data-no-i18n ${folder?.parent_id === f.id ? 'selected' : ''}>${esc(f.name)}${f.visibility === 'private' ? t(' (riêng tư)') : ''}</option>`).join('');
+    .map((f) => `<option value="${esc(f.id)}" ${folder?.parent_id === f.id ? 'selected' : ''}>${esc(f.name)}${f.visibility === 'private' ? t(' (private)') : ''}</option>`).join('');
 
   const memberRows = members
     .filter((m) => m.role !== 'admin')
@@ -228,54 +222,54 @@ async function folderModal(folder) {
       <label class="perm-row">
         <input type="checkbox" class="perm-check" value="${esc(String(m.email).toLowerCase())}" ${grantedSet.has(String(m.email).toLowerCase()) ? 'checked' : ''} />
         <span class="who"><b>${esc(m.full_name || String(m.email).split('@')[0])}</b><span>${esc(m.email)}</span></span>
-        ${m.status === 'invited' ? `<span class="badge tiny warn">${esc(t('chờ nhận lời mời'))}</span>` : ''}
+        ${m.status === 'invited' ? `<span class="badge tiny warn">${esc(t('invited'))}</span>` : ''}
       </label>`).join('');
 
   const adminCount = members.filter((m) => m.role === 'admin').length;
 
   modal({
-    title: folder ? t('Thư mục: {name}', { name: folder.name }) : t('Thư mục mới'),
+    title: folder ? t('Folder: {name}', { name: folder.name }) : t('New folder'),
     wide: true,
-    okText: folder ? t('Lưu thay đổi') : t('Tạo thư mục'),
+    okText: folder ? t('Save changes') : t('Create folder'),
     body: `
       <div class="form-grid">
-        <div class="field"><label>Tên thư mục</label><input type="text" id="fname" value="${esc(folder?.name || '')}" placeholder="${esc(t('Ví dụ: Quy trình nhân sự'))}" /></div>
-        <div class="field"><label>Thư mục cha</label><select id="fparent"><option value="">${esc(t('— Không có —'))}</option>${opts}</select></div>
+        <div class="field"><label>Folder name</label><input type="text" id="fname" value="${esc(folder?.name || '')}" placeholder="${esc(t('e.g. HR procedures'))}" /></div>
+        <div class="field"><label>Parent folder</label><select id="fparent"><option value="">${esc(t('— None —'))}</option>${opts}</select></div>
       </div>
 
       <div class="field">
-        <label>Chế độ truy cập</label>
+        <label>Access</label>
         <label class="perm-row"><input type="radio" name="fvis" value="public" ${folder?.visibility !== 'private' ? 'checked' : ''} />
-          <span class="who"><b>Công khai trong tổ chức</b><span>Mọi thành viên đều hỏi chatbot được về tài liệu trong thư mục này</span></span></label>
+          <span class="who"><b>Public within the organization</b><span>Every member can ask the chatbot about files in this folder</span></span></label>
         <label class="perm-row"><input type="radio" name="fvis" value="private" ${folder?.visibility === 'private' ? 'checked' : ''} />
-          <span class="who"><b>Riêng tư</b><span>Chỉ những người được chọn bên dưới mới hỏi được. Người khác không thấy thư mục và chatbot không đọc tài liệu bên trong.</span></span></label>
+          <span class="who"><b>Private</b><span>Only the people selected below can ask. Others never see this folder and the chatbot will not read from it.</span></span></label>
       </div>
 
       <div class="field ${folder?.visibility === 'private' ? '' : 'hidden'}" id="permBlock">
-        <label>Ai được hỏi về tài liệu trong thư mục này?</label>
-        <div class="perm-list">${memberRows || `<div class="empty" style="padding:20px"><b>${esc(t('Chưa có thành viên thường'))}</b><div>${esc(t('Hãy mời thành viên trước khi phân quyền.'))}</div></div>`}</div>
-        <div class="hint">${esc(t('{n} quản trị viên của tổ chức luôn đọc được mọi thư mục nên không cần chọn ở đây.', { n: adminCount }))}</div>
+        <label>Who can ask about files in this folder?</label>
+        <div class="perm-list">${memberRows || `<div class="empty" style="padding:20px"><b>${esc(t('No regular members yet'))}</b><div>${esc(t('Invite members before granting access.'))}</div></div>`}</div>
+        <div class="hint">${esc(t('The {n} organization admins can always read every folder, so they are not listed here.', { n: adminCount }))}</div>
         <div class="row mt-1" style="gap:8px">
-          <button type="button" class="btn sm" id="permAll">Chọn tất cả</button>
-          <button type="button" class="btn sm" id="permNone">Bỏ chọn tất cả</button>
+          <button type="button" class="btn sm" id="permAll">Select all</button>
+          <button type="button" class="btn sm" id="permNone">Clear all</button>
         </div>
       </div>
 
       <div class="alert info show" id="inheritNote" style="display:none">
-        Thư mục con nằm trong thư mục riêng tư cũng bị hạn chế theo — muốn đọc thư mục con thì phải có quyền ở tất cả thư mục cha riêng tư.
+        Subfolders of a private folder inherit the restriction — access requires permission on every private parent folder.
       </div>`,
     onOk: async (box) => {
       const name = box.querySelector('#fname').value.trim();
-      if (!name) { toast(t('Chưa nhập tên thư mục'), 'err'); return false; }
+      if (!name) { toast(t('Please enter a folder name'), 'err'); return false; }
 
       const visibility = box.querySelector('input[name="fvis"]:checked').value;
       const emails = [...box.querySelectorAll('.perm-check:checked')].map((c) => c.value);
 
       if (visibility === 'private' && emails.length === 0) {
         const ok = await confirmDialog(
-          t('Thư mục riêng tư chưa có ai'),
-          t('Bạn chưa chọn thành viên nào. Thư mục sẽ chỉ quản trị viên đọc được, thành viên thường không hỏi được gì trong đó. Tiếp tục?'),
-          t('Vẫn lưu')
+          t('Private folder with nobody selected'),
+          t('You have not selected anyone. Only admins will be able to read this folder. Continue?'),
+          t('Save anyway')
         );
         if (!ok) return false;
       }
@@ -286,14 +280,14 @@ async function folderModal(folder) {
         : await api(`/orgs/${orgId}/folders`, { method: 'POST', body });
 
       if (res.permissions?.rejected?.length) {
-        toast(t('Bỏ qua {n} email không thuộc tổ chức', { n: res.permissions.rejected.length }), 'err');
+        toast(t('Skipped {n} email(s) not in this organization', { n: res.permissions.rejected.length }), 'err');
       }
-      toast(t('Đã lưu thư mục'), 'ok');
+      toast(t('Folder saved'), 'ok');
       loadFolders();
     },
   });
 
-  // Hiện/ẩn danh sách phân quyền theo chế độ đang chọn
+  // Show the per-email grant list only while the folder is private.
   const sync = () => {
     const isPrivate = document.querySelector('input[name="fvis"]:checked')?.value === 'private';
     document.getElementById('permBlock')?.classList.toggle('hidden', !isPrivate);
@@ -311,30 +305,30 @@ async function folderModal(folder) {
 }
 
 function uploadModal() {
-  const opts = state.folders.map((f) => `<option value="${esc(f.id)}" data-no-i18n ${state.folder === f.id ? 'selected' : ''}>${esc(f.name)}</option>`).join('');
+  const opts = state.folders.map((f) => `<option value="${esc(f.id)}" ${state.folder === f.id ? 'selected' : ''}>${esc(f.name)}</option>`).join('');
   modal({
-    title: t('Tải tài liệu lên'),
-    okText: t('Tải lên'),
+    title: t('Upload documents'),
+    okText: t('Upload'),
     body: `
-      <div class="field"><label>Chọn thư mục</label><select id="ufolder"><option value="">${esc(t('Chưa phân loại'))}</option>${opts}</select></div>
-      <div class="field"><label>Tệp tài liệu</label><input type="file" id="ufile" multiple accept=".pdf,.docx,.txt" />
-        <div class="hint">${esc(t('Hỗ trợ PDF (kể cả bản scan — hệ thống tự nhận dạng chữ), DOCX và TXT. Tối đa 25 MB mỗi tệp.'))}<br>${esc(t('PDF scan xử lý lâu hơn và tính vào hạn mức trang nhận dạng của gói.'))}</div></div>
+      <div class="field"><label>Choose a folder</label><select id="ufolder"><option value="">${esc(t('Unfiled'))}</option>${opts}</select></div>
+      <div class="field"><label>Files</label><input type="file" id="ufile" multiple accept=".pdf,.docx,.txt" />
+        <div class="hint">${esc(t('Supports PDF (including scans — text is recognised automatically), DOCX and TXT. Max 25 MB per file.'))}<br>${esc(t('Scanned PDFs take longer and count towards the OCR page quota on your plan.'))}</div></div>
       <div id="uprogress" class="small muted"></div>`,
     onOk: async (box) => {
       const files = [...box.querySelector('#ufile').files];
-      if (!files.length) { toast(t('Chưa chọn tệp'), 'err'); return false; }
+      if (!files.length) { toast(t('No file selected'), 'err'); return false; }
       const folderId = box.querySelector('#ufolder').value;
       const pg = box.querySelector('#uprogress');
       let ok = 0, fail = 0;
       for (const [i, file] of files.entries()) {
-        pg.textContent = t('Đang tải {i}/{total}: {name}…', { i: i + 1, total: files.length, name: file.name });
+        pg.textContent = t('Uploading {i}/{total}: {name}…', { i: i + 1, total: files.length, name: file.name });
         const fd = new FormData();
         fd.append('file', file);
         if (folderId) fd.append('folder_id', folderId);
         try { await api(`/orgs/${orgId}/documents`, { method: 'POST', form: fd }); ok++; }
         catch (err) { fail++; toast(`${file.name}: ${err.message}`, 'err'); }
       }
-      toast(t('Đã tải lên {ok} tệp', { ok }) + (fail ? t(', {n} tệp lỗi', { n: fail }) : ''), fail ? 'err' : 'ok');
+      toast(t('Uploaded {ok} file(s)', { ok }) + (fail ? t(', {n} failed', { n: fail }) : ''), fail ? 'err' : 'ok');
       loadFolders(); loadDocs();
     },
   });
@@ -351,17 +345,17 @@ async function loadDocs(q = '') {
 
   const docs = await api(`/orgs/${orgId}/documents?${params}`);
   if (!docs.length) {
-    box.innerHTML = emptyState(t('Chưa có tài liệu'), t('Bấm "Tải tài liệu lên" để đưa tài liệu đầu tiên vào chatbot.'));
+    box.innerHTML = emptyState(t('No documents yet'), t('Click "Upload documents" to add your first file.'));
     return;
   }
 
   const folderCell = (id) => {
     const f = state.folders.find((x) => x.id === id);
-    if (!f) return `<span class="muted">${esc(t('Chưa phân loại'))}</span>`;
-    return `${esc(f.name)}${f.visibility === 'private' ? ` <span class="lock" title="${esc(t('Thư mục riêng tư'))}">${icon.lock}</span>` : ''}`;
+    if (!f) return `<span class="muted">${esc(t('Unfiled'))}</span>`;
+    return `${esc(f.name)}${f.visibility === 'private' ? ` <span class="lock" title="${esc(t('Private folder'))}">${icon.lock}</span>` : ''}`;
   };
   box.innerHTML = `<div class="table-wrap"><table class="tbl">
-    <thead><tr><th>Tài liệu</th><th>Thư mục</th><th class="num">Dung lượng</th><th class="num">Số đoạn</th><th>Trạng thái</th><th>Tải lên</th><th></th></tr></thead>
+    <thead><tr><th>Documents</th><th>Folders</th><th class="num">Size</th><th class="num">Chunks</th><th>Status</th><th>Upload</th><th></th></tr></thead>
     <tbody>${docs.map((d) => `
       <tr>
         <td><div class="cell-main truncate" style="max-width:280px" title="${esc(d.filename)}">${esc(d.filename)}</div>
@@ -371,14 +365,14 @@ async function loadDocs(q = '') {
         <td class="num small">${esc(fmt.bytes(d.size_bytes))}</td>
         <td class="num small">${fmt.num(d.chunk_count)}</td>
         <td>${badge(d.status, LABEL.status)}
-            ${d.status === 'ocr_retry' && d.next_retry_at ? `<div class="cell-sub">${esc(t('Tự chạy lại {when}', { when: fmt.until(d.next_retry_at) }))}</div>` : ''}
-            ${d.extraction_method === 'ocr' && d.ocr_pages ? `<div class="cell-sub">${icon.scan} ${esc(t('OCR {n} trang', { n: fmt.num(d.ocr_pages) }))}</div>` : ''}</td>
+            ${d.status === 'ocr_retry' && d.next_retry_at ? `<div class="cell-sub">${esc(t('Retrying {when}', { when: fmt.until(d.next_retry_at) }))}</div>` : ''}
+            ${d.extraction_method === 'ocr' && d.ocr_pages ? `<div class="cell-sub">${icon.scan} ${esc(t('OCR {n} pages', { n: fmt.num(d.ocr_pages) }))}</div>` : ''}</td>
         <td class="small nowrap">${esc(fmt.ago(d.created_at))}</td>
         <td class="nowrap" style="width:1%">
-          <button class="icon-btn" data-dl="${esc(d.id)}" title="Tải xuống">${icon.download}</button>
-          <button class="icon-btn" data-mv="${esc(d.id)}" title="Chuyển thư mục">${icon.folder}</button>
-          ${d.status === 'failed' || d.status === 'ocr_retry' ? `<button class="icon-btn" data-re="${esc(d.id)}" title="Chạy lại ngay">${icon.refresh}</button>` : ''}
-          <button class="icon-btn" data-rm="${esc(d.id)}" title="Xoá">${icon.trash}</button>
+          <button class="icon-btn" data-dl="${esc(d.id)}" title="Download">${icon.download}</button>
+          <button class="icon-btn" data-mv="${esc(d.id)}" title="Move to folder">${icon.folder}</button>
+          ${d.status === 'failed' || d.status === 'ocr_retry' ? `<button class="icon-btn" data-re="${esc(d.id)}" title="Run again now">${icon.refresh}</button>` : ''}
+          <button class="icon-btn" data-rm="${esc(d.id)}" title="Delete">${icon.trash}</button>
         </td>
       </tr>`).join('')}</tbody></table></div>`;
 
@@ -392,14 +386,14 @@ async function loadDocs(q = '') {
     b.onclick = () => {
       const d = docs.find((x) => x.id === b.dataset.mv);
       modal({
-        title: t('Chuyển thư mục'),
-        body: `<div class="field"><label>${esc(t('Thư mục đích cho "{name}"', { name: d.filename }))}</label>
-          <select id="mvf"><option value="">${esc(t('Chưa phân loại'))}</option>
-          ${state.folders.map((f) => `<option value="${esc(f.id)}" data-no-i18n ${d.folder_id === f.id ? 'selected' : ''}>${esc(f.name)}${f.visibility === 'private' ? t(' (riêng tư)') : ''}</option>`).join('')}</select></div>
-          <div class="hint">${esc(t('Chuyển vào "Chưa phân loại" nghĩa là mọi thành viên trong tổ chức đều hỏi được tài liệu này.'))}</div>`,
+        title: t('Move to folder'),
+        body: `<div class="field"><label>${esc(t('Destination folder for "{name}"', { name: d.filename }))}</label>
+          <select id="mvf"><option value="">${esc(t('Unfiled'))}</option>
+          ${state.folders.map((f) => `<option value="${esc(f.id)}" ${d.folder_id === f.id ? 'selected' : ''}>${esc(f.name)}${f.visibility === 'private' ? t(' (private)') : ''}</option>`).join('')}</select></div>
+          <div class="hint">${esc(t('Moving to Unfiled means every member of the organization can ask about this document.'))}</div>`,
         onOk: async (box2) => {
           await api(`/orgs/${orgId}/documents/${d.id}`, { method: 'PATCH', body: { folder_id: box2.querySelector('#mvf').value || null } });
-          toast(t('Đã chuyển thư mục'), 'ok'); loadFolders(); loadDocs();
+          toast(t('Moved to folder'), 'ok'); loadFolders(); loadDocs();
         },
       });
     };
@@ -407,19 +401,19 @@ async function loadDocs(q = '') {
   box.querySelectorAll('[data-re]').forEach((b) => {
     b.onclick = async () => {
       await api(`/orgs/${orgId}/documents/${b.dataset.re}/reindex`, { method: 'POST' });
-      toast(t('Đang xử lý lại tài liệu'), 'ok'); loadDocs();
+      toast(t('Reprocessing the document'), 'ok'); loadDocs();
     };
   });
   box.querySelectorAll('[data-rm]').forEach((b) => {
     b.onclick = async () => {
       const d = docs.find((x) => x.id === b.dataset.rm);
-      if (!(await confirmDialog(t('Xoá tài liệu'), t('Xoá vĩnh viễn "{name}"? Chatbot sẽ không còn dùng tài liệu này.', { name: d.filename })))) return;
+      if (!(await confirmDialog(t('Delete document'), t('Permanently delete "{name}"? The chatbot will no longer use it.', { name: d.filename })))) return;
       await api(`/orgs/${orgId}/documents/${d.id}`, { method: 'DELETE' });
-      toast(t('Đã xoá tài liệu'), 'ok'); loadFolders(); loadDocs();
+      toast(t('Document deleted'), 'ok'); loadFolders(); loadDocs();
     };
   });
 
-  // Nhịp làm mới theo việc đang chạy: đang xử lý thì hỏi dày, chờ thử lại thì hỏi thưa
+  // Poll faster while something is processing, slower while waiting on a retry.
   const has = (st) => docs.some((d) => d.status === st);
   let delay = 0;
   if (has('processing')) delay = 4000;
@@ -428,16 +422,16 @@ async function loadDocs(q = '') {
   if (delay) docTimer = setTimeout(() => loadDocs(q), delay);
 }
 
-/* =================== THÀNH VIÊN =================== */
+/* =================== MEMBERS =================== */
 async function viewMembers() {
   const el = document.getElementById('view-members');
   el.innerHTML = `
-    <div class="toolbar"><span class="spacer"></span><button class="btn primary" id="inviteBtn">${icon.plus} Mời thành viên</button></div>
-    <div class="card"><div class="card-body flush" id="memberTable" data-no-i18n>Đang tải…</div></div>
+    <div class="toolbar"><span class="spacer"></span><button class="btn primary" id="inviteBtn">${icon.plus} Invite member</button></div>
+    <div class="card"><div class="card-body flush" id="memberTable">Loading…</div></div>
     <div class="card"><div class="card-body">
-      <h3>Phân quyền hoạt động thế nào?</h3>
-      <p class="muted mt-1"><b>Quản trị</b> — tải lên, xem, xoá tài liệu, quản lý thư mục, mời và gỡ thành viên, xem lịch sử hỏi đáp của cả tổ chức.</p>
-      <p class="muted mb-0"><b>Thành viên</b> — chỉ trò chuyện với chatbot và xem lịch sử của chính mình. Không thấy danh sách tài liệu, không tải lên hay xoá được.</p>
+      <h3>How permissions work</h3>
+      <p class="muted mt-1"><b>Admin</b> — upload, view and delete documents, manage folders, invite and remove members, and read the whole organization's chat history.</p>
+      <p class="muted mb-0"><b>Member</b> — can chat with the bot and read their own history only. They never see the document list and cannot upload or delete anything.</p>
     </div></div>`;
   document.getElementById('inviteBtn').onclick = inviteModal;
   await loadMembers();
@@ -447,39 +441,39 @@ async function loadMembers() {
   const box = document.getElementById('memberTable');
   const members = await api(`/orgs/${orgId}/members`);
   box.innerHTML = `<div class="table-wrap"><table class="tbl">
-    <thead><tr><th>Thành viên</th><th>Vai trò</th><th>Trạng thái</th><th>Đăng nhập gần nhất</th><th></th></tr></thead>
+    <thead><tr><th>Members</th><th>Role</th><th>Status</th><th>Last sign-in</th><th></th></tr></thead>
     <tbody>${members.map((m) => `
       <tr>
         <td><div class="row" style="gap:10px">
           <div class="avatar" style="background:var(--primary-soft);color:var(--primary)">${esc((m.full_name || m.email)[0].toUpperCase())}</div>
-          <div><div class="cell-main">${esc(m.full_name || m.email.split('@')[0])} ${m.is_owner ? `<span class="badge purple">${esc(t('Chủ sở hữu'))}</span>` : ''}</div>
+          <div><div class="cell-main">${esc(m.full_name || m.email.split('@')[0])} ${m.is_owner ? `<span class="badge purple">${esc(t('Owner'))}</span>` : ''}</div>
           <div class="cell-sub">${esc(m.email)}</div></div></div></td>
         <td>${badge(m.role, LABEL.role)}</td>
-        <td>${badge(m.status, LABEL.status)}${m.invite_token ? `<button class="btn sm mt-1" data-link="${esc(m.invite_token)}">Sao chép link mời</button>` : ''}</td>
+        <td>${badge(m.status, LABEL.status)}${m.invite_token ? `<button class="btn sm mt-1" data-link="${esc(m.invite_token)}">Copy invite link</button>` : ''}</td>
         <td class="small">${esc(fmt.ago(m.last_login_at))}</td>
         <td class="nowrap" style="width:1%">
-          ${m.is_owner ? '' : `<button class="icon-btn" data-edit="${esc(m.id)}" title="Đổi vai trò">${icon.edit}</button>
-          <button class="icon-btn" data-rm="${esc(m.id)}" title="Gỡ khỏi tổ chức">${icon.trash}</button>`}
+          ${m.is_owner ? '' : `<button class="icon-btn" data-edit="${esc(m.id)}" title="Change role">${icon.edit}</button>
+          <button class="icon-btn" data-rm="${esc(m.id)}" title="Remove from organization">${icon.trash}</button>`}
         </td>
       </tr>`).join('')}</tbody></table></div>`;
 
   box.querySelectorAll('[data-link]').forEach((b) => {
     b.onclick = () => {
       const url = `${location.origin}/register.html?invite=${b.dataset.link}`;
-      navigator.clipboard.writeText(url).then(() => toast(t('Đã sao chép link mời'), 'ok'), () => prompt(t('Sao chép link này:'), url));
+      navigator.clipboard.writeText(url).then(() => toast(t('Invite link copied'), 'ok'), () => prompt(t('Copy this link:'), url));
     };
   });
   box.querySelectorAll('[data-edit]').forEach((b) => {
     b.onclick = () => {
       const m = members.find((x) => x.id === b.dataset.edit);
       modal({
-        title: t('Đổi vai trò'),
-        body: `<div class="field"><label>${esc(t('Vai trò của {email}', { email: m.email }))}</label>
-          <select id="mrole"><option value="member" ${m.role === 'member' ? 'selected' : ''}>Thành viên — chỉ dùng chatbot</option>
-          <option value="admin" ${m.role === 'admin' ? 'selected' : ''}>Quản trị — quản lý tài liệu và thành viên</option></select></div>`,
+        title: t('Change role'),
+        body: `<div class="field"><label>${esc(t('Role for {email}', { email: m.email }))}</label>
+          <select id="mrole"><option value="member" ${m.role === 'member' ? 'selected' : ''}>Member — chatbot only</option>
+          <option value="admin" ${m.role === 'admin' ? 'selected' : ''}>Admin — manages documents and members</option></select></div>`,
         onOk: async (box2) => {
           await api(`/orgs/${orgId}/members/${m.id}`, { method: 'PATCH', body: { role: box2.querySelector('#mrole').value } });
-          toast(t('Đã cập nhật vai trò'), 'ok'); loadMembers();
+          toast(t('Role updated'), 'ok'); loadMembers();
         },
       });
     };
@@ -487,46 +481,46 @@ async function loadMembers() {
   box.querySelectorAll('[data-rm]').forEach((b) => {
     b.onclick = async () => {
       const m = members.find((x) => x.id === b.dataset.rm);
-      if (!(await confirmDialog(t('Gỡ thành viên'), t('Gỡ {email} khỏi tổ chức? Họ sẽ không truy cập được chatbot nữa.', { email: m.email }), t('Gỡ')))) return;
+      if (!(await confirmDialog(t('Remove member'), t('Remove {email} from the organization? They will lose access to the chatbot.', { email: m.email }), t('Remove')))) return;
       await api(`/orgs/${orgId}/members/${m.id}`, { method: 'DELETE' });
-      toast(t('Đã gỡ thành viên'), 'ok'); loadMembers();
+      toast(t('Member removed'), 'ok'); loadMembers();
     };
   });
 }
 
 function inviteModal() {
   modal({
-    title: t('Mời thành viên'),
-    okText: t('Gửi lời mời'),
+    title: t('Invite member'),
+    okText: t('Send invitation'),
     body: `
-      <div class="field"><label>Email</label><input type="email" id="iemail" placeholder="nhanvien@congty.vn" data-no-i18n /></div>
-      <div class="field"><label>Vai trò</label>
-        <select id="irole"><option value="member">Thành viên — chỉ dùng chatbot</option><option value="admin">Quản trị — quản lý tài liệu và thành viên</option></select></div>
-      <div class="alert info show">${esc(t('Nếu email chưa có tài khoản, hệ thống tạo một link mời để bạn gửi cho họ.'))}</div>`,
+      <div class="field"><label>Email</label><input type="email" id="iemail" placeholder="teammate@company.com" /></div>
+      <div class="field"><label>Role</label>
+        <select id="irole"><option value="member">Member — chatbot only</option><option value="admin">Admin — manages documents and members</option></select></div>
+      <div class="alert info show">${esc(t('If the email has no account yet, an invite link is created for you to send them.'))}</div>`,
     onOk: async (box) => {
       const email = box.querySelector('#iemail').value.trim();
-      if (!email) { toast(t('Chưa nhập email'), 'err'); return false; }
+      if (!email) { toast(t('Please enter an email'), 'err'); return false; }
       const res = await api(`/orgs/${orgId}/members`, { method: 'POST', body: { email, role: box.querySelector('#irole').value } });
       loadMembers();
       if (res.invite_link) {
         const url = location.origin + res.invite_link;
-        modal({ title: t('Link mời đã sẵn sàng'), okText: t('Sao chép link'), cancelText: t('Đóng'),
-          body: `<p>${esc(t('Gửi link dưới đây cho {email} để họ tạo tài khoản và vào tổ chức:', { email }))}</p>
+        modal({ title: t('Invite link ready'), okText: t('Copy link'), cancelText: t('Close'),
+          body: `<p>${esc(t('Send the link below to {email} so they can create an account and join:', { email }))}</p>
                  <div class="field"><input type="text" readonly value="${esc(url)}" /></div>`,
-          onOk: () => navigator.clipboard.writeText(url).then(() => toast(t('Đã sao chép'), 'ok')) });
+          onOk: () => navigator.clipboard.writeText(url).then(() => toast(t('Copied'), 'ok')) });
       } else {
-        toast(t('Đã thêm thành viên vào tổ chức'), 'ok');
+        toast(t('Member added to the organization'), 'ok');
       }
     },
   });
 }
 
-/* =================== LỊCH SỬ HỎI ĐÁP =================== */
+/* =================== CHAT HISTORY =================== */
 async function viewHistory() {
   const el = document.getElementById('view-history');
   el.innerHTML = `
-    <div class="toolbar"><div class="search-box">${icon.search}<input type="search" id="hq" placeholder="Tìm trong câu hỏi…" /></div></div>
-    <div class="card"><div class="card-body flush" id="histBox" data-no-i18n>Đang tải…</div><div class="pager" id="histPager"></div></div>`;
+    <div class="toolbar"><div class="search-box">${icon.search}<input type="search" id="hq" placeholder="Search questions…" /></div></div>
+    <div class="card"><div class="card-body flush" id="histBox">Loading…</div><div class="pager" id="histPager"></div></div>`;
   document.getElementById('hq').oninput = debounce(() => { state.historyPage = 1; loadHistory(); }, 350);
   await loadHistory();
 }
@@ -536,10 +530,10 @@ async function loadHistory() {
   const q = document.getElementById('hq')?.value || '';
   const res = await api(`/orgs/${orgId}/chat/history?page=${state.historyPage}&size=25&q=${encodeURIComponent(q)}`);
 
-  if (!res.items.length) { box.innerHTML = emptyState(t('Chưa có câu hỏi nào')); document.getElementById('histPager').innerHTML = ''; return; }
+  if (!res.items.length) { box.innerHTML = emptyState(t('No questions yet')); document.getElementById('histPager').innerHTML = ''; return; }
 
   box.innerHTML = `<div class="table-wrap"><table class="tbl">
-    <thead><tr><th>Câu hỏi</th><th>Người hỏi</th><th class="num">Nguồn</th><th class="num">Thời gian xử lý</th><th>Lúc</th></tr></thead>
+    <thead><tr><th>Question</th><th>Asked by</th><th class="num">Sources</th><th class="num">Response time</th><th>When</th></tr></thead>
     <tbody>${res.items.map((m, i) => `
       <tr data-row="${i}" style="cursor:pointer">
         <td><div class="cell-main truncate" style="max-width:420px">${esc(m.question)}</div>
@@ -553,33 +547,31 @@ async function loadHistory() {
   box.querySelectorAll('[data-row]').forEach((tr) => {
     tr.onclick = () => {
       const m = res.items[+tr.dataset.row];
-      modal({ title: t('Chi tiết hỏi đáp'), wide: true, okText: t('Đóng'), cancelText: t('Đóng'),
-        body: `<div class="field"><label>Câu hỏi</label><div>${esc(m.question)}</div></div>
-               <div class="field"><label>Trả lời</label><div style="white-space:pre-wrap">${esc(m.answer || '')}</div></div>
-               <div class="field"><label>Nguồn tham chiếu</label><div class="srcs">${(m.sources || []).map((s) => `<span class="src-chip">${icon.file}${esc(s)}</span>`).join('') || `<span class="muted">${esc(t('Không có'))}</span>`}</div></div>
+      modal({ title: t('Conversation detail'), wide: true, okText: t('Close'), cancelText: t('Close'),
+        body: `<div class="field"><label>Question</label><div>${esc(m.question)}</div></div>
+               <div class="field"><label>Answer</label><div style="white-space:pre-wrap">${esc(m.answer || '')}</div></div>
+               <div class="field"><label>Source documents</label><div class="srcs">${(m.sources || []).map((s) => `<span class="src-chip">${icon.file}${esc(s)}</span>`).join('') || `<span class="muted">${esc(t('None'))}</span>`}</div></div>
                <div class="small muted">${esc(m.user_email || '')} · ${esc(fmt.dateTime(m.created_at))}</div>` });
     };
   });
 
   const pages = Math.ceil(res.total / res.size);
   document.getElementById('histPager').innerHTML = `
-    <span>${esc(t('{total} câu hỏi · trang {page}/{pages}', { total: fmt.num(res.total), page: res.page, pages: pages || 1 }))}</span>
-    <button class="btn sm" id="prev" ${res.page <= 1 ? 'disabled' : ''}>Trước</button>
-    <button class="btn sm" id="next" ${res.page >= pages ? 'disabled' : ''}>Sau</button>`;
+    <span>${esc(t('{total} questions · page {page}/{pages}', { total: fmt.num(res.total), page: res.page, pages: pages || 1 }))}</span>
+    <button class="btn sm" id="prev" ${res.page <= 1 ? 'disabled' : ''}>Previous</button>
+    <button class="btn sm" id="next" ${res.page >= pages ? 'disabled' : ''}>Next</button>`;
   const prev = document.getElementById('prev'), next = document.getElementById('next');
   if (prev) prev.onclick = () => { state.historyPage--; loadHistory(); };
   if (next) next.onclick = () => { state.historyPage++; loadHistory(); };
 }
 
-/* =================== GÓI CƯỚC =================== */
+/* =================== PLAN & BILLING =================== */
 async function viewBilling() {
   const el = document.getElementById('view-billing');
   el.innerHTML = '<div class="loading-line"></div>';
   const b = await api(`/orgs/${orgId}/billing`);
   const u = b.usage, L = u.limits;
-  // Tiền tệ đi theo ngôn ngữ đang chọn, không theo quốc gia đã lưu
-  const intl = currency() === 'USD';
-
+  
   const line = (label, used, limit, unit = '') => `
     <div class="mb-2">
       <div class="row between small"><span>${esc(label)}</span><span class="muted">${fmt.num(used)}${unit} / ${fmt.num(limit)}${unit}</span></div>
@@ -590,61 +582,61 @@ async function viewBilling() {
     <div class="split" style="grid-template-columns:1fr 340px">
       <div>
         <div class="card">
-          <div class="card-head"><h2>Mức sử dụng</h2><span class="sub">${esc(t('Hạn mức theo gói {name}', { name: b.plan?.name || '—' }))}</span></div>
+          <div class="card-head"><h2>Usage</h2><span class="sub">${esc(t('Limits on the {name} plan', { name: b.plan?.name || '—' }))}</span></div>
           <div class="card-body">
-            ${line('Tài liệu', u.documents, L.max_documents)}
-            ${line('Thành viên', u.members, L.max_members)}
-            ${line('Lượt hỏi trong tháng', u.questions_this_month, L.max_questions_per_month)}
-            ${line('Dung lượng lưu trữ', u.storage_mb, L.max_storage_mb, ' MB')}
-            ${line('Trang nhận dạng PDF scan (OCR)', u.ocr_pages_this_month, L.max_ocr_pages_per_month)}
+            ${line('Documents', u.documents, L.max_documents)}
+            ${line('Members', u.members, L.max_members)}
+            ${line('Questions this month', u.questions_this_month, L.max_questions_per_month)}
+            ${line('Storage used', u.storage_mb, L.max_storage_mb, ' MB')}
+            ${line('Scanned PDF pages (OCR)', u.ocr_pages_this_month, L.max_ocr_pages_per_month)}
           </div>
         </div>
 
         <div class="card">
-          <div class="card-head"><h2>Lịch sử thanh toán</h2></div>
+          <div class="card-head"><h2>Payment history</h2></div>
           <div class="card-body flush">${b.payments.length ? `<div class="table-wrap"><table class="tbl">
-            <thead><tr><th>Ngày</th><th>Kỳ</th><th class="num">Số tiền</th><th>Hình thức</th><th>Trạng thái</th></tr></thead>
+            <thead><tr><th>Date</th><th>Period</th><th class="num">Amount</th><th>Method</th><th>Status</th></tr></thead>
             <tbody>${b.payments.map((p) => `<tr>
               <td class="small">${esc(fmt.date(p.created_at))}</td>
               <td class="small">${esc(fmt.date(p.period_start))} → ${esc(fmt.date(p.period_end))}</td>
               <td class="num">${esc(fmt.money(p.amount_vnd))}</td>
               <td class="small">${esc(p.method || '—')}</td>
               <td>${badge(p.status, LABEL.payment)}</td></tr>`).join('')}</tbody></table></div>`
-            : emptyState(t('Chưa có giao dịch'), t('Doanh nghiệp đang dùng gói miễn phí.'))}</div>
+            : emptyState(t('No transactions yet'), t('This organization is on the free plan.'))}</div>
         </div>
       </div>
 
       <div>
         <div class="card">
-          <div class="card-head"><h3>Gói hiện tại</h3></div>
+          <div class="card-head"><h3>Current plan</h3></div>
           <div class="card-body">
-            <div style="font-size:22px;font-weight:680">${esc(b.plan?.name || t('Chưa gán gói'))}</div>
+            <div style="font-size:22px;font-weight:680">${esc(b.plan?.name || t('No plan assigned'))}</div>
             <div class="muted small">${esc(b.plan?.description || '')}</div>
             <div class="mt-2">${badge(b.billing_status, LABEL.billing)}</div>
-            <div class="small muted mt-1">${esc(t('Hạn dùng'))}: ${esc(b.plan_expires_at ? fmt.date(b.plan_expires_at) : t('không giới hạn'))}</div>
+            <div class="small muted mt-1">${esc(t('Valid until'))}: ${esc(b.plan_expires_at ? fmt.date(b.plan_expires_at) : t('unlimited'))}</div>
             ${b.trial?.isTrial && !b.trial.expired
-              ? `<div class="alert warn show mt-1" style="background:var(--warn-soft);color:var(--warn)">${esc(t('Bản dùng thử còn {time}', { time: fmt.duration(b.trial.msLeft) }))} — ${esc(t('hết hạn sẽ xoá toàn bộ tài liệu'))}</div>`
+              ? `<div class="alert warn show mt-1" style="background:var(--warn-soft);color:var(--warn)">${esc(t('{time} left in your trial', { time: fmt.duration(b.trial.msLeft) }))} — ${esc(t('all documents are deleted when it ends'))}</div>`
               : ''}
             ${b.trial?.expired
-              ? `<div class="alert error show mt-1">${esc(b.trial.purged ? t('Tài liệu đã bị xoá. Nâng cấp để bắt đầu lại.') : t('Nâng cấp ngay để giữ lại tài liệu của bạn.'))}</div>`
+              ? `<div class="alert error show mt-1">${esc(b.trial.purged ? t('Your documents were deleted. Upgrade to start again.') : t('Upgrade now to keep your documents.'))}</div>`
               : ''}
-            <div class="mt-2" style="font-size:20px;font-weight:650">${esc(money(intl ? (b.plan?.price_usd || 0) : (b.plan?.price_vnd || 0), intl ? 'USD' : 'VND'))}<span class="muted small"> ${esc(t('/tháng'))}</span></div>
+            <div class="mt-2" style="font-size:20px;font-weight:650">${esc(money(intl ? (b.plan?.price_usd || 0) : (b.plan?.price_vnd || 0), intl ? 'USD' : 'VND'))}<span class="muted small"> ${esc(t('/month'))}</span></div>
           </div>
         </div>
 
         <div class="card">
-          <div class="card-head"><h3>Các gói khác</h3></div>
+          <div class="card-head"><h3>Other plans</h3></div>
           <div class="card-body">
             ${b.available_plans.filter((p) => p.id !== b.plan?.id).map((p) => `
               <div class="mb-2" style="padding-bottom:12px;border-bottom:1px solid var(--border)">
-                <div class="row between"><b>${esc(p.name)}</b><span>${esc(money(intl ? p.price_usd : p.price_vnd, intl ? 'USD' : 'VND'))}${esc(t('/tháng'))}</span></div>
-                <div class="small muted mb-1">${fmt.num(p.max_documents)} tài liệu · ${fmt.num(p.max_members)} thành viên · ${fmt.num(p.max_questions_per_month)} lượt hỏi/tháng · ${fmt.num(p.max_ocr_pages_per_month || 0)} trang OCR/tháng</div>
+                <div class="row between"><b>${esc(p.name)}</b><span>${esc(money(intl ? p.price_usd : p.price_vnd, intl ? 'USD' : 'VND'))}${esc(t('/month'))}</span></div>
+                <div class="small muted mb-1">${fmt.num(p.max_documents)} documents · ${fmt.num(p.max_members)} members · ${fmt.num(p.max_questions_per_month)} questions/month · ${fmt.num(p.max_ocr_pages_per_month || 0)} OCR pages/month</div>
                 ${Number(intl ? p.price_usd : p.price_vnd) > 0 && b.providers?.length
-                  ? `<button class="btn sm primary" data-buy="${esc(p.id)}">Nâng cấp lên gói này</button>` : ''}
-              </div>`).join('') || `<span class="muted small">${esc(t('Không có gói khác'))}</span>`}
+                  ? `<button class="btn sm primary" data-buy="${esc(p.id)}">Upgrade to this plan</button>` : ''}
+              </div>`).join('') || `<span class="muted small">${esc(t('No other plans'))}</span>`}
             ${b.providers?.length
-              ? `<p class="small muted mb-0">${esc(t('Gói có hiệu lực ngay sau khi hệ thống nhận được tiền.'))}</p>`
-              : `<p class="small muted mb-0">${esc(t('Máy chủ chưa bật cổng thanh toán nào. Liên hệ quản trị hệ thống để đổi gói.'))}</p>`}
+              ? `<p class="small muted mb-0">${esc(t('Your plan activates as soon as the payment arrives.'))}</p>`
+              : `<p class="small muted mb-0">${esc(t('No payment gateway is enabled on the server. Contact the system administrator to change plan.'))}</p>`}
           </div>
         </div>
       </div>
@@ -655,29 +647,28 @@ async function viewBilling() {
   });
 }
 
-/** Mở hộp thoại chọn phương thức rồi chuyển sang trang thanh toán của cổng. */
+/** Pick a payment method, then hand off to the gateway's checkout page. */
 function startCheckout(billing, planId, intl) {
   const plan = billing.available_plans.find((p) => p.id === planId);
-  const wanted = preferredProvider();
-  const providers = [...(billing.providers || [])].sort((a, b) => Number(b.id === wanted) - Number(a.id === wanted));
-  const amount = money(intl ? plan.price_usd : plan.price_vnd, intl ? 'USD' : 'VND');
+  const providers = billing.providers || [];
+  const amount = money(plan.price_usd);
 
   modal({
-    title: t('Nâng cấp lên gói {name}', { name: plan.name }),
-    okText: t('Tiếp tục thanh toán'),
+    title: t('Upgrade to {name}', { name: plan.name }),
+    okText: t('Continue to payment'),
     body: `
       <div class="field">
-        <label>Phương thức thanh toán</label>
+        <label>Payment method</label>
         ${providers.map((p, i) => `
           <label class="pay-method ${i === 0 ? 'sel' : ''}">
-            <input type="radio" name="prov" value="${esc(p.id)}" ${i === 0 ? 'checked' : ''} />
-            <span class="who"><b>${esc(t(p.name))}</b><span>${esc(t(p.description))}</span></span>
+            <input type="radio" name="prov" value="${esc(p.id)}" ${i === 0 ? 'checked' : ''} ${providers.length === 1 ? 'hidden' : ''} />
+            <span class="who"><b>${esc(p.name)}</b><span>${esc(p.description)}</span></span>
           </label>`).join('')}
       </div>
       <div class="row between" style="padding-top:10px;border-top:1px solid var(--border)">
-        <b>${esc(t('Tổng thanh toán'))}</b><b style="font-size:18px">${esc(amount)}</b>
+        <b>${esc(t('Total'))}</b><b style="font-size:18px">${esc(amount)}</b>
       </div>
-      <p class="small muted mt-1 mb-0">${esc(t('Nếu gói hiện tại còn hạn, thời gian còn lại được cộng dồn thêm 1 tháng.'))}</p>`,
+      <p class="small muted mt-1 mb-0">${esc(t('If your current plan is still valid, one month is added to the remaining time.'))}</p>`,
     onOk: async (box) => {
       const provider = box.querySelector('input[name="prov"]:checked').value;
       const res = await api(`/orgs/${orgId}/billing/checkout`, { method: 'POST', body: { plan_id: planId, provider } });
@@ -694,7 +685,7 @@ function startCheckout(billing, planId, intl) {
   });
 }
 
-/* =================== THIẾT LẬP =================== */
+/* =================== SETTINGS =================== */
 async function viewSettings() {
   const el = document.getElementById('view-settings');
   const d = await api(`/orgs/${orgId}`);
@@ -703,26 +694,26 @@ async function viewSettings() {
   el.innerHTML = `
     <div class="split" style="grid-template-columns:1fr 1fr">
       <div class="card">
-        <div class="card-head"><h2>Hồ sơ doanh nghiệp</h2></div>
+        <div class="card-head"><h2>Company profile</h2></div>
         <div class="card-body">
-          <div class="field"><label>Tên doanh nghiệp</label><input type="text" id="oname" value="${esc(org.name)}" /></div>
-          <div class="field"><label>Email liên hệ</label><input type="text" id="omail" value="${esc(org.contact_email || '')}" placeholder="ketoan@congty.vn" data-no-i18n /></div>
-          <div class="field"><label>Mã số thuế</label><input type="text" id="otax" value="${esc(org.tax_code || '')}" /></div>
-          <div class="field"><label>Mã tổ chức</label><input type="text" class="mono" value="${esc(org.id)}" readonly /></div>
-          <button class="btn primary" id="saveOrg">Lưu thay đổi</button>
+          <div class="field"><label>Company name</label><input type="text" id="oname" value="${esc(org.name)}" /></div>
+          <div class="field"><label>Contact email</label><input type="text" id="omail" value="${esc(org.contact_email || '')}" placeholder="billing@company.com" /></div>
+          <div class="field"><label>Tax code</label><input type="text" id="otax" value="${esc(org.tax_code || '')}" /></div>
+          <div class="field"><label>Organization ID</label><input type="text" class="mono" value="${esc(org.id)}" readonly /></div>
+          <button class="btn primary" id="saveOrg">Save changes</button>
         </div>
       </div>
       <div class="card">
-        <div class="card-head"><h2>Tài khoản của bạn</h2></div>
+        <div class="card-head"><h2>Your account</h2></div>
         <div class="card-body">
-          <div class="field"><label>Họ và tên</label><input type="text" id="uname" value="${esc(me.user.full_name || '')}" /></div>
+          <div class="field"><label>Full name</label><input type="text" id="uname" value="${esc(me.user.full_name || '')}" /></div>
           <div class="field"><label>Email</label><input type="text" value="${esc(me.user.email)}" readonly /></div>
-          <button class="btn" id="saveUser">Lưu hồ sơ</button>
+          <button class="btn" id="saveUser">Save profile</button>
           <hr style="border:none;border-top:1px solid var(--border);margin:20px 0" />
-          <h3 class="mb-1">Đổi mật khẩu</h3>
-          <div class="field"><label>Mật khẩu hiện tại</label><input type="password" id="pwOld" /></div>
-          <div class="field"><label>Mật khẩu mới</label><input type="password" id="pwNew" placeholder="Ít nhất 6 ký tự" /></div>
-          <button class="btn" id="savePw">${icon.key} Đổi mật khẩu</button>
+          <h3 class="mb-1">Change password</h3>
+          <div class="field"><label>Current password</label><input type="password" id="pwOld" /></div>
+          <div class="field"><label>New password</label><input type="password" id="pwNew" placeholder="At least 6 characters" /></div>
+          <button class="btn" id="savePw">${icon.key} Change password</button>
         </div>
       </div>
     </div>`;
@@ -735,12 +726,12 @@ async function viewSettings() {
         contact_email: document.getElementById('omail').value.trim(),
         tax_code: document.getElementById('otax').value.trim(),
       }});
-      toast(t('Đã lưu hồ sơ doanh nghiệp'), 'ok');
+      toast(t('Company profile saved'), 'ok');
       setTimeout(() => location.reload(), 700);
     } catch (err) { toast(err.message, 'err'); e.target.disabled = false; }
   };
   document.getElementById('saveUser').onclick = async () => {
-    try { await api('/auth/profile', { method: 'PATCH', body: { full_name: document.getElementById('uname').value.trim() } }); toast(t('Đã lưu hồ sơ'), 'ok'); }
+    try { await api('/auth/profile', { method: 'PATCH', body: { full_name: document.getElementById('uname').value.trim() } }); toast(t('Profile saved'), 'ok'); }
     catch (err) { toast(err.message, 'err'); }
   };
   document.getElementById('savePw').onclick = async () => {
@@ -749,13 +740,13 @@ async function viewSettings() {
         current_password: document.getElementById('pwOld').value,
         new_password: document.getElementById('pwNew').value,
       }});
-      toast(t('Đã đổi mật khẩu'), 'ok');
+      toast(t('Password changed'), 'ok');
       document.getElementById('pwOld').value = ''; document.getElementById('pwNew').value = '';
     } catch (err) { toast(err.message, 'err'); }
   };
 }
 
-/* =================== KHỞI CHẠY =================== */
+/* =================== BOOTSTRAP =================== */
 const VIEWS = { overview: viewOverview, documents: viewDocuments, members: viewMembers, history: viewHistory, billing: viewBilling, settings: viewSettings };
 
 shell();

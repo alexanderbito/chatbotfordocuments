@@ -1,27 +1,27 @@
 -- =====================================================================
--- MIGRATION V4 — Thử lại OCR khi Gemini quá tải
--- Chạy trong Supabase Dashboard > SQL Editor > New query > Run
--- An toàn khi chạy lại nhiều lần. Yêu cầu đã chạy migration_v3_ocr.sql.
+-- MIGRATION V4 — Retrying OCR when Gemini is overloaded
+-- Run in Supabase Dashboard > SQL Editor > New query > Run
+-- Safe to run more than once. Requires migration_v3_ocr.sql to have been run.
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
--- KIỂM TRA ĐIỀU KIỆN: dừng sớm với thông báo rõ ràng nếu chạy sai thứ tự
+-- PRECONDITION CHECK: stop early with a clear message if the files are run out of order
 -- ---------------------------------------------------------------------
 do $guard$
 begin
   if to_regclass('public.documents') is null then
-    raise exception E'Thieu bang "documents".\n=> Ban chua chay supabase_schema.sql va migration_v2_auth.sql.';
+    raise exception E'Missing table "documents".\n=> You have not run supabase_schema.sql and migration_v2_auth.sql yet.';
   end if;
 end
 $guard$;
 
--- 1. Đếm số lần đã thử OCR một tài liệu và thời điểm dự kiến thử lại
+-- 1. Track how many OCR attempts a document has had, and when the next retry is due
 alter table documents add column if not exists ocr_attempts int not null default 0;
 alter table documents add column if not exists next_retry_at timestamptz;
 
--- 2. Lưu tạm kết quả nhận dạng của từng lô trang.
---    Nhờ bảng này, khi một lô lỗi giữa chừng thì lần thử lại chỉ làm phần còn thiếu,
---    không gọi lại Gemini cho những trang đã nhận dạng xong (tiết kiệm thời gian và chi phí).
+-- 2. Temporary store for the recognition result of each batch of pages.
+--    Thanks to this table, when a batch fails part-way through, the retry only redoes
+--    the missing pages, never calling Gemini again for pages already recognised (saving time and cost).
 create table if not exists document_ocr_batches (
   id uuid primary key default gen_random_uuid(),
   document_id uuid not null references documents(id) on delete cascade,
@@ -37,8 +37,8 @@ create unique index if not exists document_ocr_batches_doc_range_idx
 
 alter table document_ocr_batches enable row level security;
 
--- 3. Dọn các lô tạm cũ hơn 7 ngày của tài liệu đã xong hoặc đã bỏ
---    (gọi thủ công khi cần, hoặc gắn vào cron của Supabase)
+-- 3. Clean up temporary batches older than 7 days for documents that finished or were abandoned
+--    (call it manually when needed, or wire it into Supabase cron)
 create or replace function cleanup_ocr_batches()
 returns int
 language sql

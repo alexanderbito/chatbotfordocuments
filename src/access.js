@@ -1,26 +1,27 @@
 import { supabase } from './supabaseClient.js';
 
 /**
- * Tính xem một người được đọc những thư mục nào trong một tổ chức.
+ * Work out which folders a person is allowed to read inside an organization.
  *
- * Quy tắc:
- *  - Thư mục 'public'  : mọi thành viên trong tổ chức đều đọc được.
- *  - Thư mục 'private' : chỉ những email có trong folder_permissions.
- *  - KẾ THỪA: muốn đọc một thư mục thì phải có quyền ở TẤT CẢ thư mục cha
- *    riêng tư nằm trên đường đi tới nó. Nhờ vậy không thể vô tình lộ dữ liệu
- *    bằng cách tạo một thư mục con để public bên trong thư mục mật.
- *  - Admin tổ chức và admin hệ thống đọc được tất cả (họ vốn đã quản lý
- *    toàn bộ tài liệu).
- *  - Tài liệu chưa phân loại (folder_id = null) coi như công khai trong tổ chức.
+ * Rules:
+ *  - 'public' folders  : every member of the organization can read them.
+ *  - 'private' folders : only the emails listed in folder_permissions.
+ *  - INHERITANCE: reading a folder requires permission on EVERY private ancestor
+ *    folder on the path down to it. This is what makes it impossible to leak data
+ *    by accident by creating a public subfolder inside a confidential folder.
+ *  - Organization admins and system admins can read everything (they already
+ *    manage the whole document set anyway).
+ *  - Unfiled documents (folder_id = null) are treated as public within the
+ *    organization.
  */
 
 /**
  * @returns {Promise<{
  *   isAdmin: boolean,
- *   folders: Array,            // toàn bộ thư mục của tổ chức (kèm visibility)
- *   accessible: Array,         // thư mục người này được đọc
- *   allowedIds: string[],      // id của accessible
- *   grantedIds: Set<string>,   // thư mục private được cấp quyền trực tiếp
+ *   folders: Array,            // every folder in the organization (with visibility)
+ *   accessible: Array,         // the folders this person may read
+ *   allowedIds: string[],      // the ids of accessible
+ *   grantedIds: Set<string>,   // private folders granted directly to this person
  * }>}
  */
 export async function getFolderAccess(orgId, user, membership) {
@@ -56,15 +57,15 @@ export async function getFolderAccess(orgId, user, membership) {
 
   const cache = new Map();
   const canRead = (folderId, seen = new Set()) => {
-    if (!folderId) return true;                 // chưa phân loại: công khai
+    if (!folderId) return true;                 // unfiled: public
     if (cache.has(folderId)) return cache.get(folderId);
-    if (seen.has(folderId)) return false;       // phòng dữ liệu vòng lặp
+    if (seen.has(folderId)) return false;       // guard against cyclic data
     seen.add(folderId);
 
     const f = byId.get(folderId);
     if (!f) return false;
 
-    // Chính thư mục này phải qua được, rồi mới xét lên thư mục cha
+    // The folder itself has to pass first, only then do we walk up to the parent
     const selfOk = f.visibility !== 'private' || granted.has(f.id);
     const result = selfOk && (f.parent_id ? canRead(f.parent_id, seen) : true);
 
@@ -84,7 +85,7 @@ export async function getFolderAccess(orgId, user, membership) {
 }
 
 /**
- * Kiểm tra nhanh một người có được đọc một thư mục cụ thể không.
+ * Quick check of whether a person may read one specific folder.
  */
 export async function canReadFolder(orgId, user, membership, folderId) {
   if (!folderId) return true;
@@ -93,7 +94,7 @@ export async function canReadFolder(orgId, user, membership, folderId) {
 }
 
 /**
- * Lấy danh sách email đang được cấp quyền cho một thư mục.
+ * List the emails currently granted access to a folder.
  */
 export async function listFolderPermissions(folderId) {
   const { data, error } = await supabase
@@ -106,9 +107,10 @@ export async function listFolderPermissions(folderId) {
 }
 
 /**
- * Đặt lại toàn bộ danh sách email được đọc một thư mục riêng tư.
- * Chỉ chấp nhận email đang là thành viên của tổ chức — tránh trường hợp
- * gõ nhầm địa chỉ rồi tưởng đã cấp quyền.
+ * Replace the whole list of emails allowed to read a private folder.
+ * Only emails that are already members of the organization are accepted — this
+ * avoids the case where someone mistypes an address and believes access has been
+ * granted.
  *
  * @returns {Promise<{ saved: string[], rejected: string[] }>}
  */

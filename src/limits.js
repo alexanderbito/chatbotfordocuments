@@ -1,7 +1,7 @@
 import { supabase } from './supabaseClient.js';
 
 /**
- * Tính mức sử dụng hiện tại của một tổ chức và so với hạn mức của gói cước.
+ * Measure an organization's current usage against the limits of its plan.
  */
 export async function getUsage(orgId, plan) {
   const startOfMonth = new Date();
@@ -40,8 +40,8 @@ export async function getUsage(orgId, plan) {
 }
 
 /**
- * Kiểm tra trước khi thực hiện hành động tốn hạn mức.
- * Trả về { ok: true } hoặc { ok: false, error: '...' }
+ * Check before performing an action that consumes quota.
+ * Returns { ok: true } or { ok: false, error: '...' }
  */
 export async function checkQuota(orgId, plan, action, extraBytes = 0) {
   const usage = await getUsage(orgId, plan);
@@ -49,31 +49,31 @@ export async function checkQuota(orgId, plan, action, extraBytes = 0) {
 
   if (action === 'upload') {
     if (usage.documents >= L.max_documents) {
-      return { ok: false, error: `Đã đạt giới hạn ${L.max_documents} tài liệu của gói hiện tại. Vui lòng nâng cấp gói.` };
+      return { ok: false, error: `Your plan allows ${L.max_documents} documents and you have reached that limit. Upgrade to add more.` };
     }
     const newMb = usage.storage_mb + extraBytes / (1024 * 1024);
     if (newMb > L.max_storage_mb) {
-      return { ok: false, error: `Vượt dung lượng lưu trữ ${L.max_storage_mb} MB của gói hiện tại. Vui lòng nâng cấp gói.` };
+      return { ok: false, error: `This would exceed the ${L.max_storage_mb} MB of storage your plan includes. Upgrade for more room.` };
     }
   }
 
   if (action === 'invite' && usage.members >= L.max_members) {
-    return { ok: false, error: `Đã đạt giới hạn ${L.max_members} thành viên của gói hiện tại. Vui lòng nâng cấp gói.` };
+    return { ok: false, error: `Your plan allows ${L.max_members} members and you have reached that limit. Upgrade to invite more.` };
   }
 
   if (action === 'chat' && usage.questions_this_month >= L.max_questions_per_month) {
-    return { ok: false, error: `Đã dùng hết ${L.max_questions_per_month} lượt hỏi trong tháng của gói hiện tại.` };
+    return { ok: false, error: `You have used all ${L.max_questions_per_month} questions included in your plan this month.` };
   }
 
-  // extraBytes ở đây mang nghĩa số trang cần nhận dạng
+  // Here extraBytes carries the number of pages that need OCR
   if (action === 'ocr') {
     const pages = extraBytes;
     const remaining = L.max_ocr_pages_per_month - usage.ocr_pages_this_month;
     if (remaining <= 0) {
-      return { ok: false, error: `Đã dùng hết ${L.max_ocr_pages_per_month} trang nhận dạng (OCR) trong tháng của gói hiện tại.` };
+      return { ok: false, error: `You have used all ${L.max_ocr_pages_per_month} OCR pages included in your plan this month.` };
     }
     if (pages > remaining) {
-      return { ok: false, error: `Tài liệu cần ${pages} trang nhận dạng nhưng gói hiện tại chỉ còn ${remaining} trang trong tháng này.` };
+      return { ok: false, error: `This document needs ${pages} OCR pages but only ${remaining} are left on your plan this month.` };
     }
   }
 

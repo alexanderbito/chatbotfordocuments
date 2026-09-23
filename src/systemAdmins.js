@@ -1,21 +1,24 @@
 import 'dotenv/config';
 
 /**
- * Danh sách email luôn có quyền admin hệ thống, khai báo qua biến môi trường.
+ * The list of emails that always hold system admin rights, declared through an
+ * environment variable.
  *
- * Vì sao cần: tài khoản admin hệ thống ĐẦU TIÊN không thể tạo từ trong giao
- * diện (chưa có ai để cấp quyền). Trước đây phải vào Supabase chạy SQL tay.
- * Có biến này thì chỉ cần khai báo email trên Render rồi đăng ký bình thường.
+ * Why this exists: the FIRST system admin account cannot be created from the UI,
+ * because there is nobody around yet to grant the rights. Until now that meant
+ * opening Supabase and running SQL by hand. With this variable you just declare
+ * the email on Render and sign up normally.
  *
- * Quyền hiệu lực = cờ trong CSDL HOẶC email nằm trong danh sách này. Vế thứ
- * hai là đường khôi phục: kể cả khi cờ trong CSDL bị xoá nhầm, chỉ cần email
- * còn trong biến môi trường là vẫn vào được.
+ * Effective rights = the flag in the database OR the email being in this list. The
+ * second path is the recovery route: even if the database flag is deleted by
+ * mistake, having the email in the environment variable is enough to get back in.
  *
- * LƯU Ý: lần đầu đăng nhập, cờ trong CSDL được bật để đồng bộ. Vì vậy GỠ EMAIL
- * KHỎI BIẾN MÔI TRƯỜNG KHÔNG THU HỒI QUYỀN — phải thu hồi hẳn bằng
- * `npm run make-admin -- email@congty.vn --revoke` hoặc trong trang Người dùng
- * của quản trị hệ thống (và phải gỡ khỏi biến môi trường trước, nếu không thao
- * tác thu hồi sẽ bị chặn).
+ * NOTE: on the first sign-in the database flag is turned on to keep the two in
+ * sync. REMOVING AN EMAIL FROM THE ENVIRONMENT VARIABLE THEREFORE DOES NOT REVOKE
+ * ACCESS — it has to be revoked explicitly with
+ * `npm run make-admin -- email@company.com --revoke` or from the Users page of the
+ * system admin area (and the email must be taken out of the environment variable
+ * first, otherwise the revoke is blocked).
  */
 
 function parse() {
@@ -34,7 +37,7 @@ export function isSystemAdminEmail(email) {
   return parse().includes(String(email).trim().toLowerCase());
 }
 
-/** Có khai báo admin hệ thống nào qua biến môi trường không. */
+/** Whether any system admin is declared through the environment variable. */
 export function hasBootstrapAdmins() {
   return parse().length > 0;
 }

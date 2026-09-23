@@ -2,7 +2,7 @@ import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } fro
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import 'dotenv/config';
 
-// R2 tương thích API S3, chỉ cần đổi endpoint
+// R2 speaks the S3 API; only the endpoint differs
 const s3 = new S3Client({
   region: 'auto',
   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
@@ -14,14 +14,14 @@ const s3 = new S3Client({
 
 const BUCKET = process.env.R2_BUCKET_NAME;
 
-/** Upload buffer file lên R2, trả về storage_key + url. */
+/** Upload a file buffer to R2 and return its storage_key and url. */
 export async function uploadToR2(key, buffer, contentType) {
   await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: buffer, ContentType: contentType }));
   const publicUrl = `${process.env.R2_PUBLIC_URL || ''}/${key}`;
   return { storage_key: key, storage_url: publicUrl };
 }
 
-/** Tải file về dạng buffer để xử lý (trích xuất text). */
+/** Download a file as a buffer so its text can be extracted. */
 export async function downloadFromR2(key) {
   const res = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
   const chunks = [];
@@ -29,17 +29,17 @@ export async function downloadFromR2(key) {
   return Buffer.concat(chunks);
 }
 
-/** Xoá file khỏi R2 khi admin xoá tài liệu. */
+/** Remove a file from R2 when an admin deletes the document. */
 export async function deleteFromR2(key) {
   await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
 }
 
 /**
- * Tạo link tải có chữ ký, hết hạn sau expiresIn giây.
- * Nhờ vậy bucket có thể để riêng tư, chỉ admin tổ chức mới xem được tài liệu.
+ * Build a signed download link that expires after expiresIn seconds, which
+ * lets the bucket stay private while organization admins can still read files.
  */
 export async function getDownloadUrl(key, filename, expiresIn = 300) {
-  // RFC 5987: filename* giữ được tiếng Việt có dấu, filename= là bản dự phòng ASCII
+  // RFC 5987: filename* preserves non-ASCII names, filename= is the fallback
   let disposition;
   if (filename) {
     const ascii = filename.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');

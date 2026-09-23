@@ -14,15 +14,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 
-// QUAN TRỌNG: tuyến webhook phải nằm TRƯỚC express.json().
-// PayPal yêu cầu gửi lại thân request nguyên văn để xác thực chữ ký, nên
-// tuyến đó tự dùng express.raw(); nếu express.json() chạy trước thì luồng
-// dữ liệu đã bị đọc mất và chữ ký sẽ luôn sai.
+// IMPORTANT: the webhook routes must be mounted BEFORE express.json().
+// PayPal verifies a signature against the verbatim request body, so that route
+// installs its own express.raw(); if express.json() ran first the stream would
+// already be consumed and every signature check would fail.
 app.use('/webhooks', webhookRouter);
 
 app.use(express.json({ limit: '2mb' }));
 
-// Giao diện web tĩnh
+// Static front-end
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // API
@@ -31,11 +31,11 @@ app.use('/orgs', organizationsRouter);
 app.use('/admin', adminRouter);
 app.use('/public/billing', billingPublicRouter);
 
-// Danh sách gói cước công khai (dùng ở trang đăng ký / trang gói cước)
+// Public price list (used by the sign-up and pricing pages)
 app.get('/public/plans', async (req, res) => {
   const { data, error } = await supabase
     .from('plans')
-    .select('code, name, description, price_vnd, max_documents, max_members, max_storage_mb, max_questions_per_month')
+    .select('code, name, description, price_usd, max_documents, max_members, max_storage_mb, max_questions_per_month')
     .eq('is_active', true)
     .order('sort_order');
   if (error) return res.status(500).json({ error: error.message });
@@ -46,14 +46,14 @@ app.get('/healthz', (req, res) => res.json({ ok: true, time: new Date().toISOStr
 
 /**
  * POST /cron/purge-trials
- * Dành cho dịch vụ cron bên ngoài gọi định kỳ (mỗi ngày một lần là đủ).
- * Bảo vệ bằng header x-cron-secret thay vì đăng nhập, vì cron không có tài khoản.
- * Không đặt CRON_SECRET thì endpoint này tắt hẳn.
+ * Called by an external cron service on a schedule; once a day is enough.
+ * Guarded by the x-cron-secret header rather than a session, because a cron job
+ * has no account. Leaving CRON_SECRET unset disables the endpoint entirely.
  */
 app.post('/cron/purge-trials', async (req, res) => {
   const secret = process.env.CRON_SECRET;
-  if (!secret) return res.status(404).json({ error: 'Chưa bật (thiếu CRON_SECRET)' });
-  if (req.headers['x-cron-secret'] !== secret) return res.status(401).json({ error: 'Sai mã bảo vệ' });
+  if (!secret) return res.status(404).json({ error: 'Disabled (CRON_SECRET is not set)' });
+  if (req.headers['x-cron-secret'] !== secret) return res.status(401).json({ error: 'Wrong secret' });
 
   try {
     const result = await purgeExpiredTrials();
@@ -63,26 +63,26 @@ app.post('/cron/purge-trials', async (req, res) => {
   }
 });
 
-// 404 cho API (các route khác trả về trang tĩnh)
+// 404 for API routes; everything else falls through to the static site
 app.use((req, res) => {
   if (req.path.startsWith('/auth') || req.path.startsWith('/orgs') || req.path.startsWith('/admin') || req.path.startsWith('/webhooks') || req.path.startsWith('/cron')) {
-    return res.status(404).json({ error: 'Không tìm thấy endpoint' });
+    return res.status(404).json({ error: 'Endpoint not found' });
   }
   res.status(404).sendFile(path.join(__dirname, '..', 'public', '404.html'), (err) => {
-    if (err) res.status(404).send('Không tìm thấy trang');
+    if (err) res.status(404).send('Page not found');
   });
 });
 
-// Bắt lỗi chung (ví dụ file upload quá lớn từ multer)
+// Catch-all error handler (for example an over-size upload from multer)
 app.use((err, req, res, next) => {
-  console.error('Lỗi không bắt được:', err);
+  console.error('Unhandled error:', err);
   if (err?.code === 'LIMIT_FILE_SIZE') {
-    return res.status(413).json({ error: 'File vượt quá 25 MB' });
+    return res.status(413).json({ error: 'File is larger than 25 MB' });
   }
-  res.status(500).json({ error: err.message || 'Lỗi hệ thống' });
+  res.status(500).json({ error: err.message || 'Internal server error' });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server đang chạy tại http://localhost:${PORT}`);
+  console.log(`Server listening on http://localhost:${PORT}`);
 });
