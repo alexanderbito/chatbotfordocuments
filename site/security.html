@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Security and privacy — BotClarify</title>
+<meta name="description" content="Where BotClarify stores your documents, who can read them, how folder permissions are enforced, what deletion removes, and what we do not claim." />
+<link rel="canonical" href="https://botclarify.com/security.html" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://botclarify.com/security.html" />
+<meta property="og:title" content="Security and privacy — BotClarify" />
+<meta property="og:description" content="Where your documents are stored, who can read them, and what deletion actually removes." />
+<link rel="stylesheet" href="/assets/site.css" />
+</head>
+<body>
+
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="/">
+      <div class="brand-mark">B</div>
+      <div class="brand-name">BotClarify</div>
+    </a>
+    <nav class="nav">
+      <a href="/#features">Features</a>
+      <a href="/#how">How it works</a>
+      <a href="/#pricing">Pricing</a>
+      <a href="/security.html">Security</a>
+      <a href="/contact.html">Contact</a>
+    </nav>
+    <button class="nav-toggle" aria-label="Open menu" aria-expanded="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+    <div class="head-cta">
+      <a class="btn ghost" href="https://app.botclarify.com/login.html">Sign in</a>
+      <a class="btn primary" href="https://app.botclarify.com/register.html">Start free trial</a>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+<article class="doc">
+
+<h1>Security and privacy</h1>
+<p class="updated">Last updated: 23 September 2026</p>
+
+<p class="lead">
+  The first thing a company asks before uploading its handbook and its contracts is where
+  those files end up and who can read them. This page answers that in full, including the
+  parts that are limitations rather than features.
+</p>
+
+<h2>How your documents are separated from everyone else's</h2>
+<p>
+  Every organisation's content is separated at the query layer, not by convention. When
+  someone asks a question, the search for relevant passages is filtered by organisation
+  identifier before it runs. There is no request path that returns a passage belonging to
+  another customer, because no search is ever issued without that filter in place.
+</p>
+<p>
+  The same applies inside your own company. Before a search runs, the system works out the
+  exact list of folders that person is allowed to read, and searches only that list. A
+  private folder they have not been granted is not searched at all — it is not searched and
+  then filtered out of the answer, which is the arrangement that tends to leak.
+</p>
+
+<h2>Folder permissions and how inheritance works</h2>
+<p>
+  A folder is open to your whole organisation by default. Make it private and you name the
+  email addresses that may read it.
+</p>
+<p>
+  Permission is inherited down the tree, and deliberately in the strict direction: to read a
+  folder, a person must also be permitted on every private folder above it. This means you
+  cannot accidentally expose confidential material by creating an open subfolder inside a
+  restricted one. Administrators in your organisation can read every folder, since they are
+  the people who manage the documents in the first place.
+</p>
+
+<h2>Where your data is stored</h2>
+<table>
+  <thead><tr><th>What</th><th>Where it lives</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>The uploaded file itself</td><td>Cloudflare R2 object storage, in a private bucket</td><td>So it can be downloaded again by an administrator</td></tr>
+    <tr><td>Extracted text and search index</td><td>Supabase (managed PostgreSQL)</td><td>So passages relevant to a question can be found</td></tr>
+    <tr><td>Accounts, folders, permissions</td><td>Supabase (managed PostgreSQL)</td><td>To know who may read what</td></tr>
+    <tr><td>Questions and answers</td><td>Supabase (managed PostgreSQL)</td><td>So your administrators can review what is being asked</td></tr>
+    <tr><td>Payment details</td><td>PayPal — never on our systems</td><td>We never see or store a card number</td></tr>
+  </tbody>
+</table>
+<p>
+  The storage bucket is private. Downloads are served through short-lived signed links
+  generated per request, so a file URL cannot be forwarded and reused later.
+</p>
+
+<h2>Which outside services see your content</h2>
+<p>
+  Answering a question requires sending the relevant passages to a language model. We use
+  these processors, and no others, for that:
+</p>
+<ul>
+  <li><b>Voyage AI</b> — converts your document text into the numeric vectors that make search by meaning possible.</li>
+  <li><b>DeepSeek</b> — receives the question and the retrieved passages, and writes the answer.</li>
+  <li><b>Google Gemini</b> — receives scanned PDF pages, and only those, to recognise their text. It is not used on plans without scanned-PDF reading.</li>
+</ul>
+<p>
+  Each of these receives what it needs for that one request. None of them receives your
+  whole document library, and none of them receives your account or billing details. The
+  full list of processors, including infrastructure providers, is in the
+  <a href="/privacy.html">privacy policy</a>.
+</p>
+
+<div class="note">
+  <p>
+    <b>Your documents are not used to train models.</b> They are stored to answer your team's
+    questions and for nothing else. They are not pooled with other customers' content and not
+    used to improve any model.
+  </p>
+</div>
+
+<h2>What deletion actually removes</h2>
+<p>
+  When an administrator deletes a document, the stored file, the extracted text and every
+  search index entry derived from it are removed together. A deleted document stops being
+  reachable by the chatbot immediately, because the passages it would have drawn on no
+  longer exist.
+</p>
+<p>
+  The same happens automatically when a free trial ends without an upgrade: the documents,
+  their index and the chat history are deleted. The account, the organisation and the member
+  list remain, so upgrading later means uploading again rather than starting from nothing.
+</p>
+
+<h2>Accounts and sign-in</h2>
+<ul>
+  <li>Sign-in is handled by Supabase Auth. Passwords are stored hashed; we never see them.</li>
+  <li>All traffic runs over HTTPS. The application refuses plain HTTP.</li>
+  <li>The browser keeps a session token in local storage. It is not an advertising cookie and is not shared with any third party.</li>
+  <li>An administrator can remove a member at any time, which ends their access immediately.</li>
+</ul>
+
+<h2>Who at BotClarify can see your content</h2>
+<p>
+  We would rather state this plainly than leave it implied. Our system administrators can
+  technically read stored documents and chat history, because operating and supporting the
+  service requires it — diagnosing a failed upload, for example. That access is restricted to
+  the people who need it, and the administrator console makes the scope of the role explicit
+  to anyone granted it.
+</p>
+<p>
+  If your organisation handles material where that is unacceptable, do not upload it. We
+  would rather lose the sale than have you discover this afterwards.
+</p>
+
+<h2>What we do not claim</h2>
+<p>
+  BotClarify is a young product and it is worth being straight about where it currently stands:
+</p>
+<ul>
+  <li>We do not hold SOC 2, ISO 27001 or any comparable certification.</li>
+  <li>We do not offer a contractual uptime guarantee.</li>
+  <li>There is no customer-managed encryption key or on-premise deployment.</li>
+  <li>Answers are generated by a language model and can be wrong. Every answer names the document it drew on precisely so that anything important can be checked against the source.</li>
+</ul>
+<p>
+  If any of those is a requirement for you, tell us — it is useful to know what buyers are
+  blocked on. <a href="/contact.html">Get in touch</a>.
+</p>
+
+<h2>Reporting a vulnerability</h2>
+<p>
+  If you believe you have found a security problem, please write to
+  <a href="mailto:security@botclarify.com">security@botclarify.com</a> with enough detail to
+  reproduce it. We will confirm receipt and keep you posted while we work on it. Please give
+  us a reasonable window to fix the issue before disclosing it publicly, and please do not
+  access, alter or retain another customer's data while investigating.
+</p>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="/privacy.html">Privacy Policy</a> — what we collect, why, and your rights over it</li>
+  <li><a href="/terms.html">Terms of Service</a> — the agreement covering use of the service</li>
+</ul>
+
+</article>
+</div>
+
+
+<footer class="site-foot">
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <a class="brand" href="/">
+          <div class="brand-mark">B</div>
+          <div class="brand-name">BotClarify</div>
+        </a>
+        <p class="foot-about">A chatbot that answers from your company's own documents, and tells you which one it read.</p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul>
+          <li><a href="/#features">Features</a></li>
+          <li><a href="/#how">How it works</a></li>
+          <li><a href="/#pricing">Pricing</a></li>
+          <li><a href="https://app.botclarify.com/login.html">Sign in</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul>
+          <li><a href="/contact.html">Contact</a></li>
+          <li><a href="/security.html">Security</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul>
+          <li><a href="/terms.html">Terms of Service</a></li>
+          <li><a href="/privacy.html">Privacy Policy</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>&copy; <span data-year>2026</span> BotClarify. All rights reserved.</span>
+      <span>botclarify.com</span>
+    </div>
+  </div>
+</footer>
+
+<script src="/assets/site.js"></script>
+</body>
+</html>

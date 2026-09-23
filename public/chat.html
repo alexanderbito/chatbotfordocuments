@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Ask your documents — DocBot</title>
+<title>Ask your documents — BotClarify</title>
 <link rel="stylesheet" href="/assets/app.css" />
 </head>
 <body>
@@ -120,7 +120,7 @@ function render() {
 function greet() {
   document.getElementById('chatInner').innerHTML = `
     <div style="text-align:center;padding:48px 10px" data-greet>
-      <div class="brand-mark" style="margin:0 auto 14px;width:42px;height:42px;font-size:19px">D</div>
+      <div class="brand-mark" style="margin:0 auto 14px;width:42px;height:42px;font-size:19px">B</div>
       <h2>${esc(t('Hello'))} <span>${esc(me.user.full_name || me.user.email.split('@')[0])}</span></h2>
       <p class="muted mt-1">Ask about your internal documents. Every answer cites the source file.</p>
       <div class="row wrap mt-2" style="justify-content:center">
@@ -151,7 +151,7 @@ function bubble(role, html) {
   el.innerHTML = `
     <div class="bubble-avatar">${role === 'user' ? esc((me.user.full_name || me.user.email)[0].toUpperCase()) : 'D'}</div>
     <div class="body">
-      <div class="who">${role === 'user' ? esc(me.user.full_name || t('You')) : 'DocBot'}</div>
+      <div class="who">${role === 'user' ? esc(me.user.full_name || t('You')) : 'BotClarify'}</div>
       <div class="text">${html}</div>
       <div class="srcs"></div>
     </div>`;

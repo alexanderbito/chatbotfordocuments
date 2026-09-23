@@ -1,8 +1,15 @@
 /* =====================================================================
-   DocBot — shared front-end library
+   BotClarify — shared front-end library
    ===================================================================== */
 
 const LOCALE = 'en-US';
+
+/**
+ * The marketing site lives on its own domain, so links out of the app cannot be
+ * relative. Kept in one place: changing the domain should be one edit, not a
+ * search through every page.
+ */
+export const SITE_URL = 'https://botclarify.com';
 export function locale() { return LOCALE; }
 
 /**
@@ -27,13 +34,28 @@ export function money(amount, cur = 'USD') {
 }
 
 /* ---------- Session ---------- */
-const TOKEN_KEY = 'docbot_token';
+const TOKEN_KEY = 'botclarify_token';
+const ORG_KEY = 'botclarify_org';
+
+// One-time carry-over from the keys used before the product was renamed, so the
+// rename does not sign everyone out. Safe to delete once no one is on an old
+// session any more.
+(function migrateLegacyKeys() {
+  try {
+    for (const [oldKey, newKey] of [['docbot_token', TOKEN_KEY], ['docbot_org', ORG_KEY]]) {
+      const v = localStorage.getItem(oldKey);
+      if (v && !localStorage.getItem(newKey)) localStorage.setItem(newKey, v);
+      if (v) localStorage.removeItem(oldKey);
+    }
+  } catch { /* private mode: nothing to carry over */ }
+})();
+
 export const Session = {
   get token() { return localStorage.getItem(TOKEN_KEY); },
   set token(v) { v ? localStorage.setItem(TOKEN_KEY, v) : localStorage.removeItem(TOKEN_KEY); },
-  clear() { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem('docbot_org'); },
-  get orgId() { return localStorage.getItem('docbot_org'); },
-  set orgId(v) { v ? localStorage.setItem('docbot_org', v) : localStorage.removeItem('docbot_org'); },
+  clear() { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(ORG_KEY); },
+  get orgId() { return localStorage.getItem(ORG_KEY); },
+  set orgId(v) { v ? localStorage.setItem(ORG_KEY, v) : localStorage.removeItem(ORG_KEY); },
 };
 
 /* ---------- API calls ---------- */
@@ -255,7 +277,7 @@ export function buildSidebar({ brandSub, items, user, orgs, currentOrgId, onOrgC
   const orgBlock = orgs
     ? `<div class="org-switch">
          <label>Organization</label>
-         <select id="orgSwitch" data-no-i18n>${orgs.map((o) => `<option value="${esc(o.id)}" ${o.id === currentOrgId ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select>
+         <select id="orgSwitch">${orgs.map((o) => `<option value="${esc(o.id)}" ${o.id === currentOrgId ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select>
        </div>` : '';
 
   const nav = items
@@ -269,13 +291,13 @@ export function buildSidebar({ brandSub, items, user, orgs, currentOrgId, onOrgC
   return `
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">D</div>
-        <div><div class="brand-name">DocBot</div><div class="brand-sub">${esc(brandSub)}</div></div>
+        <div class="brand-mark">B</div>
+        <div><div class="brand-name">BotClarify</div><div class="brand-sub">${esc(brandSub)}</div></div>
       </div>
       ${orgBlock}
       <nav class="nav">${nav}</nav>
       <div class="sidebar-foot">
-        <div class="user-chip" data-no-i18n>
+        <div class="user-chip">
           <div class="avatar">${esc(initials(user.full_name || user.email))}</div>
           <div class="who"><b>${esc(user.full_name || user.email.split('@')[0])}</b><span>${esc(user.email)}</span></div>
         </div>

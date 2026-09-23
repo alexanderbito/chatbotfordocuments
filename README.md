@@ -1,4 +1,4 @@
-# DocBot — a SaaS chatbot that answers questions about company documents
+# BotClarify — a SaaS chatbot that answers questions about company documents
 
 Each company signs up for an administrator account, uploads its documents (organized
 into folders), and the system indexes them and serves a chatbot that answers
@@ -278,10 +278,66 @@ Grant the role only to people who genuinely need it.
 
 ## 5. Deploying on Render
 
+The product is two deployments from this one repository:
+
+| What | Render service type | Folder | Domain |
+|---|---|---|---|
+| The application | Web Service | repository root | `app.botclarify.com` |
+| The marketing site | Static Site | `site/` | `botclarify.com` and `www.botclarify.com` |
+
+They are split because the marketing site is plain files with no server behind it. As a static
+site it is free, it never sleeps, and a visitor who lands on the home page does not have to
+wait for a sleeping application instance to wake up.
+
+### The application — Web Service
+
 - Build command: `npm install`
 - Start command: `npm start`
 - **Environment** tab: paste in every variable from `.env`. Double-check `SUPABASE_ANON_KEY`,
   `APP_BASE_URL` and `PAYPAL_ENV` — those three are the ones most often forgotten.
+- `APP_BASE_URL` must be `https://app.botclarify.com`, not the apex domain. It builds the
+  return link after a payment and is what PayPal signs its webhooks against.
+- Custom domain: `app.botclarify.com`.
+
+### The marketing site — Static Site
+
+- Root directory: `site`
+- Build command: leave empty (there is nothing to build)
+- Publish directory: `.`
+- Custom domains: `botclarify.com` and `www.botclarify.com`.
+
+Every call-to-action on the marketing site points at `https://app.botclarify.com/register.html`
+or `/login.html`. Those links are written out in full in `site/index.html`; the application
+points back with the `SITE_URL` constant at the top of `public/assets/app.js`. Changing either
+domain means editing those two places.
+
+### DNS
+
+All four records are CNAMEs. Render's Custom Domains page shows the exact targets, including
+the two verification records; the shape is:
+
+| Type | Name | Points at |
+|---|---|---|
+| CNAME | `@` | the static site's `onrender.com` address |
+| CNAME | `www` | the static site's `onrender.com` address |
+| CNAME | `app` | the web service's `onrender.com` address |
+
+Render does not publish a fixed IP for a service, so the apex record has to be a CNAME. That
+is not valid in plain DNS, so the domain needs a provider that flattens it — Cloudflare's free
+tier does, and Render documents that combination. Set Cloudflare's proxy to **DNS only** until
+the certificates are issued, and SSL/TLS mode to **Full**.
+
+### After changing a domain
+
+Three things have to be updated by hand, and a payment silently fails if any of them is missed:
+
+1. `APP_BASE_URL` on the web service.
+2. The webhook URL in the PayPal dashboard — `https://app.botclarify.com/webhooks/paypal`.
+   PayPal signs against the address, so a stale one makes every webhook fail signature checks.
+3. The external cron job that calls `POST /cron/purge-trials`.
+
+The System health page checks `APP_BASE_URL` against the address you are actually browsing and
+warns when they differ, which catches the first of those three.
 
 Run the migrations on Supabase **before** opening the interface for the first time, or every
 page will fail with a missing-table error.

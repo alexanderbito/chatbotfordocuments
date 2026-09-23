@@ -184,7 +184,7 @@ export async function createCheckout({ payment, plan, org, baseUrl }) {
       payment_source: {
         paypal: {
           experience_context: {
-            brand_name: 'DocBot',
+            brand_name: 'BotClarify',
             user_action: 'PAY_NOW',
             return_url: `${baseUrl}/billing-return.html?payment=${payment.id}`,
             cancel_url: `${baseUrl}/billing-return.html?payment=${payment.id}&cancelled=1`,

@@ -1,5 +1,5 @@
 {
-  "name": "doc-chatbot-demo",
+  "name": "botclarify",
   "version": "1.0.0",
   "description": "RAG chatbot SaaS for company documents — Supabase + R2 + Voyage + DeepSeek",
   "type": "module",

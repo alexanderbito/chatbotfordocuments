@@ -46,7 +46,7 @@ export function trialStatus(org) {
 
 /** Standard notice shown once the trial has expired. */
 export const EXPIRED_MESSAGE =
-  'Your free trial has ended. Upgrade your plan to keep using DocBot.';
+  'Your free trial has ended. Upgrade your plan to keep using BotClarify.';
 
 /**
  * Purge the data of ONE organization whose trial has expired.
