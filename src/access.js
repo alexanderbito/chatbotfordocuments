@@ -85,15 +85,6 @@ export async function getFolderAccess(orgId, user, membership) {
 }
 
 /**
- * Quick check of whether a person may read one specific folder.
- */
-export async function canReadFolder(orgId, user, membership, folderId) {
-  if (!folderId) return true;
-  const { allowedIds, isAdmin } = await getFolderAccess(orgId, user, membership);
-  return isAdmin || allowedIds.includes(folderId);
-}
-
-/**
  * List the emails currently granted access to a folder.
  */
 export async function listFolderPermissions(folderId) {

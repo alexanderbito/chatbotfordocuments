@@ -275,8 +275,3 @@ export async function verifyWebhook({ headers, rawBody }) {
     raw: event,
   };
 }
-
-export async function getStatus(orderId) {
-  const order = await callPaypal(`/v2/checkout/orders/${orderId}`, { method: 'GET' });
-  return { status: order.status, raw: order };
-}

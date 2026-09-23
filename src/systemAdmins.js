@@ -36,8 +36,3 @@ export function isSystemAdminEmail(email) {
   if (!email) return false;
   return parse().includes(String(email).trim().toLowerCase());
 }
-
-/** Whether any system admin is declared through the environment variable. */
-export function hasBootstrapAdmins() {
-  return parse().length > 0;
-}

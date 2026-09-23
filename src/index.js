@@ -8,7 +8,6 @@ import organizationsRouter from './routes/organizations.js';
 import adminRouter from './routes/admin.js';
 import { publicRouter as billingPublicRouter, webhookRouter } from './routes/billing.js';
 import { purgeExpiredTrials } from './trials.js';
-import { supabase } from './supabaseClient.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -30,17 +29,6 @@ app.use('/auth', authRouter);
 app.use('/orgs', organizationsRouter);
 app.use('/admin', adminRouter);
 app.use('/public/billing', billingPublicRouter);
-
-// Public price list (used by the sign-up and pricing pages)
-app.get('/public/plans', async (req, res) => {
-  const { data, error } = await supabase
-    .from('plans')
-    .select('code, name, description, price_usd, max_documents, max_members, max_storage_mb, max_questions_per_month')
-    .eq('is_active', true)
-    .order('sort_order');
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data || []);
-});
 
 app.get('/healthz', (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 

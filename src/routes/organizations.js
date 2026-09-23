@@ -137,12 +137,11 @@ router.get('/:orgId/billing', requireAuth, requireOrgMember, requireOrgAdmin, as
       plan: req.org.plan,
       billing_status: req.org.billing_status,
       plan_expires_at: req.org.plan_expires_at,
-      billing_country: req.org.billing_country || 'VN',
       trial: req.trial,
       usage,
       payments: payments || [],
       available_plans: plans || [],
-      providers: availableProviders(req.org.billing_country),
+      providers: availableProviders(),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

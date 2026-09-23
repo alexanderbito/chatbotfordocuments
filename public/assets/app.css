@@ -222,8 +222,6 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 input[type=file] { width: 100%; font-size: 13px; padding: 8px; border: 1px dashed var(--border-strong); border-radius: 8px; background: var(--surface-2); }
 textarea { resize: vertical; min-height: 78px; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 14px; }
-.inline-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.inline-form input:not([type=checkbox]):not([type=radio]), .inline-form select { width: auto; flex: 1; min-width: 150px; }
 /* Written as "label.check", not ".check": these labels sit inside .field, and
    ".field label { display:block }" outranks a bare ".check", which would undo
    display:flex and drop the checkbox onto its own line. */

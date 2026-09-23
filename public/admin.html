@@ -599,7 +599,7 @@ async function viewBilling() {
             <tbody>${b.payments.map((p) => `<tr>
               <td class="small">${esc(fmt.date(p.created_at))}</td>
               <td class="small">${esc(fmt.date(p.period_start))} → ${esc(fmt.date(p.period_end))}</td>
-              <td class="num">${esc(fmt.money(p.amount_vnd))}</td>
+              <td class="num">${esc(money(p.amount, p.currency || 'USD'))}</td>
               <td class="small">${esc(p.method || '—')}</td>
               <td>${badge(p.status, LABEL.payment)}</td></tr>`).join('')}</tbody></table></div>`
             : emptyState(t('No transactions yet'), t('This organization is on the free plan.'))}</div>
@@ -620,7 +620,7 @@ async function viewBilling() {
             ${b.trial?.expired
               ? `<div class="alert error show mt-1">${esc(b.trial.purged ? t('Your documents were deleted. Upgrade to start again.') : t('Upgrade now to keep your documents.'))}</div>`
               : ''}
-            <div class="mt-2" style="font-size:20px;font-weight:650">${esc(money(intl ? (b.plan?.price_usd || 0) : (b.plan?.price_vnd || 0), intl ? 'USD' : 'VND'))}<span class="muted small"> ${esc(t('/month'))}</span></div>
+            <div class="mt-2" style="font-size:20px;font-weight:650">${esc(money(b.plan?.price_usd || 0))}<span class="muted small"> ${esc(t('/month'))}</span></div>
           </div>
         </div>
 
@@ -629,9 +629,9 @@ async function viewBilling() {
           <div class="card-body">
             ${b.available_plans.filter((p) => p.id !== b.plan?.id).map((p) => `
               <div class="mb-2" style="padding-bottom:12px;border-bottom:1px solid var(--border)">
-                <div class="row between"><b>${esc(p.name)}</b><span>${esc(money(intl ? p.price_usd : p.price_vnd, intl ? 'USD' : 'VND'))}${esc(t('/month'))}</span></div>
+                <div class="row between"><b>${esc(p.name)}</b><span>${esc(money(p.price_usd))}${esc(t('/month'))}</span></div>
                 <div class="small muted mb-1">${fmt.num(p.max_documents)} documents · ${fmt.num(p.max_members)} members · ${fmt.num(p.max_questions_per_month)} questions/month · ${fmt.num(p.max_ocr_pages_per_month || 0)} OCR pages/month</div>
-                ${Number(intl ? p.price_usd : p.price_vnd) > 0 && b.providers?.length
+                ${Number(p.price_usd) > 0 && b.providers?.length
                   ? `<button class="btn sm primary" data-buy="${esc(p.id)}">Upgrade to this plan</button>` : ''}
               </div>`).join('') || `<span class="muted small">${esc(t('No other plans'))}</span>`}
             ${b.providers?.length
@@ -643,12 +643,12 @@ async function viewBilling() {
     </div>`;
 
   el.querySelectorAll('[data-buy]').forEach((btn) => {
-    btn.onclick = () => startCheckout(b, btn.dataset.buy, intl);
+    btn.onclick = () => startCheckout(b, btn.dataset.buy);
   });
 }
 
 /** Pick a payment method, then hand off to the gateway's checkout page. */
-function startCheckout(billing, planId, intl) {
+function startCheckout(billing, planId) {
   const plan = billing.available_plans.find((p) => p.id === planId);
   const providers = billing.providers || [];
   const amount = money(plan.price_usd);
