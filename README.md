@@ -42,7 +42,7 @@ process behind a small in-memory queue (`src/queue.js`).
    a mistake in the permission calculation returns nothing rather than returning a document
    the user should not see.
 3. The matching chunks become the context for DeepSeek (`src/llm.js`), which is instructed to
-   answer only from that context, to cite its sources, and to reply in `BOT_REPLY_LANGUAGE`.
+   answer only from that context, to cite its sources, and to reply in the language the question was asked in (see `BOT_REPLY_LANGUAGE`).
 4. The question, the answer and the sources are written to the chat history.
 
 **Payments** run through PayPal only (section 10). The PayPal webhook route is mounted in
@@ -152,7 +152,7 @@ cp .env.example .env    # then fill in the real values
 |---|---|---|
 | `DEEPSEEK_API_KEY` | Yes | |
 | `DEEPSEEK_BASE_URL` | Yes | `https://api.deepseek.com` |
-| `BOT_REPLY_LANGUAGE` | No | The language the chatbot replies in, regardless of what language the documents are written in. Defaults to `English`. Set it to any language name, for example `Spanish` |
+| `BOT_REPLY_LANGUAGE` | No | Which language the chatbot answers in. Defaults to `auto`: the answer mirrors the language of the question, whatever language the documents are written in. Set a language name such as `English` to pin every answer to one language instead |
 
 **Gemini (OCR for scanned PDFs)**
 
@@ -552,7 +552,38 @@ Background Worker on Render.
 
 ---
 
-## 12. Troubleshooting
+
+## 12. Answer language
+
+The chatbot answers in the language the question was asked in, even when the
+documents it is quoting are written in another language. A Vietnamese question
+about an English handbook comes back in Vietnamese.
+
+How it is decided, in order:
+
+1. If `BOT_REPLY_LANGUAGE` names a language, that language always wins and no
+   detection runs at all.
+2. Otherwise `src/language.js` inspects the question. Distinctive scripts
+   (Vietnamese, Chinese, Japanese, Korean, Thai, Arabic, Hebrew, Greek, Hindi,
+   Russian) are recognised on sight. Latin-script languages are identified from
+   function words, which also catches Vietnamese typed without tone marks.
+   When a language is recognised, the system prompt names it explicitly.
+3. If detection is not confident, the system prompt simply instructs the model
+   to mirror the question's language.
+
+Naming the language explicitly matters: the retrieved documents sit in the same
+prompt, and without an explicit instruction the model tends to drift towards
+their language rather than the reader's.
+
+Detection stays silent rather than guessing. `Café résumé` inside an English
+sentence, a two-word fragment, or a string of acronyms all fall through to
+step 3 instead of picking a language on thin evidence.
+
+The "nothing relevant found" reply never reaches the model at all, so it is
+translated in `src/language.js` for every language detection can name, and
+falls back to English otherwise.
+
+## 13. Troubleshooting
 
 **The system health page.** `/sysadmin.html` -> **System health** probes every dependency:
 Supabase, Cloudflare R2, Voyage AI, DeepSeek, Gemini (each model in the fallback chain), the
@@ -583,7 +614,7 @@ names". That is `POST /admin/maintenance/fix-filenames`; add `?dry_run=1` to pre
 
 ---
 
-## 13. Known limitations
+## 14. Known limitations
 
 - **Documents are processed inside the web process.** Very large files can time out on Render
   Free. With real customers, split this into a dedicated worker.

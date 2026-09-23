@@ -1,6 +1,7 @@
 import express from 'express';
 import { embedText } from '../embed.js';
 import { generateAnswer } from '../llm.js';
+import { notFoundMessage, forcedReplyLanguage } from '../language.js';
 import { supabase } from '../supabaseClient.js';
 import { requireAuth, requireOrgMember, requireOrgAdmin, blockIfTrialExpired } from '../auth.js';
 import { checkQuota } from '../limits.js';
@@ -57,7 +58,8 @@ router.post('/', blockIfTrialExpired, async (req, res) => {
     if (error) throw error;
 
     if (!matches || matches.length === 0) {
-      const answer = 'I could not find anything relevant in the documents you have access to.';
+      // Answered without calling the model, so the language has to be picked here.
+      const answer = notFoundMessage(question, forcedReplyLanguage());
       await saveMessage(req, question, answer, [], 0, Date.now() - startedAt);
       return res.json({ answer, sources: [] });
     }
