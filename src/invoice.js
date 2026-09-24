@@ -20,7 +20,7 @@ const ASSETS = path.join(HERE, '..', 'assets');
 
 /** Who is issuing the invoice. */
 export const SELLER = {
-  name: 'BotClarify Co. Ltd',
+  name: 'BotClarify Pte. Ltd.',
   address: ['18 Marina Gardens Dr', 'Singapore 018953'],
   email: 'info@botclarify.com',
   site: 'botclarify.com',

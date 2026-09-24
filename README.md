@@ -644,7 +644,7 @@ look different on different servers.
 **Seller details** are the constant `SELLER` at the top of `src/invoice.js`.
 
 **Tax.** The invoice states in words that no tax has been charged. There is no tax calculation
-and no tax line. If BotClarify Co. Ltd registers for GST, this needs revisiting before the next
+and no tax line. If BotClarify Pte. Ltd. registers for GST, this needs revisiting before the next
 invoice is issued.
 
 ## 13. Answer language
