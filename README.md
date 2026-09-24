@@ -97,6 +97,7 @@ In **Supabase Dashboard -> SQL Editor -> New query**, run these files in order:
 6. `migration_v6_payments.sql` — **required**. Adds USD pricing and gateway checkout.
 7. `migration_v7_trial.sql` — **required**. Turns the free plan into a 3-day trial with no OCR.
 8. `migration_v8_english_plans.sql` — **required**. Moves the plan catalogue to English. Plan names and descriptions live in the database and are rendered on the pricing page, the sign-up page and the "Current plan" card, so a database seeded before the switch keeps showing its original text until this runs.
+9. `migration_v9_invoices.sql` — **required**. Adds the customer's billing name and address, plus the invoice numbering the PDF download uses.
 
 **Run them in that order.** Every file from v3 onwards starts with a precondition check and
 stops with a clear message if an earlier file has not been run.
@@ -365,10 +366,10 @@ GET    /orgs/:orgId/billing                   plan and payment history          
 POST   /orgs/:orgId/billing/checkout          open a checkout session              (org admin)
 GET    /orgs/:orgId/billing/payments/:id      status of one transaction            (org admin)
 POST   /orgs/:orgId/billing/payments/:id/capture  capture a PayPal order           (org admin)
+GET    /orgs/:orgId/billing/payments/:id/invoice.pdf  download the PDF invoice     (org admin)
 
 GET    /public/billing/plans                  the public price list, in USD, plus the
                                               gateways that are currently configured
-GET    /public/plans                          older, leaner plan list kept for compatibility
 GET    /healthz                               liveness probe
 POST   /cron/purge-trials                     purge expired trial data (header x-cron-secret)
 POST   /admin/maintenance/purge-trials        purge on demand                    (system admin)
@@ -399,6 +400,7 @@ GET    /orgs/:orgId/chat/history              the whole organization's history  
        organizations/:id/purge-data
 POST   /admin/users                           create a new system administrator
 GET    /admin/system-admins                   who currently holds system admin rights
+GET    /admin/payments/:id/invoice.pdf        the same invoice, for any organization
 ```
 
 Authentication: the `Authorization: Bearer <access_token>` header, with a token issued by
@@ -610,7 +612,42 @@ Background Worker on Render.
 ---
 
 
-## 12. Answer language
+## 12. Invoices
+
+Every payment that has actually been received can be downloaded as a PDF invoice — by the
+organization's own administrators from **Plan & billing**, and by a system administrator from
+the **Payments** page for any organization.
+
+**Numbering.** The number is allocated by `assign_invoice_number()` on the first download and
+stored on the payment row, so downloading the same invoice again returns the same document.
+The form is `BC-YYYY-00001`, where the year comes from the date the money was received and the
+counter is a database sequence. A payment that has not been received cannot be invoiced: the
+function raises, and the route answers 409. Issuing an invoice for money that never arrived
+would put a document into the customer's accounts that does not correspond to a payment.
+
+**Who the invoice is addressed to.** `organizations.billing_name` and `billing_address`, filled
+in by the customer under **Settings → Invoice details**. When the legal name is empty the
+invoice falls back to the organization's display name, so an account that has filled in nothing
+still gets a usable document.
+
+**Rendering.** `src/invoice.js` draws the page with pdf-lib, already a dependency for splitting
+scanned PDFs. It embeds Liberation Sans from `assets/fonts/` rather than using pdf-lib's
+built-in fonts, which are WinAnsi-only and throw on any character outside it — an invoice could
+not otherwise be issued to a customer whose registered name carries Vietnamese, Polish or
+Cyrillic letters. Characters the font has no glyph for (CJK, Thai, Arabic) are replaced with
+`?` rather than being allowed to fail the download.
+
+Money and dates are formatted by hand instead of through `toLocaleString`, because `Intl`
+output depends on which ICU data the Node build ships and the same invoice would otherwise
+look different on different servers.
+
+**Seller details** are the constant `SELLER` at the top of `src/invoice.js`.
+
+**Tax.** The invoice states in words that no tax has been charged. There is no tax calculation
+and no tax line. If BotClarify Co. Ltd registers for GST, this needs revisiting before the next
+invoice is issued.
+
+## 13. Answer language
 
 The chatbot answers in the language the question was asked in, even when the
 documents it is quoting are written in another language. A Vietnamese question
@@ -640,7 +677,7 @@ The "nothing relevant found" reply never reaches the model at all, so it is
 translated in `src/language.js` for every language detection can name, and
 falls back to English otherwise.
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 **The system health page.** `/sysadmin.html` -> **System health** probes every dependency:
 Supabase, Cloudflare R2, Voyage AI, DeepSeek, Gemini (each model in the fallback chain), the
@@ -671,7 +708,7 @@ names". That is `POST /admin/maintenance/fix-filenames`; add `?dry_run=1` to pre
 
 ---
 
-## 14. Known limitations
+## 15. Known limitations
 
 - **Documents are processed inside the web process.** Very large files can time out on Render
   Free. With real customers, split this into a dedicated worker.

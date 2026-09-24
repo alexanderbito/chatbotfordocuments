@@ -9,6 +9,7 @@ import { purgeExpiredTrials, purgeOrganizationData } from '../trials.js';
 import { systemAdminEmails, isSystemAdminEmail } from '../systemAdmins.js';
 import { isOcrEnabled, ocrModels } from '../ocr.js';
 import { paypal } from '../payments/index.js';
+import { renderInvoice, sendInvoice } from './billing.js';
 
 const router = express.Router();
 router.use(requireAuth, requireSystemAdmin);
@@ -461,6 +462,34 @@ router.post('/payments', async (req, res) => {
     await logEvent({ scope: 'billing', organizationId: organization_id, userId: req.user.id, message: `Recorded a payment of $${Number(amount || 0).toLocaleString('en-US')}` });
     res.json(data);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /admin/payments/:id/invoice.pdf — the same invoice, for any organization */
+router.get('/payments/:id/invoice.pdf', async (req, res) => {
+  try {
+    const { data: payment } = await supabase
+      .from('payments')
+      .select('*, plan:plans(name, description)')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (!payment) return res.status(404).json({ error: 'Transaction not found' });
+    if (!payment.paid_at) {
+      return res.status(409).json({ error: 'This payment has not been received yet, so there is no invoice for it' });
+    }
+
+    const { data: org } = await supabase
+      .from('organizations')
+      .select('*')
+      .eq('id', payment.organization_id)
+      .maybeSingle();
+    if (!org) return res.status(404).json({ error: 'Organization not found' });
+
+    const out = await renderInvoice(payment, org);
+    sendInvoice(res, out.pdf, out.payment);
+  } catch (err) {
+    console.error('invoice error:', err);
     res.status(500).json({ error: err.message });
   }
 });

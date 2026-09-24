@@ -45,7 +45,7 @@ router.get('/:orgId', requireAuth, requireOrgMember, async (req, res) => {
 router.patch('/:orgId', requireAuth, requireOrgMember, requireOrgAdmin, async (req, res) => {
   try {
     const patch = {};
-    for (const f of ['name', 'contact_email', 'tax_code']) {
+    for (const f of ['name', 'contact_email', 'tax_code', 'billing_name', 'billing_address']) {
       if (req.body?.[f] !== undefined) patch[f] = req.body[f];
     }
     const { data, error } = await supabase

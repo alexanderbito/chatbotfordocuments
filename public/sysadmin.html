@@ -10,7 +10,7 @@
 <div class="shell" id="shell"></div>
 
 <script type="module">
-import {api, requireSession, buildSidebar, logout, icon, esc, fmt, money, toast, modal, confirmDialog, emptyState, badge, LABEL, renderBars, debounce, router} from '/assets/app.js';
+import {api, requireSession, buildSidebar, logout, icon, esc, fmt, money, toast, modal, confirmDialog, emptyState, badge, LABEL, renderBars, debounce, router, downloadFile} from '/assets/app.js';
 
 const me = await requireSession({ systemAdmin: true });
 let cache = { plans: [], orgs: [] };
@@ -351,8 +351,18 @@ async function loadPayments() {
         <td class="num">${esc(money(p.amount, p.currency || 'USD'))}</td>
         <td class="small">${esc(p.method || '—')}</td>
         <td>${badge(p.status, LABEL.payment)}</td>
-        <td style="width:1%">${p.status === 'pending' ? `<button class="btn sm" data-ok="${esc(p.id)}">Mark as received</button>` : ''}</td>
+        <td class="nowrap" style="width:1%">${p.status === 'pending' ? `<button class="btn sm" data-ok="${esc(p.id)}">Mark as received</button>` : ''}${p.paid_at ? `<button class="btn sm" data-invoice="${esc(p.id)}" title="Download invoice">${icon.download}</button>` : ''}</td>
       </tr>`).join('')}</tbody></table></div>`;
+
+  box.querySelectorAll('[data-invoice]').forEach((b) => {
+    b.onclick = async () => {
+      const original = b.innerHTML;
+      b.disabled = true; b.textContent = '…';
+      try { await downloadFile(`/admin/payments/${b.dataset.invoice}/invoice.pdf`, 'invoice.pdf'); }
+      catch (err) { toast(err.message, 'err'); }
+      b.disabled = false; b.innerHTML = original;
+    };
+  });
 
   box.querySelectorAll('[data-ok]').forEach((b) => {
     b.onclick = async () => {

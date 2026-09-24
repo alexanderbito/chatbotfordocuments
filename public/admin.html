@@ -11,7 +11,7 @@
 <div class="shell" id="shell"></div>
 
 <script type="module">
-import {api, Session, requireSession, buildSidebar, logout, icon, esc, fmt, toast, modal, confirmDialog, emptyState, badge, LABEL, meter, renderBars, debounce, router, t, money, trialBanner} from '/assets/app.js';
+import {api, Session, requireSession, buildSidebar, logout, icon, esc, fmt, toast, modal, confirmDialog, emptyState, badge, LABEL, meter, renderBars, debounce, router, t, money, trialBanner, downloadFile} from '/assets/app.js';
 
 const me = await requireSession();
 const adminOrgs = me.user.is_system_admin ? me.organizations : me.organizations.filter((o) => o.role === 'admin');
@@ -595,13 +595,16 @@ async function viewBilling() {
         <div class="card">
           <div class="card-head"><h2>Payment history</h2></div>
           <div class="card-body flush">${b.payments.length ? `<div class="table-wrap"><table class="tbl">
-            <thead><tr><th>Date</th><th>Period</th><th class="num">Amount</th><th>Method</th><th>Status</th></tr></thead>
+            <thead><tr><th>Date</th><th>Period</th><th class="num">Amount</th><th>Method</th><th>Status</th><th>Invoice</th></tr></thead>
             <tbody>${b.payments.map((p) => `<tr>
               <td class="small">${esc(fmt.date(p.created_at))}</td>
               <td class="small">${esc(fmt.date(p.period_start))} → ${esc(fmt.date(p.period_end))}</td>
               <td class="num">${esc(money(p.amount, p.currency || 'USD'))}</td>
               <td class="small">${esc(p.method || '—')}</td>
-              <td>${badge(p.status, LABEL.payment)}</td></tr>`).join('')}</tbody></table></div>`
+              <td>${badge(p.status, LABEL.payment)}</td>
+              <td style="width:1%">${p.paid_at
+                ? `<button class="btn sm" data-invoice="${esc(p.id)}">${icon.download} PDF</button>`
+                : '<span class="muted small">—</span>'}</td></tr>`).join('')}</tbody></table></div>`
             : emptyState(t('No transactions yet'), t('This organization is on the free plan.'))}</div>
         </div>
       </div>
@@ -641,6 +644,17 @@ async function viewBilling() {
         </div>
       </div>
     </div>`;
+
+  el.querySelectorAll('[data-invoice]').forEach((btn) => {
+    btn.onclick = async () => {
+      const original = btn.innerHTML;
+      btn.disabled = true; btn.textContent = t('Preparing…');
+      try {
+        await downloadFile(`/orgs/${orgId}/billing/payments/${btn.dataset.invoice}/invoice.pdf`, 'invoice.pdf');
+      } catch (err) { toast(err.message, 'err'); }
+      btn.disabled = false; btn.innerHTML = original;
+    };
+  });
 
   el.querySelectorAll('[data-buy]').forEach((btn) => {
     btn.onclick = () => startCheckout(b, btn.dataset.buy);
@@ -703,6 +717,26 @@ async function viewSettings() {
           <button class="btn primary" id="saveOrg">Save changes</button>
         </div>
       </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Invoice details</h2>
+          <span class="sub">What is printed on the invoices you download</span>
+        </div>
+        <div class="card-body">
+          <div class="field">
+            <label>Legal entity name</label>
+            <input type="text" id="obillname" value="${esc(org.billing_name || '')}" placeholder="${esc(org.name)}" />
+            <div class="hint">Leave empty to use the company name above.</div>
+          </div>
+          <div class="field">
+            <label>Billing address</label>
+            <textarea id="obilladdr" rows="4" placeholder="Street&#10;City, postcode&#10;Country">${esc(org.billing_address || '')}</textarea>
+            <div class="hint">Printed exactly as typed, one line per line.</div>
+          </div>
+          <button class="btn primary" id="saveBilling">Save invoice details</button>
+        </div>
+      </div>
       <div class="card">
         <div class="card-head"><h2>Your account</h2></div>
         <div class="card-body">
@@ -729,6 +763,17 @@ async function viewSettings() {
       toast(t('Company profile saved'), 'ok');
       setTimeout(() => location.reload(), 700);
     } catch (err) { toast(err.message, 'err'); e.target.disabled = false; }
+  };
+  document.getElementById('saveBilling').onclick = async (e) => {
+    e.target.disabled = true;
+    try {
+      await api(`/orgs/${orgId}`, { method: 'PATCH', body: {
+        billing_name: document.getElementById('obillname').value.trim(),
+        billing_address: document.getElementById('obilladdr').value.trim(),
+      }});
+      toast(t('Invoice details saved'), 'ok');
+    } catch (err) { toast(err.message, 'err'); }
+    e.target.disabled = false;
   };
   document.getElementById('saveUser').onclick = async () => {
     try { await api('/auth/profile', { method: 'PATCH', body: { full_name: document.getElementById('uname').value.trim() } }); toast(t('Profile saved'), 'ok'); }

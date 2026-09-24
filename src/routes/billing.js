@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient.js';
 import { requireAuth, requireOrgMember, requireOrgAdmin } from '../auth.js';
 import { logEvent } from '../logger.js';
 import { availableProviders, startCheckout, markPaid, findPayment, paypal } from '../payments/index.js';
+import { buildInvoicePdf, invoiceFilename } from '../invoice.js';
 
 const router = express.Router({ mergeParams: true });
 
@@ -110,6 +111,64 @@ router.post('/payments/:paymentId/capture', async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
+
+/**
+ * GET /orgs/:orgId/billing/payments/:paymentId/invoice.pdf
+ *
+ * The invoice number is allocated by the database on the first download and
+ * then never changes, so downloading the same invoice twice gives the same
+ * document. Only a payment that has actually been received can be invoiced.
+ */
+router.get('/payments/:paymentId/invoice.pdf', async (req, res) => {
+  try {
+    const { data: payment } = await supabase
+      .from('payments')
+      .select('*, plan:plans(name, description)')
+      .eq('id', req.params.paymentId)
+      .eq('organization_id', req.org.id)
+      .maybeSingle();
+    if (!payment) return res.status(404).json({ error: 'Transaction not found' });
+    if (!payment.paid_at) {
+      return res.status(409).json({ error: 'This payment has not been received yet, so there is no invoice for it' });
+    }
+
+    const out = await renderInvoice(payment, req.org);
+    sendInvoice(res, out.pdf, out.payment);
+  } catch (err) {
+    console.error('invoice error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Allocates the invoice number if this is the first download, then renders.
+ * Shared by the customer route above and the system-admin route.
+ *
+ * Returns the payment as well as the bytes, because on a first download the
+ * caller's copy still has invoice_number null — and the filename is built from
+ * it. Returning only the bytes named the first download after the order code
+ * and every later one after the invoice number, so the customer ended up with
+ * two differently named copies of the same document.
+ */
+export async function renderInvoice(payment, organization) {
+  let number = payment.invoice_number;
+  if (!number) {
+    const { data, error } = await supabase.rpc('assign_invoice_number', { p_payment_id: payment.id });
+    if (error) throw error;
+    number = data;
+  }
+  const invoiced = { ...payment, invoice_number: number };
+  const pdf = await buildInvoicePdf({ payment: invoiced, organization, plan: payment.plan });
+  return { pdf, payment: invoiced };
+}
+
+export function sendInvoice(res, pdf, payment) {
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${invoiceFilename(payment)}"`);
+  res.setHeader('Content-Length', pdf.length);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.end(Buffer.from(pdf));
+}
 
 export default router;
 

@@ -79,6 +79,38 @@ export async function api(path, { method = 'GET', body, form, raw } = {}) {
   return raw ? text : data;
 }
 
+/**
+ * Downloads a file from an authenticated endpoint.
+ *
+ * A plain <a href> cannot carry the Authorization header, so the bytes are
+ * fetched, turned into a blob and handed to a temporary link. The filename
+ * comes from Content-Disposition when the server sent one.
+ */
+export async function downloadFile(path, fallbackName = 'download') {
+  const headers = {};
+  if (Session.token) headers.Authorization = `Bearer ${Session.token}`;
+  const res = await fetch(path, { headers });
+  if (!res.ok) {
+    let msg = `Error ${res.status}`;
+    try { msg = (await res.json())?.error || msg; } catch { /* not JSON */ }
+    throw new Error(msg);
+  }
+
+  const disposition = res.headers.get('Content-Disposition') || '';
+  const match = /filename="?([^"]+)"?/.exec(disposition);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = match ? match[1] : fallbackName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoked on the next tick: Safari needs the URL to still exist when it
+  // starts the download, so it cannot be released synchronously.
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
 /* ---------- Page guards ---------- */
 export async function requireSession({ systemAdmin = false } = {}) {
   if (!Session.token) { location.href = '/login.html'; throw new Error('redirect'); }
