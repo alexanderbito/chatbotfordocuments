@@ -13,9 +13,16 @@
   --text: #15181e;
   --text-2: #4a5160;
   --muted: #7a8291;
-  --primary: #4f46e5;
-  --primary-600: #4338ca;
-  --primary-soft: #eef2ff;
+  /* --brand is the exact orange from the logo. Against white it only reaches
+     2.98:1, so it is used for fills and decoration and never for text or for a
+     button carrying white text. --primary is the same hue darkened to 4.59:1,
+     which is what interactive elements and links use. Side by side they read as
+     one colour; swapping --primary back to #ff6320 would put most of the
+     interface below the readable threshold. */
+  --brand: #ff6320;
+  --primary: #d2440a;
+  --primary-600: #b93c08;
+  --primary-soft: #fff4ef;
   --ink: #171b24;
   --success: #067a4e;
   --success-soft: #e6f6ee;
@@ -49,10 +56,9 @@ a:hover { text-decoration: underline; }
 .site-head .wrap { display: flex; align-items: center; gap: 28px; height: 66px; }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
 .brand:hover { text-decoration: none; }
-.brand-mark {
-  width: 32px; height: 32px; border-radius: 9px; flex: none; display: grid; place-items: center;
-  background: linear-gradient(140deg, #6366f1, #4338ca); color: #fff; font-weight: 700; font-size: 15px;
-}
+/* The mark is an image now, so it must not be stretched: the artwork is taller
+   than it is wide. Height is set and width follows, everywhere it appears. */
+.brand-mark { height: 30px; width: auto; flex: none; display: block; }
 .brand-name { font-weight: 680; font-size: 17px; color: var(--text); letter-spacing: -.01em; }
 .nav { display: flex; gap: 26px; margin-left: 10px; }
 .nav a { color: var(--text-2); font-size: 14.5px; font-weight: 500; }
@@ -127,7 +133,7 @@ section.tint { background: var(--bg-soft); border-top: 1px solid var(--border); 
   padding: 10px 13px; border-radius: 12px; font-size: 14px; line-height: 1.6;
   max-width: 82%; border: 1px solid transparent;
 }
-.mock-msg.me .mock-bubble { background: var(--primary-soft); border-color: #dfe3fb; border-bottom-right-radius: 3px; }
+.mock-msg.me .mock-bubble { background: var(--primary-soft); border-color: #ffd9c7; border-bottom-right-radius: 3px; }
 .mock-msg.bot .mock-bubble { background: var(--bg-soft); border-color: var(--border); border-bottom-left-radius: 3px; }
 /* A block, not inline-flex: inline, the chip wraps into the last line of the
    answer and the sentence breaks around it. */
@@ -150,7 +156,7 @@ section.tint { background: var(--bg-soft); border-top: 1px solid var(--border); 
 .card p { margin: 0; color: var(--text-2); font-size: 14.8px; }
 .card .ico {
   width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center;
-  background: var(--primary-soft); color: var(--primary); margin-bottom: 16px;
+  background: var(--primary-soft); color: var(--primary-600); margin-bottom: 16px;
 }
 .card .ico svg { width: 19px; height: 19px; }
 
@@ -207,13 +213,13 @@ section.tint { background: var(--bg-soft); border-top: 1px solid var(--border); 
 
 /* ---------- CTA band ---------- */
 .cta-band {
-  background: linear-gradient(135deg, #312e81, #4338ca 55%, #4f46e5);
+  background: linear-gradient(135deg, #7a2a06, #b93c08 55%, #d2440a);
   color: #fff; border-radius: var(--radius-lg); padding: 56px 44px; text-align: center;
 }
 .cta-band h2 { color: #fff; margin-bottom: 14px; }
-.cta-band p { color: #cdd0f5; font-size: 17px; margin: 0 auto 28px; max-width: 520px; }
+.cta-band p { color: #ffe2d4; font-size: 17px; margin: 0 auto 28px; max-width: 520px; }
 .cta-band .btn { background: #fff; border-color: #fff; color: var(--primary-600); }
-.cta-band .btn:hover { background: #eef2ff; border-color: #eef2ff; }
+.cta-band .btn:hover { background: #fff4ef; border-color: #fff4ef; }
 .cta-band .btn.outline { background: transparent; border-color: rgba(255,255,255,.45); color: #fff; }
 .cta-band .btn.outline:hover { background: rgba(255,255,255,.12); }
 .cta-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
@@ -262,7 +268,7 @@ section.tint { background: var(--bg-soft); border-top: 1px solid var(--border); 
   background: var(--surface); outline: none;
 }
 .field input:focus, .field select:focus, .field textarea:focus {
-  border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,70,229,.13);
+  border-color: var(--primary); box-shadow: 0 0 0 3px rgba(210,68,10,.16);
 }
 .field textarea { min-height: 130px; resize: vertical; }
 .field .hint { font-size: 13px; color: var(--muted); margin-top: 6px; }

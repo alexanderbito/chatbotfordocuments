@@ -323,7 +323,7 @@ export function buildSidebar({ brandSub, items, user, orgs, currentOrgId, onOrgC
   return `
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">B</div>
+        <img class="brand-mark" src="/assets/brand/mark-light.png" alt="BotClarify" />
         <div><div class="brand-name">BotClarify</div><div class="brand-sub">${esc(brandSub)}</div></div>
       </div>
       ${orgBlock}
