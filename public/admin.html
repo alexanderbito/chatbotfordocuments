@@ -599,10 +599,11 @@ async function viewBilling() {
         <div class="card">
           <div class="card-head"><h2>Payment history</h2></div>
           <div class="card-body flush">${b.payments.length ? `<div class="table-wrap"><table class="tbl">
-            <thead><tr><th>Date</th><th>Period</th><th class="num">Amount</th><th>Method</th><th>Status</th><th>Invoice</th></tr></thead>
+            <thead><tr><th>Date</th><th>Period</th><th>Billed</th><th class="num">Amount</th><th>Method</th><th>Status</th><th>Invoice</th></tr></thead>
             <tbody>${b.payments.map((p) => `<tr>
               <td class="small">${esc(fmt.date(p.created_at))}</td>
               <td class="small">${esc(fmt.date(p.period_start))} → ${esc(fmt.date(p.period_end))}</td>
+              <td class="small">${esc(p.billing_cycle === 'yearly' ? t('Yearly') : t('Monthly'))}</td>
               <td class="num">${esc(money(p.amount, p.currency || 'USD'))}</td>
               <td class="small">${esc(p.method || '—')}</td>
               <td>${badge(p.status, LABEL.payment)}</td>
@@ -627,7 +628,15 @@ async function viewBilling() {
             ${b.trial?.expired
               ? `<div class="alert error show mt-1">${esc(b.trial.purged ? t('Your documents were deleted. Upgrade to start again.') : t('Upgrade now to keep your documents.'))}</div>`
               : ''}
-            <div class="mt-2" style="font-size:20px;font-weight:650">${esc(money(b.plan?.price_usd || 0))}<span class="muted small"> ${esc(t('/month'))}</span></div>
+            ${(() => {
+              // Show the cycle this organization last paid on, not a generic
+              // "/month" — an organization on a yearly plan that reads "$19
+              // /month" next to a card charged $187 will open a support ticket.
+              const last = b.payments.find((p) => p.paid_at);
+              const onYear = last?.billing_cycle === 'yearly';
+              const amount = onYear ? (b.plan?.price_usd_yearly || last.amount) : (b.plan?.price_usd || 0);
+              return `<div class="mt-2" style="font-size:20px;font-weight:650">${esc(money(amount))}<span class="muted small"> ${esc(onYear ? t('/year') : t('/month'))}</span></div>`;
+            })()}
           </div>
         </div>
 
@@ -637,6 +646,9 @@ async function viewBilling() {
             ${b.available_plans.filter((p) => p.id !== b.plan?.id).map((p) => `
               <div class="mb-2" style="padding-bottom:12px;border-bottom:1px solid var(--border)">
                 <div class="row between"><b>${esc(p.name)}</b><span>${esc(money(p.price_usd))}${esc(t('/month'))}</span></div>
+                ${p.has_yearly
+                  ? `<div class="small" style="color:var(--primary);font-weight:600">${esc(t('or {amount}/year — save {n}%', { amount: money(p.price_yearly), n: p.yearly_saving_pct }))}</div>`
+                  : ''}
                 <div class="small muted mb-1">${fmt.num(p.max_documents)} documents · ${fmt.num(p.max_members)} members · ${fmt.num(p.max_questions_per_month)} questions/month · ${fmt.num(p.max_ocr_pages_per_month || 0)} OCR pages/month</div>
                 ${Number(p.price_usd) > 0 && b.providers?.length
                   ? `<button class="btn sm primary" data-buy="${esc(p.id)}">Upgrade to this plan</button>` : ''}
@@ -669,36 +681,73 @@ async function viewBilling() {
 function startCheckout(billing, planId) {
   const plan = billing.available_plans.find((p) => p.id === planId);
   const providers = billing.providers || [];
-  const amount = money(plan.price_usd);
+
+  // The cycle lives in the modal, not on the page behind it: an admin who is
+  // already looking at a total should be able to see it change rather than
+  // close the dialog, flip something and come back.
+  const cycleRow = plan.has_yearly ? `
+      <div class="field">
+        <label>${esc(t('Billing'))}</label>
+        ${[
+          { id: 'monthly', name: t('Monthly'), price: plan.price_usd, note: t('Renews every month. Cancel any time.') },
+          { id: 'yearly', name: t('Yearly'), price: plan.price_yearly, note: t('Paid once for 12 months — save {n}%', { n: plan.yearly_saving_pct }) },
+        ].map((c) => `
+          <label class="pay-method ${c.id === 'monthly' ? 'sel' : ''}" data-cyc="${esc(c.id)}">
+            <input type="radio" name="cyc" value="${esc(c.id)}" ${c.id === 'monthly' ? 'checked' : ''} />
+            <span class="who"><b>${esc(c.name)} — ${esc(money(c.price))}</b><span>${esc(c.note)}</span></span>
+          </label>`).join('')}
+      </div>` : '';
 
   modal({
     title: t('Upgrade to {name}', { name: plan.name }),
     okText: t('Continue to payment'),
     body: `
+      ${cycleRow}
       <div class="field">
         <label>Payment method</label>
         ${providers.map((p, i) => `
-          <label class="pay-method ${i === 0 ? 'sel' : ''}">
+          <label class="pay-method ${i === 0 ? 'sel' : ''}" data-prov="1">
             <input type="radio" name="prov" value="${esc(p.id)}" ${i === 0 ? 'checked' : ''} ${providers.length === 1 ? 'hidden' : ''} />
             <span class="who"><b>${esc(p.name)}</b><span>${esc(p.description)}</span></span>
           </label>`).join('')}
       </div>
       <div class="row between" style="padding-top:10px;border-top:1px solid var(--border)">
-        <b>${esc(t('Total'))}</b><b style="font-size:18px">${esc(amount)}</b>
+        <b id="ckLabel"></b><b style="font-size:18px" id="ckTotal"></b>
       </div>
-      <p class="small muted mt-1 mb-0">${esc(t('If your current plan is still valid, one month is added to the remaining time.'))}</p>`,
+      <p class="small muted mt-1 mb-0" id="ckNote"></p>`,
     onOk: async (box) => {
       const provider = box.querySelector('input[name="prov"]:checked').value;
-      const res = await api(`/orgs/${orgId}/billing/checkout`, { method: 'POST', body: { plan_id: planId, provider } });
+      const cycle = box.querySelector('input[name="cyc"]:checked')?.value || 'monthly';
+      const res = await api(`/orgs/${orgId}/billing/checkout`, {
+        method: 'POST',
+        body: { plan_id: planId, provider, billing_cycle: cycle },
+      });
       location.href = res.checkout_url;
       return false;
     },
   });
 
+  // Keep the total honest as the cycle changes. The amount charged still comes
+  // from the plans table on the server — this only keeps the dialog from
+  // showing one number while the customer is agreeing to another.
+  const refresh = () => {
+    const yearly = document.querySelector('input[name="cyc"]:checked')?.value === 'yearly';
+    document.getElementById('ckLabel').textContent = yearly ? t('Total for 12 months') : t('Total for 1 month');
+    document.getElementById('ckTotal').textContent = money(yearly ? plan.price_yearly : plan.price_usd);
+    document.getElementById('ckNote').textContent = yearly
+      ? t('If your current plan is still valid, twelve months are added to the remaining time.')
+      : t('If your current plan is still valid, one month is added to the remaining time.');
+  };
+  refresh();
+
+  // Each group highlights only its own rows; one shared selector would clear
+  // the payment method every time the cycle was clicked.
   document.querySelectorAll('.pay-method').forEach((el2) => {
     el2.onclick = () => {
-      document.querySelectorAll('.pay-method').forEach((x) => x.classList.remove('sel'));
+      const group = el2.dataset.cyc ? '[data-cyc]' : '[data-prov]';
+      document.querySelectorAll(`.pay-method${group}`).forEach((x) => x.classList.remove('sel'));
       el2.classList.add('sel');
+      refresh();
     };
   });
 }

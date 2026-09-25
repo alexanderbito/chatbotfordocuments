@@ -1,6 +1,7 @@
 import { supabase } from '../supabaseClient.js';
 import { logEvent } from '../logger.js';
 import * as paypal from './paypal.js';
+import { normalizeCycle, priceFor, monthsFor } from './cycles.js';
 
 /**
  * Payment gateway registry.
@@ -36,13 +37,18 @@ export function baseUrl(req) {
  * Security rule: the amount ALWAYS comes from the plans table on the server.
  * The browser only ever picks a plan and a gateway, never a price.
  */
-export async function startCheckout({ org, plan, providerId, req, userId }) {
+export async function startCheckout({ org, plan, providerId, req, userId, cycle }) {
   const provider = getProvider(providerId);
   const currency = provider.meta.currency;
+  const billingCycle = normalizeCycle(cycle);
 
-  const amount = Number(plan.price_usd);
+  const amount = priceFor(plan, billingCycle);
   if (!(amount > 0)) {
-    throw new Error(`The "${plan.name}" plan has no price set. Contact the system administrator.`);
+    throw new Error(
+      billingCycle === 'yearly'
+        ? `The "${plan.name}" plan is not sold yearly. Choose monthly billing, or contact the system administrator.`
+        : `The "${plan.name}" plan has no price set. Contact the system administrator.`
+    );
   }
 
   // A unique integer order reference: timestamp tail plus a random suffix.
@@ -56,6 +62,7 @@ export async function startCheckout({ org, plan, providerId, req, userId }) {
       provider: providerId,
       currency,
       amount,
+      billing_cycle: billingCycle,
       order_code: orderCode,
       status: 'pending',
       method: providerId,
@@ -66,7 +73,7 @@ export async function startCheckout({ org, plan, providerId, req, userId }) {
   if (error) throw error;
 
   try {
-    const result = await provider.createCheckout({ payment, plan, org, baseUrl: baseUrl(req) });
+    const result = await provider.createCheckout({ payment, plan, org, cycle: billingCycle, baseUrl: baseUrl(req) });
 
     await supabase
       .from('payments')
@@ -77,11 +84,11 @@ export async function startCheckout({ org, plan, providerId, req, userId }) {
       scope: 'billing',
       organizationId: org.id,
       userId,
-      message: `Opened a checkout for ${plan.name} via ${provider.meta.name}`,
-      detail: { payment_id: payment.id, amount, currency },
+      message: `Opened a checkout for ${plan.name} (${billingCycle}) via ${provider.meta.name}`,
+      detail: { payment_id: payment.id, amount, currency, billing_cycle: billingCycle },
     });
 
-    return { payment_id: payment.id, checkout_url: result.checkoutUrl, amount, currency };
+    return { payment_id: payment.id, checkout_url: result.checkoutUrl, amount, currency, billing_cycle: billingCycle };
   } catch (err) {
     // If the gateway would not give us a link, close the row so no session is left hanging.
     await supabase.from('payments').update({ status: 'failed', note: err.message }).eq('id', payment.id);
@@ -95,8 +102,13 @@ export async function startCheckout({ org, plan, providerId, req, userId }) {
  * Idempotent: calling it repeatedly for one transaction only has an effect the
  * first time, because gateways retry their webhooks on a flaky connection.
  * Returns true when this call is the one that actually activated the plan.
+ *
+ * How long the payment buys is NOT passed in. The database reads it off the
+ * payment's own billing_cycle, which was written at checkout in the same step
+ * that fixed the price. A caller that could name the number of months could
+ * hand out a year for the price of a month.
  */
-export async function markPaid({ payment, providerRef, raw, months = 1 }) {
+export async function markPaid({ payment, providerRef, raw }) {
   // paid_at is the single marker for "already handled" — also checking status
   // would leave a gap through which a plan could be extended twice.
   if (payment.paid_at) {
@@ -114,16 +126,16 @@ export async function markPaid({ payment, providerRef, raw, months = 1 }) {
   // organizations, so money can never be recorded without the plan being extended.
   const { data, error } = await supabase.rpc('activate_paid_plan', {
     p_payment_id: payment.id,
-    p_months: months,
   });
   if (error) throw error;
 
   if (data) {
+    const months = monthsFor(payment.billing_cycle);
     await logEvent({
       scope: 'billing',
       organizationId: payment.organization_id,
-      message: `Payment received and plan extended (${payment.amount} ${payment.currency})`,
-      detail: { payment_id: payment.id, provider: payment.provider },
+      message: `Payment received and plan extended by ${months} month${months === 1 ? '' : 's'} (${payment.amount} ${payment.currency})`,
+      detail: { payment_id: payment.id, provider: payment.provider, billing_cycle: payment.billing_cycle || 'monthly' },
     });
   }
 
@@ -143,3 +155,4 @@ export async function findPayment({ id, orderCode, provider }) {
 }
 
 export { paypal };
+export { normalizeCycle, priceFor, monthsFor, decoratePlan } from './cycles.js';

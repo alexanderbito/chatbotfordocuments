@@ -248,12 +248,14 @@ async function viewPlans() {
 async function loadPlans() {
   cache.plans = await api('/admin/plans');
   document.getElementById('planTable').innerHTML = `<div class="table-wrap"><table class="tbl">
-    <thead><tr><th>Plan</th><th class="num">Price/month</th><th class="num">Documents</th><th class="num">Members</th><th class="num">Storage</th><th class="num">Questions/month</th><th class="num">OCR pages/month</th><th>OCR</th><th class="num">In use</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>Plan</th><th class="num">Price/month</th><th class="num">Price/year</th><th class="num">Documents</th><th class="num">Members</th><th class="num">Storage</th><th class="num">Questions/month</th><th class="num">OCR pages/month</th><th>OCR</th><th class="num">In use</th><th>Status</th><th></th></tr></thead>
     <tbody>${cache.plans.map((p) => `
       <tr>
         <td><div class="cell-main">${esc(p.name)}</div><div class="cell-sub mono">${esc(p.code)}</div></td>
         <td class="num">${esc(fmt.money(p.price_usd))}</td>
-        <td class="num">${p.price_usd ? '$' + Number(p.price_usd).toFixed(0) : '—'}</td>
+        <td class="num">${Number(p.price_usd_yearly) > 0
+          ? `${esc(fmt.money(p.price_usd_yearly))}<div class="cell-sub">${Number(p.price_usd) > 0 ? `-${Math.round((1 - p.price_usd_yearly / (p.price_usd * 12)) * 100)}%` : ''}</div>`
+          : '<span class="muted">monthly only</span>'}</td>
         <td class="num">${fmt.num(p.max_documents)}</td>
         <td class="num">${fmt.num(p.max_members)}</td>
         <td class="num">${fmt.num(p.max_storage_mb)} MB</td>
@@ -289,6 +291,7 @@ function planModal(p) {
         ${f('p_name', 'Display name', p?.name)}
         ${f('p_trial', 'Trial days (0 = paid plan)', p?.trial_days ?? 0, 'number')}
         ${f('p_usd', 'Price per month (USD)', p?.price_usd ?? 0, 'number')}
+        ${f('p_usd_y', 'Price per year (USD, 0 = monthly only)', p?.price_usd_yearly ?? 0, 'number')}
         ${f('p_sort', 'Sort order', p?.sort_order ?? 0, 'number')}
         ${f('p_docs', 'Max documents', p?.max_documents ?? 20, 'number')}
         ${f('p_members', 'Max members', p?.max_members ?? 5, 'number')}
@@ -305,7 +308,7 @@ function planModal(p) {
         code: g('p_code').trim(), name: g('p_name').trim(),
         description: g('p_desc').trim(),
         trial_days: g('p_trial'),
-        price_usd: g('p_usd'), sort_order: g('p_sort'),
+        price_usd: g('p_usd'), price_usd_yearly: g('p_usd_y'), sort_order: g('p_sort'),
         max_documents: g('p_docs'), max_members: g('p_members'),
         max_storage_mb: g('p_storage'), max_questions_per_month: g('p_questions'),
         max_ocr_pages_per_month: g('p_ocr'),
@@ -313,6 +316,13 @@ function planModal(p) {
         ocr_enabled: box.querySelector('#p_ocr').checked,
       };
       if (!body.code || !body.name) { toast('Plan code and name are required', 'err'); return false; }
+      // A yearly price at or above twelve monthly payments is almost always a
+      // typo, and it would go straight onto the public pricing page as a
+      // "saving" of zero or less. Cheap to check here, expensive to explain later.
+      if (Number(body.price_usd) > 0 && Number(body.price_usd_yearly) >= Number(body.price_usd) * 12) {
+        toast(`A yearly price of $${Number(body.price_usd_yearly)} is not cheaper than 12 months at $${Number(body.price_usd)}. Set it lower, or 0 to sell this plan monthly only.`, 'err');
+        return false;
+      }
       if (p) await api(`/admin/plans/${p.id}`, { method: 'PATCH', body });
       else await api('/admin/plans', { method: 'POST', body });
       toast('Plan saved', 'ok'); loadPlans();
@@ -345,12 +355,13 @@ async function loadPayments() {
   if (!rows.length) return (box.innerHTML = emptyState('No transactions yet', 'Use "Record payment" to enter the first one.'));
 
   box.innerHTML = `<div class="table-wrap"><table class="tbl">
-    <thead><tr><th>Date</th><th>Organization</th><th>Plan</th><th>Service period</th><th class="num">Amount</th><th>Method</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>Date</th><th>Organization</th><th>Plan</th><th>Billed</th><th>Service period</th><th class="num">Amount</th><th>Method</th><th>Status</th><th></th></tr></thead>
     <tbody>${rows.map((p) => `
       <tr>
         <td class="small nowrap">${esc(fmt.date(p.created_at))}</td>
         <td class="cell-main">${esc(p.organization?.name || '—')}</td>
         <td class="small">${esc(p.plan?.name || '—')}</td>
+        <td class="small">${p.billing_cycle === 'yearly' ? 'Yearly' : 'Monthly'}</td>
         <td class="small nowrap">${esc(fmt.date(p.period_start))} → ${esc(fmt.date(p.period_end))}</td>
         <td class="num">${esc(money(p.amount, p.currency || 'USD'))}</td>
         <td class="small">${esc(p.method || '—')}</td>
@@ -384,7 +395,8 @@ function paymentModal() {
     body: `
       <div class="form-grid">
         <div class="field"><label>Organization</label><select id="y_org">${cache.orgs.map((o) => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('')}</select></div>
-        <div class="field"><label>Plan</label><select id="y_plan">${cache.plans.map((p) => `<option value="${esc(p.id)}" data-price="${p.price_usd}">${esc(p.name)} — ${fmt.money(p.price_usd)}</option>`).join('')}</select></div>
+        <div class="field"><label>Plan</label><select id="y_plan">${cache.plans.map((p) => `<option value="${esc(p.id)}" data-price="${p.price_usd}" data-price-year="${p.price_usd_yearly || 0}">${esc(p.name)} — ${fmt.money(p.price_usd)}</option>`).join('')}</select></div>
+        <div class="field"><label>Billed</label><select id="y_cycle"><option value="monthly">Monthly (1 month)</option><option value="yearly">Yearly (12 months)</option></select></div>
         <div class="field"><label>Amount (USD)</label><input type="number" step="0.01" id="y_amount" value="${cache.plans[0]?.price_usd || 0}" /></div>
         <div class="field"><label>Method</label><select id="y_method">
           <option value="paypal">PayPal</option><option value="card">Card</option>
@@ -400,15 +412,44 @@ function paymentModal() {
       const g = (id) => box.querySelector('#' + id).value;
       await api('/admin/payments', { method: 'POST', body: {
         organization_id: g('y_org'), plan_id: g('y_plan'), amount: g('y_amount'),
+        billing_cycle: g('y_cycle'),
         period_start: g('y_start'), period_end: g('y_end'), status: g('y_status'),
         method: g('y_method'), reference: g('y_ref').trim(), note: g('y_note').trim(),
       }});
       toast('Payment recorded', 'ok'); loadPayments();
     },
-  }).el.querySelector('#y_plan').onchange = (e) => {
-    const price = e.target.selectedOptions[0]?.dataset.price;
-    if (price !== undefined) document.getElementById('y_amount').value = price;
+  });
+
+  // Plan and cycle fill in the amount and the end date together. A hand-entered
+  // payment does not go through activate_paid_plan — the dates below ARE the
+  // service period — so leaving "To" a month away after choosing Yearly would
+  // silently sell twelve months and grant one.
+  const cycleEl = document.getElementById('y_cycle');
+  const planEl = document.getElementById('y_plan');
+  const sync = () => {
+    const opt = planEl.selectedOptions[0];
+
+    // A plan with no yearly price cannot be sold yearly. Falling through with
+    // the monthly amount and a twelve-month end date would hand out a year for
+    // one month's money — and unlike a real checkout, nothing on the server
+    // re-checks a hand-entered amount against the dates.
+    if (cycleEl.value === 'yearly' && !(Number(opt?.dataset.priceYear) > 0)) {
+      cycleEl.value = 'monthly';
+      toast(`The ${opt?.textContent.split(' — ')[0] || 'selected'} plan has no yearly price. Set one in Plans first, or bill it monthly.`, 'err');
+    }
+
+    const yearly = cycleEl.value === 'yearly';
+    const price = yearly ? opt?.dataset.priceYear : opt?.dataset.price;
+    if (price !== undefined && Number(price) > 0) document.getElementById('y_amount').value = price;
+
+    const start = new Date(document.getElementById('y_start').value || Date.now());
+    const end = new Date(start);
+    end.setMonth(start.getMonth() + (yearly ? 12 : 1));
+    document.getElementById('y_end').value = end.toISOString().slice(0, 10);
   };
+  planEl.onchange = sync;
+  cycleEl.onchange = sync;
+  document.getElementById('y_start').onchange = sync;
 }
 
 /* =================== USERS =================== */

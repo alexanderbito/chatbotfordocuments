@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient.js';
 import { requireAuth, requireOrgMember, requireOrgAdmin } from '../auth.js';
 import { getUsage } from '../limits.js';
 import { availableProviders } from '../payments/index.js';
+import { decoratePlan } from '../payments/cycles.js';
 import { maybeSweep } from '../trials.js';
 import foldersRouter from './folders.js';
 import documentsRouter from './documents.js';
@@ -140,7 +141,7 @@ router.get('/:orgId/billing', requireAuth, requireOrgMember, requireOrgAdmin, as
       trial: req.trial,
       usage,
       payments: payments || [],
-      available_plans: plans || [],
+      available_plans: (plans || []).map(decoratePlan),
       providers: availableProviders(),
     });
   } catch (err) {

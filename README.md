@@ -98,6 +98,7 @@ In **Supabase Dashboard -> SQL Editor -> New query**, run these files in order:
 7. `migration_v7_trial.sql` — **required**. Turns the free plan into a 3-day trial with no OCR.
 8. `migration_v8_english_plans.sql` — **required**. Moves the plan catalogue to English. Plan names and descriptions live in the database and are rendered on the pricing page, the sign-up page and the "Current plan" card, so a database seeded before the switch keeps showing its original text until this runs.
 9. `migration_v9_invoices.sql` — **required**. Adds the customer's billing name and address, plus the invoice numbering the PDF download uses.
+10. `migration_v10_yearly_billing.sql` — **required**. Adds annual billing: a yearly price per plan (seeded at 18% off twelve months) and the billing cycle on each payment. Skipping it leaves `plans.price_usd_yearly` missing, and because the pricing endpoint asks for that column by name, the public pricing page answers with an error instead of a price list.
 
 **Run them in that order.** Every file from v3 onwards starts with a precondition check and
 stops with a clear message if an earlier file has not been run.

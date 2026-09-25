@@ -292,3 +292,52 @@ section.tint { background: var(--bg-soft); border-top: 1px solid var(--border); 
   .cta-band { padding: 44px 24px; }
   .foot-grid { gap: 30px; }
 }
+
+/* ---------------------------------------------------------------------
+   Monthly / yearly switch
+   ---------------------------------------------------------------------
+   Two real <button>s rather than a checkbox styled as a slider. A slider has
+   an on state and an off state, but neither cycle is "off" — someone landing
+   on the yearly view should not have to work out which end of a track they
+   are looking at. Two labelled buttons say what they are, and aria-pressed
+   tells a screen reader which one is showing.
+
+   The background reads --bg-soft on the marketing site and --surface-2 in the
+   console; the two stylesheets name the same colour differently, so both are
+   tried here rather than hardcoding one of them.
+--------------------------------------------------------------------- */
+.cycle-switch { display: flex; justify-content: center; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 24px; }
+.cycle-toggle {
+  display: inline-flex; gap: 3px; padding: 4px;
+  background: var(--bg-soft, var(--surface-2, #fafbfc));
+  border: 1px solid var(--border); border-radius: 999px;
+}
+.cycle-toggle button {
+  border: 0; background: none; font: inherit; font-size: 14px; font-weight: 600;
+  color: var(--muted); padding: 8px 20px; border-radius: 999px; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.cycle-toggle button:hover { color: var(--text); }
+.cycle-toggle button[aria-pressed="true"] { background: var(--primary); color: #fff; }
+.cycle-toggle button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* The saving is stated beside the switch, not only inside the yearly view, so
+   the reason to look at it is visible before anything is clicked. */
+.cycle-save {
+  background: var(--primary-soft); color: var(--primary);
+  font-size: 13px; font-weight: 650; padding: 6px 13px; border-radius: 999px; white-space: nowrap;
+}
+
+/* Struck-through twelve-month total on the yearly view. --muted on white is
+   4.6:1, so the crossed-out price stays readable rather than becoming
+   decoration a customer has to squint at to check our arithmetic. */
+.price-was { color: var(--muted); font-weight: 500; font-size: 15px; text-decoration: line-through; }
+.price-note { color: var(--muted); font-size: 13px; line-height: 1.5; margin-top: 4px; }
+.price-note b { color: var(--primary); font-weight: 650; }
+
+/* The two prices both live in the page and one is hidden, rather than being
+   written in by script. The monthly price is therefore correct before any
+   JavaScript runs — and if the script never runs at all, the section still
+   reads as a normal price list instead of an empty box. */
+.plans[data-cycle="monthly"] .on-yearly,
+.plans[data-cycle="yearly"] .on-monthly { display: none; }

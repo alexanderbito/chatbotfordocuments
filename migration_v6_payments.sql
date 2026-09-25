@@ -54,6 +54,23 @@ create index if not exists payments_status_idx on payments (status, created_at d
 -- 5. Activate the plan after a successful payment — done inside ONE database transaction
 --    so we never record the money but forget to upgrade the plan (or the other way round).
 --    Returns true if this call actually activated the plan, false if it was already active.
+--    NOTE: migration v10 replaces this with a one-argument version that reads the
+--    number of months off the payment row. If v10 has already run, this file
+--    must NOT recreate the two-argument form: Postgres would then hold both, and
+--    a call naming only p_payment_id matches each of them equally well, so every
+--    activation would fail with "function activate_paid_plan is not unique".
+--    The guard below makes v6 safe to re-run at any point in the sequence.
+do $v6fn$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'payments' and column_name = 'billing_cycle'
+  ) then
+    raise notice 'migration v10 already applied — keeping its activate_paid_plan(uuid) and skipping the older two-argument version.';
+    return;
+  end if;
+
+  execute $v6body$
 create or replace function activate_paid_plan(
   p_payment_id uuid,
   p_months int default 1
@@ -102,6 +119,9 @@ begin
   return true;
 end;
 $$;
+  $v6body$;
+end
+$v6fn$;
 
 -- 6. Clean up checkout sessions that have been abandoned for more than 24 hours
 create or replace function cleanup_stale_payments()

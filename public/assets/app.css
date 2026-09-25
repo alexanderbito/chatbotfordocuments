@@ -452,7 +452,15 @@ label.perm-row { display: flex; align-items: center; gap: 9px; padding: 7px 9px;
 .plan-feats svg { width: 15px; height: 15px; color: var(--success); flex: none; margin-top: 2px; }
 .plan-feats li.off { color: var(--muted); }
 .plan-feats li.off svg { color: var(--muted); }
-.pay-method { display: flex; gap: 10px; align-items: center; padding: 11px 13px; border: 1px solid var(--border-strong); border-radius: 9px; cursor: pointer; margin-bottom: 8px; }
+/* The tag is in the selector because these rows live inside ".field", whose
+   own ".field label { display: block }" (0,1,1) outranks a bare ".pay-method"
+   (0,1,0) and drops the radio onto its own line above the text. Nobody saw it
+   while the only row here was a payment method with its radio hidden; the
+   monthly/yearly rows have a visible one, which made it obvious. */
+label.pay-method { display: flex; gap: 10px; align-items: center; padding: 11px 13px; border: 1px solid var(--border-strong); border-radius: 9px; cursor: pointer; margin-bottom: 8px; font-weight: 400; color: var(--text); }
+/* Without this the radio is drawn in the browser's default blue, which is the
+   one piece of the old colour scheme that survived the rebrand. */
+.pay-method input[type="radio"] { accent-color: var(--primary); margin: 0; }
 .pay-method:hover { background: var(--surface-2); }
 .pay-method.sel { border-color: var(--primary); background: var(--primary-soft); }
 .pay-method input { width: auto; flex: none; }
@@ -476,3 +484,45 @@ label.perm-row { display: flex; align-items: center; gap: 9px; padding: 7px 9px;
 .trial-bar > span:nth-child(2) { flex: 1; min-width: 200px; }
 .trial-bar .btn { margin-left: auto; }
 .shell.has-trial-bar { min-height: calc(100vh - 40px); }
+
+/* ---------------------------------------------------------------------
+   Monthly / yearly switch
+   ---------------------------------------------------------------------
+   Two real <button>s rather than a checkbox styled as a slider. A slider has
+   an on state and an off state, but neither cycle is "off" — someone landing
+   on the yearly view should not have to work out which end of a track they
+   are looking at. Two labelled buttons say what they are, and aria-pressed
+   tells a screen reader which one is showing.
+
+   The background reads --bg-soft on the marketing site and --surface-2 in the
+   console; the two stylesheets name the same colour differently, so both are
+   tried here rather than hardcoding one of them.
+--------------------------------------------------------------------- */
+.cycle-switch { display: flex; justify-content: center; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 24px; }
+.cycle-toggle {
+  display: inline-flex; gap: 3px; padding: 4px;
+  background: var(--bg-soft, var(--surface-2, #fafbfc));
+  border: 1px solid var(--border); border-radius: 999px;
+}
+.cycle-toggle button {
+  border: 0; background: none; font: inherit; font-size: 14px; font-weight: 600;
+  color: var(--muted); padding: 8px 20px; border-radius: 999px; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.cycle-toggle button:hover { color: var(--text); }
+.cycle-toggle button[aria-pressed="true"] { background: var(--primary); color: #fff; }
+.cycle-toggle button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* The saving is stated beside the switch, not only inside the yearly view, so
+   the reason to look at it is visible before anything is clicked. */
+.cycle-save {
+  background: var(--primary-soft); color: var(--primary);
+  font-size: 13px; font-weight: 650; padding: 6px 13px; border-radius: 999px; white-space: nowrap;
+}
+
+/* Struck-through twelve-month total on the yearly view. --muted on white is
+   4.6:1, so the crossed-out price stays readable rather than becoming
+   decoration a customer has to squint at to check our arithmetic. */
+.price-was { color: var(--muted); font-weight: 500; font-size: 15px; text-decoration: line-through; }
+.price-note { color: var(--muted); font-size: 13px; line-height: 1.5; margin-top: 4px; }
+.price-note b { color: var(--primary); font-weight: 650; }

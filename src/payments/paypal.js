@@ -29,6 +29,13 @@ export function env() {
 }
 
 function apiBase(forEnv) {
+  // The test suite points this at a local stub so the checkout path can be run
+  // end to end without touching PayPal. It is deliberately gated on NODE_ENV:
+  // an unconditional override would mean one stray environment variable could
+  // silently redirect real payments to somebody else's server.
+  if (process.env.NODE_ENV === 'test' && process.env.PAYPAL_API_BASE) {
+    return process.env.PAYPAL_API_BASE.replace(/\/$/, '');
+  }
   return (forEnv || env()) === 'live' ? LIVE : SANDBOX;
 }
 
@@ -165,7 +172,12 @@ async function callPaypal(path, { method = 'POST', body, headers = {} } = {}) {
  * Create a PayPal order. The amount comes from the payment record the server
  * created.
  */
-export async function createCheckout({ payment, plan, org, baseUrl }) {
+export async function createCheckout({ payment, plan, org, cycle, baseUrl }) {
+  // The cycle goes in the description because it is what the payer sees on the
+  // PayPal page. Someone paying $187 needs to read "12 months" there, not just
+  // the plan name, or the amount looks like a mistake and the checkout is
+  // abandoned.
+  const period = cycle === 'yearly' ? '12 months' : '1 month';
   const order = await callPaypal('/v2/checkout/orders', {
     body: {
       intent: 'CAPTURE',
@@ -174,7 +186,7 @@ export async function createCheckout({ payment, plan, org, baseUrl }) {
           // custom_id is the link that lets the webhook find this transaction again in our system
           custom_id: payment.id,
           invoice_id: `${payment.order_code}`,
-          description: `${plan.name} — ${org.name}`.slice(0, 127),
+          description: `${plan.name}, ${period} — ${org.name}`.slice(0, 127),
           amount: {
             currency_code: 'USD',
             value: Number(payment.amount).toFixed(2),

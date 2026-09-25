@@ -210,10 +210,15 @@ export async function buildInvoicePdf({ payment, organization, plan }) {
 
   y -= 30;
   const planName = plan?.name || 'Subscription';
-  text(`${planName} plan`, M + 12, y, { size: 11, font: fBold, color: INK });
+  // The cycle goes on the description line, not only in the dates. An invoice
+  // is filed and read again months later, often by somebody who was not there
+  // when it was paid, and "12 months" answers their question without making
+  // them subtract two dates.
+  const yearly = payment.billing_cycle === 'yearly';
+  text(`${planName} plan — ${yearly ? '12 months' : '1 month'}`, M + 12, y, { size: 11, font: fBold, color: INK });
   const period = payment.period_start && payment.period_end
     ? `${day(payment.period_start)} - ${day(payment.period_end)}`
-    : 'One month';
+    : (yearly ? 'Twelve months' : 'One month');
   text(period, periodX, y, { size: 10 });
   text('1', qtyX, y, { size: 10 });
   text(money(payment.amount, payment.currency), amountX - 12, y, { size: 11, font: fBold, color: INK, align: 'right' });

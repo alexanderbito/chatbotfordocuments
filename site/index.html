@@ -236,7 +236,15 @@
       <p class="lead">Every plan runs the same system. They differ only in how much you can put into it. Change plan whenever you like.</p>
     </div>
 
-    <div class="plans">
+    <div class="cycle-switch">
+      <div class="cycle-toggle" role="group" aria-label="Billing cycle">
+        <button type="button" data-cycle="monthly" aria-pressed="true">Monthly</button>
+        <button type="button" data-cycle="yearly" aria-pressed="false">Yearly</button>
+      </div>
+      <span class="cycle-save">Save 18% yearly</span>
+    </div>
+
+    <div class="plans" data-cycle="monthly">
       <div class="plan">
         <h3>Free trial</h3>
         <p class="blurb">Everything except scanned-PDF reading, so you can judge it on your own documents.</p>
@@ -256,7 +264,11 @@
         <span class="tag">Most popular</span>
         <h3>Professional</h3>
         <p class="blurb">For a team that has outgrown asking each other where the policy is kept.</p>
-        <div class="price">$19 <small>/month</small></div>
+        <div class="price">
+          <span class="on-monthly">$19 <small>/month</small></span>
+          <span class="on-yearly">$187 <small>/year</small></span>
+        </div>
+        <div class="price-note on-yearly"><span class="price-was">$228</span> &middot; <b>save 18%</b><br>works out at $15.58 a month</div>
         <ul class="feats">
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>500 documents</li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>30 members</li>
@@ -270,7 +282,11 @@
       <div class="plan">
         <h3>Business</h3>
         <p class="blurb">For a whole company, with room for scanned archives and long histories.</p>
-        <div class="price">$79 <small>/month</small></div>
+        <div class="price">
+          <span class="on-monthly">$79 <small>/month</small></span>
+          <span class="on-yearly">$777 <small>/year</small></span>
+        </div>
+        <div class="price-note on-yearly"><span class="price-was">$948</span> &middot; <b>save 18%</b><br>works out at $64.75 a month</div>
         <ul class="feats">
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>10,000 documents</li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>300 members</li>
@@ -283,8 +299,8 @@
     </div>
 
     <p class="center muted" style="margin-top:30px;font-size:14.5px">
-      All prices in USD, billed monthly by card or PayPal.
-      <a href="/contact.html">Talk to us</a> about annual billing or limits beyond these.
+      All prices in USD, by card or PayPal. Pay monthly and cancel any time, or pay for twelve months
+      up front and keep 18%. <a href="/contact.html">Talk to us</a> about limits beyond these.
     </p>
   </div>
 </section>
@@ -355,7 +371,11 @@
       </details>
       <details>
         <summary>How do I cancel?</summary>
-        <p>Billing is monthly and stops when you stop paying — there is no contract term and no cancellation fee. Your plan stays active until the period you have already paid for runs out.</p>
+        <p>Billing stops when you stop paying — there is no contract term and no cancellation fee. Your plan stays active until the period you have already paid for runs out, whether that is the rest of the month or the rest of the year.</p>
+      </details>
+      <details>
+        <summary>What happens if I switch to yearly halfway through a month?</summary>
+        <p>The twelve months are added on top of the time you have already paid for, so nothing is lost and nothing is refunded — the date your plan runs out simply moves a year further away. The same is true in reverse: a monthly payment made while a yearly plan is still running adds one more month to the end of it.</p>
       </details>
     </div>
   </div>

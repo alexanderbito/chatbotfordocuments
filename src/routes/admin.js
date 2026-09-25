@@ -397,7 +397,7 @@ router.delete('/plans/:id', async (req, res) => {
 function sanitizePlan(body = {}) {
   const out = {};
   const strs = ['code', 'name', 'description'];
-  const nums = ['price_usd', 'max_documents', 'max_members', 'max_storage_mb', 'max_questions_per_month', 'max_ocr_pages_per_month', 'sort_order'];
+  const nums = ['price_usd', 'price_usd_yearly', 'max_documents', 'max_members', 'max_storage_mb', 'max_questions_per_month', 'max_ocr_pages_per_month', 'sort_order'];
   for (const f of strs) if (body[f] !== undefined) out[f] = body[f];
   for (const f of nums) if (body[f] !== undefined) out[f] = Number(body[f]) || 0;
   if (body.is_active !== undefined) out.is_active = !!body.is_active;
@@ -429,8 +429,9 @@ router.get('/payments', async (req, res) => {
 /** POST /admin/payments — record a payment by hand and extend the plan */
 router.post('/payments', async (req, res) => {
   try {
-    const { organization_id, plan_id, amount, period_start, period_end, status, method, reference, note } = req.body || {};
+    const { organization_id, plan_id, amount, period_start, period_end, status, method, reference, note, billing_cycle } = req.body || {};
     if (!organization_id) return res.status(400).json({ error: 'An organization is required' });
+    const paid = (status || 'paid') === 'paid';
 
     const { data, error } = await supabase
       .from('payments')
@@ -439,9 +440,16 @@ router.post('/payments', async (req, res) => {
         plan_id: plan_id || null,
         amount: Number(amount) || 0,
         currency: 'USD',
+        billing_cycle: billing_cycle === 'yearly' ? 'yearly' : 'monthly',
         period_start: period_start || null,
         period_end: period_end || null,
         status: status || 'paid',
+        // A hand-recorded payment marked as received is received: without
+        // paid_at the row showed as "Received" in the table while the invoice
+        // route refused it as unpaid, and the download button never appeared.
+        // These rows do not go through activate_paid_plan — the admin sets the
+        // dates themselves below — so paid_at has to be written here.
+        paid_at: paid ? new Date().toISOString() : null,
         method: method || 'manual',
         reference: reference || null,
         note: note || null,
@@ -452,7 +460,7 @@ router.post('/payments', async (req, res) => {
     if (error) throw error;
 
     // A payment recorded as received updates the organization's plan and expiry
-    if ((status || 'paid') === 'paid') {
+    if (paid) {
       const patch = { billing_status: 'paid' };
       if (plan_id) patch.plan_id = plan_id;
       if (period_end) patch.plan_expires_at = new Date(period_end).toISOString();
@@ -497,8 +505,37 @@ router.get('/payments/:id/invoice.pdf', async (req, res) => {
 router.patch('/payments/:id', async (req, res) => {
   try {
     const patch = {};
-    for (const f of ['status', 'note', 'reference', 'method']) if (req.body?.[f] !== undefined) patch[f] = req.body[f];
-    const { data, error } = await supabase.from('payments').update(patch).eq('id', req.params.id).select().single();
+    for (const f of ['note', 'reference', 'method'] ) if (req.body?.[f] !== undefined) patch[f] = req.body[f];
+
+    // Marking a row as received goes through activate_paid_plan rather than
+    // writing status and paid_at here.
+    //
+    // Writing paid_at by hand looked harmless and was not: paid_at is the one
+    // marker that means "this money has already bought time". Stamping it on a
+    // PENDING GATEWAY row — which is what the "Mark as received" button offers
+    // for every pending row, PayPal ones included — made the later webhook a
+    // no-op, so the customer paid and the plan was never extended, silently and
+    // with nothing left that could repair it. Going through the function means
+    // the row is only ever marked paid together with the time it bought, and a
+    // webhook that arrives afterwards correctly finds the work already done.
+    if (req.body?.status === 'paid') {
+      const { data: activated, error: rpcError } = await supabase.rpc('activate_paid_plan', { p_payment_id: req.params.id });
+      if (rpcError) throw rpcError;
+      await logEvent({
+        scope: 'billing', userId: req.user.id,
+        message: activated
+          ? `Marked payment ${req.params.id} as received and extended the plan`
+          : `Payment ${req.params.id} was already recorded as received`,
+      });
+    } else if (req.body?.status !== undefined) {
+      patch.status = req.body.status;
+    }
+
+    if (Object.keys(patch).length) {
+      const { error } = await supabase.from('payments').update(patch).eq('id', req.params.id);
+      if (error) throw error;
+    }
+    const { data, error } = await supabase.from('payments').select('*').eq('id', req.params.id).single();
     if (error) throw error;
     res.json(data);
   } catch (err) {

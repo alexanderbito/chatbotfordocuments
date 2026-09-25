@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient.js';
 import { requireAuth, requireOrgMember, requireOrgAdmin } from '../auth.js';
 import { logEvent } from '../logger.js';
 import { availableProviders, startCheckout, markPaid, findPayment, paypal } from '../payments/index.js';
+import { decoratePlan } from '../payments/cycles.js';
 import { buildInvoicePdf, invoiceFilename } from '../invoice.js';
 
 const router = express.Router({ mergeParams: true });
@@ -18,7 +19,7 @@ publicRouter.get('/plans', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('plans')
-      .select('id, code, name, description, price_usd, trial_days, ocr_enabled, max_documents, max_members, max_storage_mb, max_questions_per_month, max_ocr_pages_per_month')
+      .select('id, code, name, description, price_usd, price_usd_yearly, trial_days, ocr_enabled, max_documents, max_members, max_storage_mb, max_questions_per_month, max_ocr_pages_per_month')
       .eq('is_active', true)
       .order('sort_order');
     if (error) throw error;
@@ -26,7 +27,10 @@ publicRouter.get('/plans', async (req, res) => {
     res.json({
       currency: 'USD',
       providers: availableProviders(),
-      plans: (data || []).map((p) => ({ ...p, price: Number(p.price_usd) })),
+      // decoratePlan adds price_yearly, yearly_per_month and yearly_saving_pct
+      // so the pricing page never computes a discount of its own — the badge
+      // and the amount charged come from the same numbers.
+      plans: (data || []).map(decoratePlan),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -44,7 +48,7 @@ router.use(requireAuth, requireOrgMember, requireOrgAdmin);
  */
 router.post('/checkout', async (req, res) => {
   try {
-    const { plan_id, provider } = req.body || {};
+    const { plan_id, provider, billing_cycle } = req.body || {};
     if (!plan_id || !provider) return res.status(400).json({ error: 'Plan and payment method are required' });
 
     const { data: plan } = await supabase.from('plans').select('*').eq('id', plan_id).maybeSingle();
@@ -55,6 +59,7 @@ router.post('/checkout', async (req, res) => {
       org: req.org,
       plan,
       providerId: provider,
+      cycle: billing_cycle,
       req,
       userId: req.user.id,
     });
@@ -71,7 +76,7 @@ router.get('/payments/:paymentId', async (req, res) => {
   try {
     const { data: payment } = await supabase
       .from('payments')
-      .select('id, status, provider, provider_ref, amount, currency, order_code, paid_at, plan:plans(name)')
+      .select('id, status, provider, provider_ref, amount, currency, billing_cycle, order_code, paid_at, plan:plans(name)')
       .eq('id', req.params.paymentId)
       .eq('organization_id', req.org.id)
       .maybeSingle();

@@ -26,6 +26,14 @@
     <p class="pricing-cta" id="curNote"></p>
   </div>
 
+  <div class="cycle-switch" id="cycleSwitch" hidden>
+    <div class="cycle-toggle" role="group" aria-label="Billing cycle">
+      <button type="button" data-cycle="monthly" aria-pressed="true">Monthly</button>
+      <button type="button" data-cycle="yearly" aria-pressed="false">Yearly</button>
+    </div>
+    <span class="cycle-save" id="cycleSave"></span>
+  </div>
+
   <div id="plans" class="plan-grid"><div class="loading-line"></div></div>
 
   <p class="small muted mt-3" id="note" style="text-align:center"></p>
@@ -47,9 +55,20 @@ document.getElementById('sub').textContent = t('Every plan runs the same system 
 document.getElementById('curNote').textContent =
   'Start your 3-day free trial — no card required. Upgrade anytime to keep your documents.';
 document.getElementById('note').textContent =
-  'All prices in USD, billed monthly. Contact us for annual billing or custom limits.';
+  'All prices in USD. Yearly plans are paid once for twelve months; monthly plans renew each month. Cancel any time.';
 
 let data = null;
+let cycle = 'monthly';
+
+/**
+ * The yearly saving shown next to the switch is the largest saving any plan
+ * actually gives, read off the prices the server sent. Nothing here hardcodes
+ * a percentage: if an admin changes a price in /sysadmin.html, this number
+ * follows it instead of advertising a discount that is no longer offered.
+ */
+function bestSaving(plans) {
+  return plans.reduce((best, p) => Math.max(best, p.has_yearly ? p.yearly_saving_pct : 0), 0);
+}
 
 async function load() {
   const box = document.getElementById('plans');
@@ -58,9 +77,34 @@ async function load() {
     data = await api('/public/billing/plans');
   } catch (err) { box.innerHTML = `<div class="alert error show">${esc(err.message)}</div>`; return; }
 
+  const saving = bestSaving(data.plans);
+  const sw = document.getElementById('cycleSwitch');
+  if (saving > 0) {
+    sw.hidden = false;
+    document.getElementById('cycleSave').textContent = t('Save up to {n}% yearly', { n: saving });
+    sw.querySelectorAll('[data-cycle]').forEach((b) => {
+      b.textContent = t(b.dataset.cycle === 'yearly' ? 'Yearly' : 'Monthly');
+      b.onclick = () => { cycle = b.dataset.cycle; render(); };
+    });
+  }
+  render();
+}
+
+function render() {
+  const box = document.getElementById('plans');
+  document.querySelectorAll('#cycleSwitch [data-cycle]').forEach((b) => {
+    b.setAttribute('aria-pressed', String(b.dataset.cycle === cycle));
+  });
+
   box.innerHTML = data.plans.map((p, i) => {
     const featured = i === 1;
     const isTrial = Number(p.trial_days) > 0;
+    // A plan with no yearly price stays on its monthly price even on the
+    // yearly view, and says so — showing it as unavailable would read as a
+    // fault rather than as a plan that is simply sold by the month.
+    const yearly = cycle === 'yearly' && p.has_yearly;
+    const amount = yearly ? p.price_yearly : p.price;
+    const per = yearly ? t('/year') : t('/month');
     const feats = [
       `${fmt.num(p.max_documents)} ${t('documents')}`,
       `${fmt.num(p.max_members)} ${t('members')}`,
@@ -75,8 +119,14 @@ async function load() {
         ${featured ? `<span class="tag">${esc(t('Most popular'))}</span>` : ''}
         <h3>${esc(p.name)}</h3>
         <div class="blurb">${esc(p.description || '')}</div>
-        <div class="plan-price">${isTrial ? esc(t('Free')) : esc(money(p.price))}${isTrial ? '' : `<small> ${esc(t('/month'))}</small>`}</div>
+        <div class="plan-price">${isTrial ? esc(t('Free')) : esc(money(amount))}${isTrial ? '' : `<small> ${esc(per)}</small>`}</div>
         ${isTrial ? `<div class="small" style="color:var(--warn);font-weight:600">${esc(t('{n} days, then documents are deleted', { n: p.trial_days }))}</div>` : ''}
+        ${!isTrial && yearly
+          ? `<div class="price-note"><span class="price-was">${esc(money(p.price * 12))}</span> &middot; <b>${esc(t('save {n}%', { n: p.yearly_saving_pct }))}</b><br>${esc(t('works out at {amount}/month', { amount: money(p.yearly_per_month) }))}</div>`
+          : ''}
+        ${!isTrial && cycle === 'yearly' && !p.has_yearly
+          ? `<div class="price-note">${esc(t('This plan is billed monthly only.'))}</div>`
+          : ''}
         <ul class="plan-feats">${feats.map((f, idx) => { const off = idx === 3 && !p.ocr_enabled; return `<li class="${off ? 'off' : ''}">${off ? icon.close : icon.check}<span>${esc(f)}</span></li>`; }).join('')}</ul>
         <button class="btn ${featured ? 'primary' : ''} block" data-plan="${esc(p.id)}" ${isTrial ? 'data-trial="1"' : ''}>
           ${esc(isTrial ? t('Start free') : t('Choose plan'))}
@@ -95,6 +145,12 @@ async function choose(planId, isTrial) {
   if (!orgs.length) { toast(t('Only company admins can change the plan'), 'err'); return; }
 
   const plan = data.plans.find((p) => p.id === planId);
+  // The cycle is resolved here, once, and the same value decides the total
+  // shown and the value posted. Reading the toggle again inside onOk would
+  // let someone flip it while the modal is open and be charged one price
+  // after agreeing to another.
+  const buyCycle = cycle === 'yearly' && plan.has_yearly ? 'yearly' : 'monthly';
+  const total = buyCycle === 'yearly' ? plan.price_yearly : plan.price;
   const providers = data.providers || [];
   if (!providers.length) {
     toast(t('No payment gateway is enabled on the server. Contact the system administrator.'), 'err');
@@ -117,16 +173,19 @@ async function choose(planId, isTrial) {
           </label>`).join('')}
       </div>
       <div class="row between" style="padding-top:10px;border-top:1px solid var(--border)">
-        <b>${esc(t('Total'))}</b>
-        <b style="font-size:18px">${esc(money(plan.price))}</b>
+        <b>${esc(buyCycle === 'yearly' ? t('Total for 12 months') : t('Total for 1 month'))}</b>
+        <b style="font-size:18px">${esc(money(total))}</b>
       </div>
+      ${buyCycle === 'yearly'
+        ? `<p class="small mt-1 mb-0" style="color:var(--primary);font-weight:600">${esc(t('You save {amount} against paying monthly.', { amount: money(plan.yearly_saving) }))}</p>`
+        : ''}
       <p class="small muted mt-1 mb-0">${esc(t('Your plan activates as soon as the payment arrives.'))}</p>`,
     onOk: async (box) => {
       const orgId = box.querySelector('#pOrg')?.value || orgs[0].id;
       const provider = box.querySelector('input[name="prov"]:checked').value;
       const res = await api(`/orgs/${orgId}/billing/checkout`, {
         method: 'POST',
-        body: { plan_id: planId, provider },
+        body: { plan_id: planId, provider, billing_cycle: buyCycle },
       });
       location.href = res.checkout_url;
       return false;
