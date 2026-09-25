@@ -284,13 +284,13 @@ The product is two deployments from this one repository:
 | What | Where | Folder | Domain |
 |---|---|---|---|
 | The application | Render Web Service | repository root | `app.botclarify.com` |
-| The marketing site | Cloudflare Pages | `site/` | `botclarify.com`, `www.botclarify.com` |
+| The marketing site | Cloudflare Workers (static assets) | `site/` | `botclarify.com`, `www.botclarify.com` |
 
 They are split because the marketing site is plain files with no server behind it.
 As a static deployment it is free, it never sleeps, and a visitor landing on the home
 page does not wait for a sleeping application instance to wake up.
 
-The site is on Cloudflare Pages rather than a Render Static Site because the domain is
+The site is on Cloudflare rather than a Render Static Site because the domain is
 registered at Cloudflare. That makes the DNS record for a custom domain automatic and
 removes the apex-CNAME problem entirely — a Render static site would need Cloudflare's
 CNAME flattening to point the apex at it anyway, so this is the same infrastructure with
@@ -308,27 +308,39 @@ one fewer hop.
   Cloudflare DNS tab they must be **DNS only** (grey cloud) until Render has issued the
   certificate. Cloudflare SSL/TLS mode must be **Full**.
 
-### The marketing site — Cloudflare Pages
+### The marketing site — Cloudflare Workers
 
-Create a Pages project connected to this GitHub repository, with:
+The site is deployed as a Worker that serves static assets and nothing else.
+`wrangler.jsonc` at the repository root is what makes that work:
 
-| Setting | Value |
-|---|---|
-| Production branch | `main` |
-| Framework preset | None |
-| Build command | leave empty |
-| Build output directory | `/` |
-| Root directory | `site` |
+```jsonc
+{
+  "name": "chatbotfordocuments",
+  "compatibility_date": "2026-09-25",
+  "assets": {
+    "directory": "./site/",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  }
+}
+```
 
-Then add `botclarify.com` and `www.botclarify.com` under **Custom domains**. Because the
-zone is already on Cloudflare, the DNS records and the certificate are created
-automatically.
+There is no `main` key, so there is no Worker script — every request is answered
+directly from a file in `site/`. The `name` must match the Worker in the dashboard,
+or `wrangler deploy` silently creates a second one beside it.
 
-`site/_headers` is read by Pages at deploy time and sets the Content-Security-Policy,
-HSTS and the cache rules. It is configuration, not a served file. The contact form's
-script lives in `site/assets/contact.js` rather than inline in the page precisely so the
-policy can be `script-src 'self'` with no `unsafe-inline`; moving it back inline would
-silently break the form in production while working fine locally.
+Without this file, connecting the repository to Cloudflare deploys the repository
+root, which is the Express application. That cannot run on Workers, and what gets
+published instead is an empty Worker on a `workers.dev` address.
+
+`site/_headers` is read at deploy time and sets the Content-Security-Policy, HSTS
+and the cache rules. It is configuration, not a served file. The contact form's
+script lives in `site/assets/contact.js` rather than inline in the page precisely so
+the policy can be `script-src 'self'` with no `unsafe-inline`; moving it back inline
+would silently break the form in production while working fine locally.
+
+`workers_dev` should be set to `false` once the custom domain serves the site, so the
+same pages are not reachable at two addresses.
 
 ### Keeping the two halves pointed at each other
 

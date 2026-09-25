@@ -1,0 +1,38 @@
+// Cloudflare Workers configuration for the MARKETING SITE only.
+//
+// The application itself is a Node/Express server and runs on Render; it cannot
+// run on Workers. This file exists so that the Cloudflare project connected to
+// this repository serves the plain static files in site/ instead of trying to
+// deploy the application.
+//
+// "name" must match the Worker already created in the dashboard, otherwise
+// `wrangler deploy` creates a second one alongside it.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "chatbotfordocuments",
+  "compatibility_date": "2026-09-25",
+
+  "assets": {
+    // Everything under site/ is uploaded and served as-is. There is no Worker
+    // script: no "main" key, so requests are answered straight from these files.
+    "directory": "./site/",
+
+    // foo.html is served at /foo, and folder/index.html at /folder/ — which is
+    // what the internal links in the site already assume.
+    "html_handling": "auto-trailing-slash",
+
+    // An unknown path returns site/404.html with a real 404 status, rather than
+    // a bare Cloudflare error page.
+    "not_found_handling": "404-page"
+  },
+
+  // Keep the *.workers.dev address while the custom domain is being set up.
+  // Once botclarify.com serves the site, set this to false: leaving it on means
+  // the same pages are reachable at two addresses, which search engines treat
+  // as duplicate content.
+  "workers_dev": true,
+
+  // No public preview URL for every branch and pull request. This is a public
+  // marketing site, not something that needs per-branch previews.
+  "preview_urls": false
+}
