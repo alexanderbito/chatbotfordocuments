@@ -196,7 +196,7 @@ export const LABEL = {
   billing: { trial: 'Trial', paid: 'Paid', overdue: 'Overdue' },
   payment: { paid: 'Received', pending: 'Pending', failed: 'Failed', refunded: 'Refunded' },
   level: { info: 'Info', warn: 'Warning', error: 'Error' },
-  scope: { auth: 'Account', upload: 'Documents', chat: 'Chat', billing: 'Payments', system: 'System' },
+  scope: { auth: 'Account', upload: 'Documents', chat: 'Chat', billing: 'Payments', api: 'API', contact: 'Contact form', system: 'System' },
 };
 export const badge = (value, dict) => `<span class="badge ${esc(value)}">${esc(t(dict?.[value] || value || '—'))}</span>`;
 

@@ -652,3 +652,32 @@ label.pay-method { display: flex; gap: 10px; align-items: center; padding: 11px 
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px;
   padding: 12px 14px; font-size: 14px; line-height: 1.6; max-height: 340px; overflow-y: auto;
 }
+
+/* ---------------------------------------------------------------------
+   API keys
+--------------------------------------------------------------------- */
+.code-block {
+  background: var(--sidebar); color: #e6e9ef;
+  border-radius: 10px; padding: 14px 16px; margin: 10px 0 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+  line-height: 1.65; overflow-x: auto; white-space: pre;
+}
+
+/* The key is shown once, so it must be selectable and must not be truncated:
+   a value the admin cannot see in full is one they cannot copy by hand when
+   the clipboard is unavailable. */
+.key-reveal {
+  display: flex; gap: 10px; align-items: center;
+  background: var(--surface-2); border: 1px solid var(--border-strong);
+  border-radius: 9px; padding: 10px 12px;
+}
+.key-reveal code {
+  flex: 1; min-width: 0; background: none; border: 0; padding: 0;
+  font-size: 13px; overflow-wrap: anywhere; user-select: all;
+}
+
+.folder-picker {
+  max-height: 200px; overflow-y: auto; margin-top: 8px;
+  border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px;
+}
+.folder-picker .check { margin-bottom: 2px; }

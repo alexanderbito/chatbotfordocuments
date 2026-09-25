@@ -405,7 +405,7 @@ router.post('/plans', async (req, res) => {
     if (error) throw error;
     res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -415,7 +415,7 @@ router.patch('/plans/:id', async (req, res) => {
     if (error) throw error;
     res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -432,13 +432,23 @@ router.delete('/plans/:id', async (req, res) => {
 });
 
 function sanitizePlan(body = {}) {
+  // Enforced here as well as in the console and in the database: a plan with
+  // api_enabled and an allowance of 0 refuses every API call, which nobody
+  // intends, and the console check is only one of the ways a row gets written.
+  if (body.api_enabled && body.max_api_calls_per_month !== undefined
+      && !(Number(body.max_api_calls_per_month) > 0)) {
+    const err = new Error('A plan that includes the API needs an allowance above 0 calls a month.');
+    err.status = 400;
+    throw err;
+  }
   const out = {};
   const strs = ['code', 'name', 'description'];
-  const nums = ['price_usd', 'price_usd_yearly', 'max_documents', 'max_members', 'max_storage_mb', 'max_questions_per_month', 'max_ocr_pages_per_month', 'sort_order'];
+  const nums = ['price_usd', 'price_usd_yearly', 'max_api_calls_per_month', 'max_documents', 'max_members', 'max_storage_mb', 'max_questions_per_month', 'max_ocr_pages_per_month', 'sort_order'];
   for (const f of strs) if (body[f] !== undefined) out[f] = body[f];
   for (const f of nums) if (body[f] !== undefined) out[f] = Number(body[f]) || 0;
   if (body.is_active !== undefined) out.is_active = !!body.is_active;
   if (body.ocr_enabled !== undefined) out.ocr_enabled = !!body.ocr_enabled;
+  if (body.api_enabled !== undefined) out.api_enabled = !!body.api_enabled;
   if (body.trial_days !== undefined) out.trial_days = Number(body.trial_days) || 0;
   return out;
 }

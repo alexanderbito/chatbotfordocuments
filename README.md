@@ -102,6 +102,8 @@ In **Supabase Dashboard -> SQL Editor -> New query**, run these files in order:
 
 11. `migration_v11_contact_messages.sql` — **required**. Creates `contact_messages`, the table behind the contact form on botclarify.com and the **Messages** inbox in `/sysadmin.html`. Without it every message sent from the form fails. Row-level security is switched on with no policy at all, so the table is reachable only through the server's service-role key.
 
+12. `migration_v12_api.sql` — **required**. Creates `api_keys` and `api_usage`, and adds `plans.api_enabled` / `plans.max_api_calls_per_month`. Seeds the Business plan with 20,000 API calls a month. Both tables have row-level security on with no policy, so they are reachable only through the server's service-role key — a stolen copy of the database still lets nobody call the API, because only a SHA-256 hash of each key is stored.
+
 **Run them in that order.** Every file from v3 onwards starts with a precondition check and
 stops with a clear message if an earlier file has not been run.
 
@@ -451,6 +453,11 @@ months paid up front, seeded at 18% off. Setting a plan's yearly price to 0 take
 the yearly view and sells it by the month only. The saving shown to customers is computed
 from the two stored prices rather than from a percentage in the code, so editing a price
 changes the advertised discount with it.
+
+`api_enabled` and `max_api_calls_per_month` decide whether a plan may create API keys and
+how many calls it includes. They are separate on purpose: a quota of 0 could otherwise mean
+either "no API on this plan" or "API, but nothing left this month", and those need different
+answers to the customer — one says upgrade, the other says wait.
 
 ---
 

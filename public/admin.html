@@ -33,6 +33,7 @@ const TITLES = {
   members: ['Members', 'Invite colleagues and set who can use the chatbot.'],
   history: ['Chat history', 'Every question members asked and how the chatbot answered.'],
   billing: ['Plan & billing', 'Current usage and payment history.'],
+  api: ['API', 'Keys for reading your documents from your own systems.'],
   settings: ['Settings', 'Company profile and your account.'],
 };
 
@@ -51,6 +52,7 @@ function shell() {
         { view: 'history', icon: 'history', label: 'Chat history' },
         { group: 'Account' },
         { view: 'billing', icon: 'card', label: 'Plan & billing' },
+        { view: 'api', icon: 'key', label: 'API' },
         { view: 'settings', icon: 'settings', label: 'Settings' },
       ],
     })}
@@ -61,7 +63,7 @@ function shell() {
         <a class="btn" href="/chat.html">${icon.chat} Open chatbot</a>
       </div>
       <div class="page">
-        ${['overview', 'documents', 'members', 'history', 'billing', 'settings']
+        ${['overview', 'documents', 'members', 'history', 'billing', 'api', 'settings']
           .map((v) => `<section class="page-section" data-view="${v}" id="view-${v}"></section>`).join('')}
       </div>
     </div>`;
@@ -755,6 +757,240 @@ function startCheckout(billing, planId) {
   });
 }
 
+/* =================== API =================== */
+/**
+ * API keys for this organization.
+ *
+ * The one moment that matters here is creation: the key is shown once and can
+ * never be shown again, so the dialog that reveals it has to make that obvious
+ * before the admin closes it.
+ */
+async function viewApi() {
+  const el = document.getElementById('view-api');
+  el.innerHTML = '<div class="loading-line"></div>';
+
+  let d;
+  try {
+    d = await api(`/orgs/${orgId}/api-keys`);
+  } catch (err) {
+    el.innerHTML = `<div class="alert error show">${esc(err.message)}</div>`;
+    return;
+  }
+
+  if (!d.api_enabled) {
+    el.innerHTML = `
+      <div class="card"><div class="card-body">
+        ${emptyState('The API is not included in your plan',
+          'The API lets your own systems ask questions about these documents — a help desk, an intranet page, a scheduled report.')}
+        <div class="center"><a class="btn primary" href="/pricing.html">See which plans include it</a></div>
+      </div></div>
+      ${apiDocsCard()}`;
+    return;
+  }
+
+  const pct = d.calls_included > 0 ? Math.round((d.calls_this_month / d.calls_included) * 100) : 0;
+  const active = d.keys.filter((k) => !k.revoked_at);
+  const revoked = d.keys.filter((k) => k.revoked_at);
+
+  el.innerHTML = `
+    <div class="split" style="grid-template-columns:1fr 320px">
+      <div>
+        <div class="card">
+          <div class="card-head">
+            <h2>API keys</h2>
+            <span class="sub">${active.length} active</span>
+            <button class="btn primary" id="newKey">${icon.plus} Create key</button>
+          </div>
+          <div class="card-body flush">${
+            active.length
+              ? `<div class="table-wrap"><table class="tbl">
+                  <thead><tr><th>Name</th><th>Key</th><th>Reads</th><th class="num">Calls this month</th><th>Last used</th><th></th></tr></thead>
+                  <tbody>${active.map((k) => `<tr>
+                    <td><div class="cell-main">${esc(k.name)}</div><div class="cell-sub">created ${esc(fmt.date(k.created_at))}${
+                      k.expires_at ? ` · expires ${esc(fmt.date(k.expires_at))}` : ''}</div></td>
+                    <td class="mono small">${esc(k.key_prefix)}…</td>
+                    <td class="small">${k.folder_ids?.length
+                      ? `<span class="badge">${k.folder_ids.length} folder${k.folder_ids.length === 1 ? '' : 's'}</span>`
+                      : '<span class="muted">all folders</span>'}</td>
+                    <td class="num">${fmt.num(k.calls_this_month)}</td>
+                    <td class="small">${k.last_used_at ? esc(fmt.date(k.last_used_at)) : '<span class="muted">never</span>'}</td>
+                    <td style="width:1%"><button class="btn sm" data-revoke="${esc(k.id)}">Revoke</button></td>
+                  </tr>`).join('')}</tbody></table></div>`
+              : emptyState('No keys yet', 'Create one to call the API from your own systems.')
+          }</div>
+        </div>
+
+        ${revoked.length ? `
+        <div class="card">
+          <div class="card-head"><h3>Revoked</h3><span class="sub">kept so past usage still has a name against it</span></div>
+          <div class="card-body flush"><div class="table-wrap"><table class="tbl">
+            <thead><tr><th>Name</th><th>Key</th><th>Revoked</th></tr></thead>
+            <tbody>${revoked.map((k) => `<tr class="muted">
+              <td>${esc(k.name)}</td><td class="mono small">${esc(k.key_prefix)}…</td>
+              <td class="small">${esc(fmt.date(k.revoked_at))}</td></tr>`).join('')}</tbody>
+          </table></div></div>
+        </div>` : ''}
+
+        ${apiDocsCard()}
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="card-head"><h3>This month</h3></div>
+          <div class="card-body">
+            <div style="font-size:26px;font-weight:700">${fmt.num(d.calls_this_month)}</div>
+            <div class="muted small">of ${fmt.num(d.calls_included)} calls included</div>
+            ${meter(d.calls_this_month, d.calls_included)}
+            <p class="small muted mt-2 mb-0">The allowance resets on the 1st. Calls that fail because of a bad key or a malformed request are not counted.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Keep keys safe</h3></div>
+          <div class="card-body">
+            <p class="small mb-1">A key reads your documents. Treat it like a password:</p>
+            <ul class="small" style="padding-left:18px;margin:0;color:var(--text-2)">
+              <li>Keep it on your server, never in a web page or a mobile app.</li>
+              <li>Give each system its own key, so one can be revoked alone.</li>
+              <li>Scope a key to folders when it only needs a few.</li>
+              <li>Revoke immediately if a key may have leaked — it stops at once.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('newKey').onclick = () => createKeyDialog();
+  el.querySelectorAll('[data-revoke]').forEach((b) => {
+    b.onclick = async () => {
+      const k = d.keys.find((x) => x.id === b.dataset.revoke);
+      if (!(await confirmDialog('Revoke key',
+        `Revoke "${k.name}"? Anything still using it stops working immediately. This cannot be undone.`, 'Revoke'))) return;
+      try {
+        await api(`/orgs/${orgId}/api-keys/${k.id}`, { method: 'DELETE' });
+        toast('Key revoked', 'ok');
+        viewApi();
+      } catch (err) { toast(err.message, 'err'); }
+    };
+  });
+}
+
+function apiDocsCard() {
+  return `
+    <div class="card">
+      <div class="card-head"><h3>Getting started</h3></div>
+      <div class="card-body">
+        <p class="small">Ask a question from your own server:</p>
+        <pre class="code-block">curl https://app.botclarify.com/v1/chat \\
+  -H "Authorization: Bearer YOUR_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"question": "How much notice do I give for annual leave?"}'</pre>
+        <p class="small muted mb-0">Full reference, including folder scoping and error codes:
+          <a href="https://botclarify.com/api.html" target="_blank" rel="noopener">botclarify.com/api.html</a></p>
+      </div>
+    </div>`;
+}
+
+async function createKeyDialog() {
+  let folders = [];
+  try { folders = (await api(`/orgs/${orgId}/folders`)).folders || []; } catch { folders = []; }
+
+  modal({
+    title: 'Create an API key',
+    wide: true,
+    okText: 'Create key',
+    body: `
+      <div class="field">
+        <label>What is this key for?</label>
+        <input type="text" id="kname" placeholder="Intranet help page" maxlength="80" />
+        <div class="hint">A name you will recognise in six months, when you are deciding whether it is safe to revoke.</div>
+      </div>
+      <div class="field">
+        <label>Which folders may it read?</label>
+        <label class="check"><input type="radio" name="kscope" value="all" checked /> Every folder, including ones added later</label>
+        <label class="check"><input type="radio" name="kscope" value="some" ${folders.length ? '' : 'disabled'} /> Only the folders I choose</label>
+        ${folders.length ? `
+          <div id="kfolders" class="folder-picker hidden">
+            ${folders.map((f) => `<label class="check"><input type="checkbox" value="${esc(f.id)}" /> ${esc(f.name)}${
+              f.visibility === 'private' ? ' <span class="badge tiny">private</span>' : ''}</label>`).join('')}
+          </div>` : '<div class="hint">This organization has no folders yet.</div>'}
+      </div>
+      <div class="field">
+        <label>Expires after</label>
+        <select id="kexpiry">
+          <option value="">Never</option>
+          <option value="30">30 days</option>
+          <option value="90">90 days</option>
+          <option value="365">1 year</option>
+        </select>
+        <div class="hint">A key with an end date is one you cannot forget about.</div>
+      </div>`,
+    onOk: async (box) => {
+      const name = box.querySelector('#kname').value.trim();
+      if (!name) { toast('Give the key a name', 'err'); return false; }
+
+      const scoped = box.querySelector('input[name="kscope"]:checked').value === 'some';
+      const folderIds = scoped
+        ? [...box.querySelectorAll('#kfolders input:checked')].map((i) => i.value)
+        : [];
+      if (scoped && !folderIds.length) { toast('Choose at least one folder, or let the key read all of them', 'err'); return false; }
+
+      const created = await api(`/orgs/${orgId}/api-keys`, {
+        method: 'POST',
+        body: { name, folder_ids: folderIds, expires_in_days: box.querySelector('#kexpiry').value || null },
+      });
+      showKeyOnce(created);
+      viewApi();
+    },
+  });
+
+  // The folder list only appears once the admin has said they want to narrow
+  // the key, so the common case stays a single click.
+  document.querySelectorAll('input[name="kscope"]').forEach((r) => {
+    r.onchange = () => document.getElementById('kfolders')?.classList.toggle('hidden', r.value !== 'some' || !r.checked);
+  });
+}
+
+/**
+ * The key, shown once.
+ *
+ * Deliberately blunt about it: there is no way to recover this value, and an
+ * admin who closes the dialog assuming they can look it up later has to create
+ * a second key and revoke the first.
+ */
+function showKeyOnce(k) {
+  const box = modal({
+    title: 'Your new API key',
+    wide: true,
+    okText: 'I have copied it',
+    hideCancel: true,
+    body: `
+      <div class="alert warn show" style="background:var(--warn-soft);color:var(--warn)">
+        This is the only time this key is shown. We store a one-way hash of it, so nobody — including us — can recover it later.
+      </div>
+      <div class="field">
+        <label>${esc(k.name)}</label>
+        <div class="key-reveal"><code id="newKeyValue">${esc(k.key)}</code>
+          <button class="btn sm" id="copyKey">${icon.check} Copy</button></div>
+      </div>
+      <p class="small muted mb-0">Put it somewhere your server can read it — an environment variable, a secrets manager — and not in a file you commit.</p>`,
+  }).el;
+
+  box.querySelector('#copyKey').onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(k.key);
+      toast('Key copied', 'ok');
+    } catch {
+      // Clipboard access is refused in some browsers and over plain http.
+      // Selecting the text is the fallback that always works.
+      const range = document.createRange();
+      range.selectNodeContents(box.querySelector('#newKeyValue'));
+      const sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(range);
+      toast('Select and copy the key', 'err');
+    }
+  };
+}
+
 /* =================== SETTINGS =================== */
 async function viewSettings() {
   const el = document.getElementById('view-settings');
@@ -848,7 +1084,7 @@ async function viewSettings() {
 }
 
 /* =================== BOOTSTRAP =================== */
-const VIEWS = { overview: viewOverview, documents: viewDocuments, members: viewMembers, history: viewHistory, billing: viewBilling, settings: viewSettings };
+const VIEWS = { overview: viewOverview, documents: viewDocuments, members: viewMembers, history: viewHistory, billing: viewBilling, api: viewApi, settings: viewSettings };
 
 shell();
 document.getElementById('trialBar').innerHTML = trialBanner(trial);

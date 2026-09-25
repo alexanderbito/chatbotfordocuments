@@ -10,6 +10,7 @@ import documentsRouter from './documents.js';
 import membersRouter from './members.js';
 import chatRouter from './chat.js';
 import billingRouter from './billing.js';
+import apiKeysRouter from './apiKeys.js';
 
 const router = express.Router();
 
@@ -19,6 +20,7 @@ router.use('/:orgId/documents', documentsRouter);
 router.use('/:orgId/members', membersRouter);
 router.use('/:orgId/chat', chatRouter);
 router.use('/:orgId/billing', billingRouter);
+router.use('/:orgId/api-keys', apiKeysRouter);
 
 /** GET /orgs/:orgId — organization details plus the signed-in user's role */
 router.get('/:orgId', requireAuth, requireOrgMember, async (req, res) => {

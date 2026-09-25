@@ -277,7 +277,7 @@ async function viewPlans() {
 async function loadPlans() {
   cache.plans = await api('/admin/plans');
   document.getElementById('planTable').innerHTML = `<div class="table-wrap"><table class="tbl">
-    <thead><tr><th>Plan</th><th class="num">Price/month</th><th class="num">Price/year</th><th class="num">Documents</th><th class="num">Members</th><th class="num">Storage</th><th class="num">Questions/month</th><th class="num">OCR pages/month</th><th>OCR</th><th class="num">In use</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>Plan</th><th class="num">Price/month</th><th class="num">Price/year</th><th class="num">Documents</th><th class="num">Members</th><th class="num">Storage</th><th class="num">Questions/month</th><th class="num">OCR pages/month</th><th>OCR</th><th>API</th><th class="num">In use</th><th>Status</th><th></th></tr></thead>
     <tbody>${cache.plans.map((p) => `
       <tr>
         <td><div class="cell-main">${esc(p.name)}</div><div class="cell-sub mono">${esc(p.code)}</div></td>
@@ -291,6 +291,9 @@ async function loadPlans() {
         <td class="num">${fmt.num(p.max_questions_per_month)}</td>
         <td class="num">${fmt.num(p.max_ocr_pages_per_month || 0)}</td>
         <td>${p.ocr_enabled === false ? '<span class="badge">Off</span>' : '<span class="badge ok">On</span>'}</td>
+        <td>${p.api_enabled
+          ? `<span class="badge ok">${fmt.num(p.max_api_calls_per_month)}/mo</span>`
+          : '<span class="badge">Off</span>'}</td>
         <td class="num">${fmt.num(p.organization_count)}</td>
         <td>${p.is_active ? '<span class="badge ok">On sale</span>' : '<span class="badge">Retired</span>'}</td>
         <td class="nowrap" style="width:1%">
@@ -327,10 +330,12 @@ function planModal(p) {
         ${f('p_storage', 'Max storage (MB)', p?.max_storage_mb ?? 100, 'number')}
         ${f('p_questions', 'Questions per month', p?.max_questions_per_month ?? 500, 'number')}
         ${f('p_ocr', 'OCR pages per month', p?.max_ocr_pages_per_month ?? 50, 'number')}
+        ${f('p_api_calls', 'API calls per month', p?.max_api_calls_per_month ?? 0, 'number')}
       </div>
       <div class="field"><label>Description</label><textarea id="p_desc">${esc(p?.description || '')}</textarea></div>
       <label class="check"><input type="checkbox" id="p_active" ${p?.is_active !== false ? 'checked' : ''} /> On sale</label>
-      <label class="check"><input type="checkbox" id="p_ocr" ${p?.ocr_enabled !== false ? 'checked' : ''} /> Allow scanned-PDF OCR</label>`,
+      <label class="check"><input type="checkbox" id="p_ocr" ${p?.ocr_enabled !== false ? 'checked' : ''} /> Allow scanned-PDF OCR</label>
+      <label class="check"><input type="checkbox" id="p_api" ${p?.api_enabled ? 'checked' : ''} /> Include API access</label>`,
     onOk: async (box) => {
       const g = (id) => box.querySelector('#' + id).value;
       const body = {
@@ -341,6 +346,8 @@ function planModal(p) {
         max_documents: g('p_docs'), max_members: g('p_members'),
         max_storage_mb: g('p_storage'), max_questions_per_month: g('p_questions'),
         max_ocr_pages_per_month: g('p_ocr'),
+        max_api_calls_per_month: g('p_api_calls'),
+        api_enabled: box.querySelector('#p_api').checked,
         is_active: box.querySelector('#p_active').checked,
         ocr_enabled: box.querySelector('#p_ocr').checked,
       };
@@ -348,6 +355,10 @@ function planModal(p) {
       // A yearly price at or above twelve monthly payments is almost always a
       // typo, and it would go straight onto the public pricing page as a
       // "saving" of zero or less. Cheap to check here, expensive to explain later.
+      if (body.api_enabled && !(Number(body.max_api_calls_per_month) > 0)) {
+        toast('A plan that includes the API needs a call allowance above 0, or every API request is refused as out of quota.', 'err');
+        return false;
+      }
       if (Number(body.price_usd) > 0 && Number(body.price_usd_yearly) >= Number(body.price_usd) * 12) {
         toast(`A yearly price of $${Number(body.price_usd_yearly)} is not cheaper than 12 months at $${Number(body.price_usd)}. Set it lower, or 0 to sell this plan monthly only.`, 'err');
         return false;
@@ -741,7 +752,7 @@ async function viewLogs() {
   el.innerHTML = `
     <div class="toolbar">
       <select id="llevel" style="width:auto"><option value="">Any level</option><option value="info">Info</option><option value="warn">Warning</option><option value="error">Error</option></select>
-      <select id="lscope" style="width:auto"><option value="">Any area</option><option value="auth">Account</option><option value="upload">Documents</option><option value="chat">Chat</option><option value="billing">Payments</option><option value="system">System</option></select>
+      <select id="lscope" style="width:auto"><option value="">Any area</option><option value="auth">Account</option><option value="upload">Documents</option><option value="chat">Chat</option><option value="billing">Payments</option><option value="api">API</option><option value="contact">Contact form</option><option value="system">System</option></select>
       <span class="spacer"></span>
       <button class="btn" id="reloadLogs">${icon.refresh} Refresh</button>
     </div>

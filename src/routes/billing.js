@@ -19,7 +19,7 @@ publicRouter.get('/plans', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('plans')
-      .select('id, code, name, description, price_usd, price_usd_yearly, trial_days, ocr_enabled, max_documents, max_members, max_storage_mb, max_questions_per_month, max_ocr_pages_per_month')
+      .select('id, code, name, description, price_usd, price_usd_yearly, trial_days, ocr_enabled, api_enabled, max_api_calls_per_month, max_documents, max_members, max_storage_mb, max_questions_per_month, max_ocr_pages_per_month')
       .eq('is_active', true)
       .order('sort_order');
     if (error) throw error;

@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>API reference — BotClarify</title>
+<meta name="description" content="The BotClarify API: ask questions about your company documents from your own systems. Endpoints, authentication, folder scoping, quotas and error codes." />
+<link rel="canonical" href="https://botclarify.com/api.html" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://botclarify.com/api.html" />
+<meta property="og:title" content="API reference — BotClarify" />
+<meta property="og:description" content="Ask questions about your company documents from your own systems." />
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" href="/assets/brand/favicon-32.png" sizes="32x32" />
+<link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png" />
+<meta name="theme-color" content="#ff6320" />
+<link rel="stylesheet" href="/assets/site.css" />
+</head>
+<body>
+
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="/">
+      <img class="brand-mark" src="/assets/brand/mark.png" alt="BotClarify" />
+      <div class="brand-name">BotClarify</div>
+    </a>
+    <nav class="nav">
+      <a href="/#features">Features</a>
+      <a href="/#how">How it works</a>
+      <a href="/#pricing">Pricing</a>
+      <a href="/security.html">Security</a>
+      <a href="/api.html">API</a>
+      <a href="/contact.html">Contact</a>
+    </nav>
+    <button class="nav-toggle" aria-label="Open menu" aria-expanded="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+    <div class="head-cta">
+      <a class="btn ghost" href="https://app.botclarify.com/login.html">Sign in</a>
+      <a class="btn primary" href="https://app.botclarify.com/register.html">Start free trial</a>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+<article class="doc">
+
+<h1>API reference</h1>
+<p class="updated">Version 1 · Base URL <code>https://app.botclarify.com/v1</code></p>
+
+<p class="lead">
+  The API lets your own systems ask questions about your documents and get the same
+  answers, with the same sources, as the chatbot in the browser. It is read-only by
+  design: a key can ask and can list what it is allowed to ask about, and can do nothing
+  else.
+</p>
+
+<h2>Before you start</h2>
+<p>
+  The API is included in the <a href="/#pricing">Business</a> plan. Create a key in the
+  console under <strong>API</strong>, in the left-hand menu of your organisation admin
+  pages. The key is shown once, at the moment you create it, and never again — we store
+  only a one-way hash of it, so nobody can recover it for you afterwards. If you lose one,
+  revoke it and make another.
+</p>
+
+<div class="callout">
+  <strong>Keys belong on your server.</strong> A key can read your documents. Never put one
+  in a web page, a mobile app, or anything else a visitor can view the source of — the API
+  deliberately sends no CORS headers, so a browser refuses to use a key even if one leaks
+  into your front-end code. If you want a chat widget on a public site, call this API from
+  your own backend and let your page talk to that.
+</div>
+
+<h2>Authentication</h2>
+<p>Send the key as a bearer token:</p>
+<pre class="code-block">Authorization: Bearer bck_xxxxxxxxxxxxxxxxxxxx</pre>
+<p>
+  An <code>X-API-Key: bck_...</code> header is accepted too, for tools where a custom
+  header is easier than an Authorization one. A key is never read from the query string,
+  because URLs end up in server logs, proxy logs and <code>Referer</code> headers.
+</p>
+
+<h2>POST /v1/chat</h2>
+<p>Ask a question. This is the endpoint most integrations only ever need.</p>
+
+<pre class="code-block">curl https://app.botclarify.com/v1/chat \
+  -H "Authorization: Bearer $BOTCLARIFY_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "How much notice do I have to give before taking annual leave?"
+  }'</pre>
+
+<pre class="code-block">{
+  "answer": "Annual leave has to be requested at least five working days in advance, and anything longer than five consecutive days needs your line manager's approval in writing.",
+  "sources": [
+    { "document_id": "6f1c...", "filename": "Employee handbook 2026.pdf" }
+  ],
+  "usage": { "calls_this_month": 412, "calls_included": 20000, "calls_remaining": 19588 }
+}</pre>
+
+<table class="api-table">
+  <thead><tr><th>Field</th><th>Type</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td><code>question</code></td><td>string</td><td>Required. Up to 2,000 characters.</td></tr>
+    <tr><td><code>folder_ids</code></td><td>string[]</td><td>Optional. Search only these folders. They must be folders the key is already allowed to read — this narrows the search, it cannot widen it.</td></tr>
+  </tbody>
+</table>
+
+<p>
+  The answer is written in the language of the question. If nothing in the documents the
+  key can reach is relevant, <code>answer</code> says so plainly and <code>sources</code>
+  is empty — the model is not asked to fill the gap from its own knowledge.
+</p>
+
+<h2>GET /v1/folders</h2>
+<p>
+  The folders this key may ask about, so you can discover the ids to pass as
+  <code>folder_ids</code> rather than guessing them. <code>scoped</code> is
+  <code>true</code> when the key was restricted to particular folders.
+</p>
+<pre class="code-block">curl https://app.botclarify.com/v1/folders \
+  -H "Authorization: Bearer $BOTCLARIFY_KEY"</pre>
+
+<h2>GET /v1/documents</h2>
+<p>
+  Metadata for the documents the key can reach — id, filename, folder, status, size, date.
+  Never the file itself and never its text; the answer from <code>/v1/chat</code> is the
+  only way content leaves the system through this API.
+</p>
+<p>
+  Takes <code>folder_id</code>, <code>limit</code> (up to 200, default 50) and
+  <code>offset</code>.
+</p>
+
+<h2>GET /v1/me</h2>
+<p>
+  What this key is, which folders it is scoped to, and how much of the month's allowance is
+  left. The first thing to call when a key is not behaving the way you expected.
+</p>
+
+<h2>Folder scope</h2>
+<p>
+  A key can be restricted to particular folders when you create it. This is what makes a
+  key safe to put behind a public-facing help page: it reads the handbook and cannot reach
+  the contracts, even if somebody later adds a contracts folder, because a scoped key
+  names its folders explicitly rather than inheriting whatever exists.
+</p>
+<p>
+  A scoped key also stops seeing documents that are filed in no folder at all. If you want
+  those included, either file them or leave the key unscoped.
+</p>
+
+<h2>Quota and rate headers</h2>
+<p>
+  Calls are counted per calendar month across the whole organisation and reset on the 1st.
+  Every response carries the state:
+</p>
+<pre class="code-block">X-RateLimit-Limit: 20000
+X-RateLimit-Remaining: 19588
+X-RateLimit-Reset: 2026-10-01T00:00:00.000Z</pre>
+<p>
+  Requests rejected for a bad key or a malformed body are <strong>not</strong> counted —
+  debugging your integration does not spend the month's allowance. Once the allowance is
+  gone, calls answer <code>429</code> until the 1st.
+</p>
+
+<h2>Errors</h2>
+<p>
+  Every error has the same shape, with a stable <code>code</code> to branch on. The
+  <code>message</code> is for a human reading a log and may be reworded; the code will not
+  change.
+</p>
+<pre class="code-block">{ "error": { "code": "quota_exceeded", "message": "This organization has used all 20,000 API calls included this month. The allowance resets on the 1st." } }</pre>
+
+<table class="api-table">
+  <thead><tr><th>Status</th><th>Code</th><th>What happened</th></tr></thead>
+  <tbody>
+    <tr><td>400</td><td><code>missing_question</code></td><td>No <code>question</code> field.</td></tr>
+    <tr><td>400</td><td><code>question_too_long</code></td><td>Over 2,000 characters.</td></tr>
+    <tr><td>401</td><td><code>missing_key</code></td><td>No key was sent.</td></tr>
+    <tr><td>401</td><td><code>invalid_key</code></td><td>The key is unknown or has been revoked. These are deliberately the same answer.</td></tr>
+    <tr><td>401</td><td><code>expired_key</code></td><td>The key was created with an end date that has passed.</td></tr>
+    <tr><td>402</td><td><code>subscription_inactive</code></td><td>The organisation's plan has lapsed.</td></tr>
+    <tr><td>403</td><td><code>api_not_in_plan</code></td><td>The plan does not include API access.</td></tr>
+    <tr><td>403</td><td><code>folder_not_allowed</code></td><td>A folder was requested that this key cannot read. The <code>denied</code> field lists which.</td></tr>
+    <tr><td>403</td><td><code>no_folders_in_scope</code></td><td>Every folder this key was scoped to has been deleted.</td></tr>
+    <tr><td>403</td><td><code>organization_suspended</code></td><td>The organisation is suspended.</td></tr>
+    <tr><td>404</td><td><code>unknown_endpoint</code></td><td>No such endpoint under <code>/v1</code>.</td></tr>
+    <tr><td>413</td><td><code>payload_too_large</code></td><td>The request body is bigger than we accept.</td></tr>
+    <tr><td>400</td><td><code>malformed_request</code></td><td>The body could not be read as JSON.</td></tr>
+    <tr><td>429</td><td><code>quota_exceeded</code></td><td>The month's allowance is spent.</td></tr>
+    <tr><td>500</td><td><code>internal_error</code></td><td>Something failed on our side. Safe to retry.</td></tr>
+  </tbody>
+</table>
+
+<h2>A worked example</h2>
+<p>A help-desk page that answers from the handbook folder only:</p>
+<pre class="code-block">// Your server. The key never reaches the browser.
+const res = await fetch('https://app.botclarify.com/v1/chat', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${process.env.BOTCLARIFY_KEY}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({ question: userQuestion }),
+});
+
+if (res.status === 429) {
+  return reply('Our document assistant has reached its limit for this month.');
+}
+if (!res.ok) {
+  const { error } = await res.json();
+  console.error('botclarify', error.code, error.message);
+  return reply('Sorry — I could not check the documents just now.');
+}
+
+const { answer, sources } = await res.json();
+return reply(answer, sources.map((s) => s.filename));</pre>
+
+<h2>Versioning</h2>
+<p>
+  The version is in the path. Anything that would break an existing integration — a field
+  removed, a field's meaning changed, an error code retired — arrives as
+  <code>/v2</code>, not as a change to this one. New optional fields may be added to
+  responses within <code>/v1</code>, so parse leniently and ignore what you do not
+  recognise.
+</p>
+
+<h2>Questions</h2>
+<p>
+  Write to <a href="mailto:support@botclarify.com">support@botclarify.com</a> or use the
+  <a href="/contact.html">contact form</a>. If something in this page is wrong or missing,
+  that is worth telling us too.
+</p>
+
+</article>
+</div>
+
+
+<footer class="site-foot">
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <a class="brand" href="/">
+          <img class="brand-mark" src="/assets/brand/mark-light.png" alt="BotClarify" />
+          <div class="brand-name">BotClarify</div>
+        </a>
+        <p class="foot-about">A chatbot that answers from your company's own documents, and tells you which one it read.</p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul>
+          <li><a href="/#features">Features</a></li>
+          <li><a href="/#how">How it works</a></li>
+          <li><a href="/#pricing">Pricing</a></li>
+          <li><a href="https://app.botclarify.com/login.html">Sign in</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul>
+          <li><a href="/contact.html">Contact</a></li>
+          <li><a href="/security.html">Security</a></li>
+          <li><a href="/api.html">API</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul>
+          <li><a href="/terms.html">Terms of Service</a></li>
+          <li><a href="/privacy.html">Privacy Policy</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>&copy; <span data-year>2026</span> BotClarify. All rights reserved.</span>
+      <span>botclarify.com</span>
+    </div>
+  </div>
+</footer>
+
+<script src="/assets/site.js"></script>
+</body>
+</html>

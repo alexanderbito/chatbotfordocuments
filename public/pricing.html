@@ -113,7 +113,16 @@ function render() {
         ? `${fmt.num(p.max_ocr_pages_per_month)} ${t('scanned-PDF OCR pages')}`
         : t('No scanned-PDF OCR'),
       `${fmt.num(p.max_storage_mb)} MB ${t('storage')}`,
+      p.api_enabled
+        ? `${t('API access')} — ${fmt.num(p.max_api_calls_per_month)} ${t('calls/month')}`
+        : t('No API access'),
     ];
+    // Which rows are "not included" is now a property of the row, not its
+    // position: hardcoding the index broke the moment a second optional
+    // feature was added below it.
+    const offIdx = new Set();
+    if (!p.ocr_enabled) offIdx.add(3);
+    if (!p.api_enabled) offIdx.add(feats.length - 1);
     return `
       <div class="plan-card ${featured ? 'featured' : ''}">
         ${featured ? `<span class="tag">${esc(t('Most popular'))}</span>` : ''}
@@ -127,7 +136,7 @@ function render() {
         ${!isTrial && cycle === 'yearly' && !p.has_yearly
           ? `<div class="price-note">${esc(t('This plan is billed monthly only.'))}</div>`
           : ''}
-        <ul class="plan-feats">${feats.map((f, idx) => { const off = idx === 3 && !p.ocr_enabled; return `<li class="${off ? 'off' : ''}">${off ? icon.close : icon.check}<span>${esc(f)}</span></li>`; }).join('')}</ul>
+        <ul class="plan-feats">${feats.map((f, idx) => { const off = offIdx.has(idx); return `<li class="${off ? 'off' : ''}">${off ? icon.close : icon.check}<span>${esc(f)}</span></li>`; }).join('')}</ul>
         <button class="btn ${featured ? 'primary' : ''} block" data-plan="${esc(p.id)}" ${isTrial ? 'data-trial="1"' : ''}>
           ${esc(isTrial ? t('Start free') : t('Choose plan'))}
         </button>
