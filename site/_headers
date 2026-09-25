@@ -1,0 +1,35 @@
+# Cloudflare Pages reads this file at deploy time. It is not served.
+# Rules apply top to bottom; a more specific path can add to a broader one.
+
+/*
+  # No script may run except the two files served from this site. The contact
+  # form's script was moved out of contact.html into /assets/contact.js
+  # specifically so this line does not need 'unsafe-inline'.
+  #
+  # style-src does allow 'unsafe-inline' because the pages use style="..."
+  # attributes for a handful of one-off layout tweaks. That is a far smaller
+  # risk than inline script, and removing it would mean a class for every
+  # single adjustment.
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; upgrade-insecure-requests
+  # Stops a browser from second-guessing a declared Content-Type, which is how
+  # an uploaded file ends up being executed as script.
+  X-Content-Type-Options: nosniff
+  # Send the full URL to ourselves, only the origin to anyone else.
+  Referrer-Policy: strict-origin-when-cross-origin
+  # Nothing here needs any of these, so refuse them all.
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()
+  # Belt and braces with frame-ancestors above, for older browsers.
+  X-Frame-Options: DENY
+  # Two years, and eligible for the browser preload list.
+  Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+
+# The stylesheet and scripts are versionless, so they cannot be cached
+# forever — a deploy has to be visible. An hour at the edge with
+# stale-while-revalidate keeps it fast without making a fix wait.
+/assets/*
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
+
+# HTML is always revalidated: the price list and the legal pages must never be
+# served from a stale cache after they change.
+/*.html
+  Cache-Control: public, max-age=0, must-revalidate

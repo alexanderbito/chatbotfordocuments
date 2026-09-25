@@ -281,16 +281,22 @@ Grant the role only to people who genuinely need it.
 
 The product is two deployments from this one repository:
 
-| What | Render service type | Folder | Domain |
+| What | Where | Folder | Domain |
 |---|---|---|---|
-| The application | Web Service | repository root | `app.botclarify.com` |
-| The marketing site | Static Site | `site/` | `botclarify.com` and `www.botclarify.com` |
+| The application | Render Web Service | repository root | `app.botclarify.com` |
+| The marketing site | Cloudflare Pages | `site/` | `botclarify.com`, `www.botclarify.com` |
 
-They are split because the marketing site is plain files with no server behind it. As a static
-site it is free, it never sleeps, and a visitor who lands on the home page does not have to
-wait for a sleeping application instance to wake up.
+They are split because the marketing site is plain files with no server behind it.
+As a static deployment it is free, it never sleeps, and a visitor landing on the home
+page does not wait for a sleeping application instance to wake up.
 
-### The application — Web Service
+The site is on Cloudflare Pages rather than a Render Static Site because the domain is
+registered at Cloudflare. That makes the DNS record for a custom domain automatic and
+removes the apex-CNAME problem entirely — a Render static site would need Cloudflare's
+CNAME flattening to point the apex at it anyway, so this is the same infrastructure with
+one fewer hop.
+
+### The application — Render Web Service
 
 - Build command: `npm install`
 - Start command: `npm start`
@@ -298,47 +304,50 @@ wait for a sleeping application instance to wake up.
   `APP_BASE_URL` and `PAYPAL_ENV` — those three are the ones most often forgotten.
 - `APP_BASE_URL` must be `https://app.botclarify.com`, not the apex domain. It builds the
   return link after a payment and is what PayPal signs its webhooks against.
-- Custom domain: `app.botclarify.com`.
+- Custom domain: `app.botclarify.com`. Render prints the CNAME records to add; in the
+  Cloudflare DNS tab they must be **DNS only** (grey cloud) until Render has issued the
+  certificate. Cloudflare SSL/TLS mode must be **Full**.
 
-### The marketing site — Static Site
+### The marketing site — Cloudflare Pages
 
-- Root directory: `site`
-- Build command: leave empty (there is nothing to build)
-- Publish directory: `.`
-- Custom domains: `botclarify.com` and `www.botclarify.com`.
+Create a Pages project connected to this GitHub repository, with:
+
+| Setting | Value |
+|---|---|
+| Production branch | `main` |
+| Framework preset | None |
+| Build command | leave empty |
+| Build output directory | `/` |
+| Root directory | `site` |
+
+Then add `botclarify.com` and `www.botclarify.com` under **Custom domains**. Because the
+zone is already on Cloudflare, the DNS records and the certificate are created
+automatically.
+
+`site/_headers` is read by Pages at deploy time and sets the Content-Security-Policy,
+HSTS and the cache rules. It is configuration, not a served file. The contact form's
+script lives in `site/assets/contact.js` rather than inline in the page precisely so the
+policy can be `script-src 'self'` with no `unsafe-inline`; moving it back inline would
+silently break the form in production while working fine locally.
+
+### Keeping the two halves pointed at each other
 
 Every call-to-action on the marketing site points at `https://app.botclarify.com/register.html`
-or `/login.html`. Those links are written out in full in `site/index.html`; the application
-points back with the `SITE_URL` constant at the top of `public/assets/app.js`. Changing either
+or `/login.html`, written out in full in `site/index.html`. The application points back
+through the `SITE_URL` constant at the top of `public/assets/app.js`. Changing either
 domain means editing those two places.
-
-### DNS
-
-All four records are CNAMEs. Render's Custom Domains page shows the exact targets, including
-the two verification records; the shape is:
-
-| Type | Name | Points at |
-|---|---|---|
-| CNAME | `@` | the static site's `onrender.com` address |
-| CNAME | `www` | the static site's `onrender.com` address |
-| CNAME | `app` | the web service's `onrender.com` address |
-
-Render does not publish a fixed IP for a service, so the apex record has to be a CNAME. That
-is not valid in plain DNS, so the domain needs a provider that flattens it — Cloudflare's free
-tier does, and Render documents that combination. Set Cloudflare's proxy to **DNS only** until
-the certificates are issued, and SSL/TLS mode to **Full**.
 
 ### After changing a domain
 
-Three things have to be updated by hand, and a payment silently fails if any of them is missed:
+Three things have to be updated by hand, and a payment silently fails if any is missed:
 
-1. `APP_BASE_URL` on the web service.
+1. `APP_BASE_URL` on the Render web service.
 2. The webhook URL in the PayPal dashboard — `https://app.botclarify.com/webhooks/paypal`.
-   PayPal signs against the address, so a stale one makes every webhook fail signature checks.
+   PayPal signs against the address, so a stale one makes every webhook fail its signature check.
 3. The external cron job that calls `POST /cron/purge-trials`.
 
-The System health page checks `APP_BASE_URL` against the address you are actually browsing and
-warns when they differ, which catches the first of those three.
+The System health page checks `APP_BASE_URL` against the address you are actually browsing
+and warns when they differ, which catches the first of those three.
 
 Run the migrations on Supabase **before** opening the interface for the first time, or every
 page will fail with a missing-table error.
