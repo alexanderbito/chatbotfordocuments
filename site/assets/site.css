@@ -341,3 +341,22 @@ section.tint { background: var(--bg-soft); border-top: 1px solid var(--border); 
    reads as a normal price list instead of an empty box. */
 .plans[data-cycle="monthly"] .on-yearly,
 .plans[data-cycle="yearly"] .on-monthly { display: none; }
+
+/* ---------------------------------------------------------------------
+   Contact form
+--------------------------------------------------------------------- */
+
+/* The honeypot. Not display:none and not type="hidden": a bot reads both and
+   skips the field, which is the opposite of what it is for. This keeps the
+   input in the page and in the form data while putting it where no sighted
+   person can reach it, and aria-hidden plus tabindex="-1" in the markup keep
+   it away from screen readers and from the Tab key. */
+.hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+
+.form-note {
+  border-radius: 10px; padding: 12px 14px; margin: 0 0 18px;
+  font-size: 14px; line-height: 1.5; border: 1px solid transparent;
+}
+.form-note.ok { background: var(--success-soft); color: var(--success); border-color: rgba(6,122,78,.2); }
+.form-note.err { background: #fdeceb; color: #c02626; border-color: rgba(192,38,38,.2); }
+.field input[aria-invalid="true"], .field textarea[aria-invalid="true"] { border-color: #c02626; }

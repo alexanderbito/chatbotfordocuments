@@ -26,6 +26,7 @@ const TITLES = {
   plans: ['Plans', 'Define the limits and price of each plan.'],
   payments: ['Payments', 'Record transactions and extend customer plans.'],
   users: ['Users', 'Every account on the platform.'],
+  messages: ['Messages', 'Enquiries sent from the contact form on botclarify.com.'],
   logs: ['Activity log', 'Events and errors raised while the system runs.'],
   health: ['System health', 'Check connectivity to every upstream service.'],
 };
@@ -42,6 +43,7 @@ function shell() {
         { view: 'plans', icon: 'card', label: 'Plans' },
         { view: 'payments', icon: 'chart', label: 'Payments' },
         { group: 'Operations' },
+        { view: 'messages', icon: 'inbox', label: 'Messages' },
         { view: 'users', icon: 'users', label: 'Users' },
         { view: 'logs', icon: 'history', label: 'Activity log' },
         { view: 'health', icon: 'pulse', label: 'System health' },
@@ -61,6 +63,28 @@ function shell() {
   // puts the hamburger into the topbar and wires the drawer.
   mountMobileNav();
   document.getElementById('logoutBtn').onclick = logout;
+  refreshUnread();
+}
+
+/**
+ * Unread badge on the Messages item.
+ *
+ * Read from the server rather than counted from whatever list happens to be on
+ * screen: the badge has to be right on the Dashboard too, where no message
+ * list has been loaded at all.
+ */
+async function refreshUnread() {
+  const item = document.querySelector('.nav-item[data-view="messages"]');
+  if (!item) return;
+  let n = 0;
+  try { n = (await api('/admin/contact/unread')).unread || 0; } catch { return; }
+  item.querySelector('.count')?.remove();
+  if (n > 0) {
+    const b = document.createElement('span');
+    b.className = 'count';
+    b.textContent = n > 99 ? '99+' : String(n);
+    item.appendChild(b);
+  }
 }
 
 /* =================== DASHBOARD =================== */
@@ -84,7 +108,8 @@ async function viewOverview() {
       ${stat('Documents', fmt.num(t.documents), 'file', `${fmt.num(t.chunks)} chunks · ${t.failed_documents} failed`)}
       ${stat('Questions', fmt.num(t.questions), 'chat')}
       ${stat('Size', fmt.mb(t.storage_mb), 'db')}
-      ${stat('Revenue this month', fmt.money(d.revenue.this_month), 'card', `${fmt.money(d.revenue.total)} all time`)}
+      ${stat('Cash this month', fmt.money(d.revenue.this_month), 'card', `${fmt.money(d.revenue.total)} all time`)}
+      ${stat('Recurring / month', fmt.money(d.revenue.mrr || 0), 'chart', 'yearly plans spread over 12 months')}
       ${stat('OCR pages this month', fmt.num(d.ocr?.pages_this_month || 0), 'scan', `${fmt.num(d.ocr?.documents || 0)} scanned documents · ${fmt.num(d.ocr?.pages_total || 0)} pages all time`)}
     </div>
 
@@ -188,7 +213,8 @@ async function orgDetail(id) {
         <div class="stat"><div class="label">OCR pages this month</div><div class="value" style="font-size:20px">${fmt.num(u.ocr_pages_this_month)} <small>/ ${fmt.num(L.max_ocr_pages_per_month)}</small></div></div>
       </div>
       <div class="form-grid">
-        <div class="field"><label>Plan</label><div>${esc(o.plan?.name || '—')} · ${esc(fmt.money(o.plan?.price_usd || 0))}/month</div></div>
+        <div class="field"><label>Plan</label><div>${esc(o.plan?.name || '—')} · ${esc(fmt.money(o.plan?.price_usd || 0))}/month${
+          Number(o.plan?.price_usd_yearly) > 0 ? ` &middot; ${esc(fmt.money(o.plan.price_usd_yearly))}/year` : ''}</div></div>
         <div class="field"><label>Valid until</label><div>${esc(o.plan_expires_at ? fmt.date(o.plan_expires_at) : 'unlimited')}</div></div>
         <div class="field"><label>Contact email</label><div>${esc(o.contact_email || '—')}</div></div>
         <div class="field"><label>Tax code</label><div>${esc(o.tax_code || '—')}</div></div>
@@ -205,7 +231,7 @@ async function orgDetail(id) {
 }
 
 function orgEdit(o) {
-  const planOpts = cache.plans.map((p) => `<option value="${esc(p.id)}" ${o.plan_id === p.id ? 'selected' : ''}>${esc(p.name)} — ${fmt.money(p.price_usd)}/month</option>`).join('');
+  const planOpts = cache.plans.map((p) => `<option value="${esc(p.id)}" ${o.plan_id === p.id ? 'selected' : ''}>${esc(p.name)} — ${fmt.money(p.price_usd)}/month${Number(p.price_usd_yearly) > 0 ? ` or ${fmt.money(p.price_usd_yearly)}/year` : ''}</option>`).join('');
   modal({
     title: `Edit organization: ${o.name}`, wide: true,
     body: `
@@ -455,6 +481,151 @@ function paymentModal() {
   document.getElementById('y_start').onchange = sync;
 }
 
+/* =================== MESSAGES =================== */
+/**
+ * The inbox for the contact form on botclarify.com.
+ *
+ * Everything shown here was typed by a stranger, so every field goes through
+ * esc() before it reaches the page — including the message body, which is the
+ * one field where line breaks are kept and so is the one most tempting to
+ * insert as HTML.
+ */
+let msgFilter = 'new';
+
+async function viewMessages() {
+  const el = document.getElementById('view-messages');
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-head">
+        <h3>Contact form</h3>
+        <span class="sub">Sent from the form on botclarify.com</span>
+        <select id="mstatus" style="width:auto">
+          <option value="new">Unread</option>
+          <option value="all">All</option>
+          <option value="read">Read</option>
+          <option value="archived">Archived</option>
+          <option value="spam">Spam</option>
+        </select>
+      </div>
+      <div class="card-body flush" id="msgList"><div class="loading-line"></div></div>
+    </div>`;
+  const sel = document.getElementById('mstatus');
+  sel.value = msgFilter;
+  sel.onchange = () => { msgFilter = sel.value; loadMessages(); };
+  await loadMessages();
+}
+
+async function loadMessages() {
+  const box = document.getElementById('msgList');
+  box.innerHTML = '<div class="loading-line"></div>';
+  const d = await api(`/admin/contact?status=${encodeURIComponent(msgFilter)}`);
+
+  if (!d.items.length) {
+    box.innerHTML = emptyState(
+      msgFilter === 'new' ? 'No unread messages' : 'Nothing here',
+      msgFilter === 'new' ? 'Anything sent from the contact form arrives here.' : 'Try another filter.'
+    );
+    return refreshUnread();
+  }
+
+  box.innerHTML = `<div class="table-wrap"><table class="tbl">
+    <thead><tr><th>Received</th><th>From</th><th>Message</th><th>Status</th><th></th></tr></thead>
+    <tbody>${d.items.map((m) => `
+      <tr${m.status === 'new' ? ' style="font-weight:550"' : ''}>
+        <td class="small nowrap">${esc(fmt.date(m.created_at))}</td>
+        <td>
+          <div class="cell-main">${esc(m.name)}</div>
+          <div class="cell-sub">${esc(m.email)}${m.company ? ' · ' + esc(m.company) : ''}</div>
+        </td>
+        <td class="small" style="max-width:420px">${esc(preview(m.message))}</td>
+        <td>${statusBadge(m.status)}</td>
+        <td class="nowrap" style="width:1%">
+          <button class="btn sm" data-open="${esc(m.id)}">Open</button>
+        </td>
+      </tr>`).join('')}</tbody></table></div>`;
+
+  box.querySelectorAll('[data-open]').forEach((b) => {
+    b.onclick = () => openMessage(d.items.find((m) => m.id === b.dataset.open));
+  });
+  refreshUnread();
+}
+
+/** One line of the message for the list, with the newlines flattened. */
+function preview(text) {
+  const flat = String(text || '').replace(/\s+/g, ' ').trim();
+  return flat.length > 110 ? flat.slice(0, 110) + '…' : flat;
+}
+
+function statusBadge(status) {
+  if (status === 'new') return '<span class="badge warn">Unread</span>';
+  if (status === 'read') return '<span class="badge ok">Read</span>';
+  if (status === 'spam') return '<span class="badge danger">Spam</span>';
+  return '<span class="badge">Archived</span>';
+}
+
+function openMessage(m) {
+  if (!m) return;
+
+  // Opening a message is what marks it read. Doing it here rather than on a
+  // separate button means the badge count matches what has actually been
+  // looked at, which is the only thing that makes the badge worth having.
+  if (m.status === 'new') setMessageStatus(m.id, 'read', { quiet: true });
+
+  const reply = `mailto:${encodeURIComponent(m.email)}`
+    + `?subject=${encodeURIComponent('Re: your message to BotClarify')}`
+    + `&body=${encodeURIComponent(`\n\n---\nOn ${fmt.date(m.created_at)} you wrote:\n${m.message}`)}`;
+
+  const box = modal({
+    title: `Message from ${m.name}`,
+    wide: true,
+    okText: 'Close',
+    hideCancel: true,
+    body: `
+      <div class="form-grid">
+        <div class="field"><label>Name</label><div>${esc(m.name)}</div></div>
+        <div class="field"><label>Email</label><div><a href="mailto:${esc(m.email)}">${esc(m.email)}</a></div></div>
+        <div class="field"><label>Company</label><div>${esc(m.company || '—')}</div></div>
+        <div class="field"><label>Received</label><div>${esc(fmt.date(m.created_at))}</div></div>
+      </div>
+      <div class="field">
+        <label>Message</label>
+        <div class="msg-body">${esc(m.message)}</div>
+      </div>
+      <div class="btn-row">
+        <a class="btn primary" href="${reply}">${icon.send} Reply by email</a>
+        <button class="btn" data-set="archived">Archive</button>
+        <button class="btn" data-set="spam">Mark as spam</button>
+        <button class="btn danger" data-del="1">${icon.trash} Delete</button>
+      </div>`,
+  }).el;
+
+  box.querySelectorAll('[data-set]').forEach((b) => {
+    b.onclick = async () => {
+      await setMessageStatus(m.id, b.dataset.set);
+      box.querySelector('[data-x]')?.click();
+    };
+  });
+  box.querySelector('[data-del]').onclick = async () => {
+    if (!(await confirmDialog('Delete message', `Delete the message from ${m.name}? This cannot be undone.`))) return;
+    try {
+      await api(`/admin/contact/${m.id}`, { method: 'DELETE' });
+      toast('Message deleted', 'ok');
+      box.querySelector('[data-x]')?.click();
+      loadMessages();
+    } catch (err) { toast(err.message, 'err'); }
+  };
+}
+
+async function setMessageStatus(id, status, { quiet = false } = {}) {
+  try {
+    await api(`/admin/contact/${id}`, { method: 'PATCH', body: { status } });
+    if (!quiet) toast('Message updated', 'ok');
+    await loadMessages();
+  } catch (err) {
+    if (!quiet) toast(err.message, 'err');
+  }
+}
+
 /* =================== USERS =================== */
 async function viewUsers() {
   const el = document.getElementById('view-users');
@@ -702,7 +873,7 @@ async function viewHealth() {
 }
 
 /* =================== BOOTSTRAP =================== */
-const VIEWS = { overview: viewOverview, orgs: viewOrgs, plans: viewPlans, payments: viewPayments, users: viewUsers, logs: viewLogs, health: viewHealth };
+const VIEWS = { overview: viewOverview, orgs: viewOrgs, plans: viewPlans, payments: viewPayments, messages: viewMessages, users: viewUsers, logs: viewLogs, health: viewHealth };
 
 shell();
 router(async (view) => {

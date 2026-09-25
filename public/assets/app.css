@@ -643,3 +643,12 @@ label.pay-method { display: flex; gap: 10px; align-items: center; padding: 11px 
 .price-was { color: var(--muted); font-weight: 500; font-size: 15px; text-decoration: line-through; }
 .price-note { color: var(--muted); font-size: 13px; line-height: 1.5; margin-top: 4px; }
 .price-note b { color: var(--primary); font-weight: 650; }
+
+/* A message somebody typed into the contact form. pre-wrap keeps the line
+   breaks they meant; break-word stops a pasted URL from widening the dialog
+   past the screen. */
+.msg-body {
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px;
+  padding: 12px 14px; font-size: 14px; line-height: 1.6; max-height: 340px; overflow-y: auto;
+}

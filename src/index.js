@@ -7,7 +7,9 @@ import authRouter from './routes/auth.js';
 import organizationsRouter from './routes/organizations.js';
 import adminRouter from './routes/admin.js';
 import { publicRouter as billingPublicRouter, webhookRouter } from './routes/billing.js';
+import contactRouter, { publicRouter as contactPublicRouter } from './routes/contact.js';
 import { purgeExpiredTrials } from './trials.js';
+import { supabase } from './supabaseClient.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -29,6 +31,9 @@ app.use('/auth', authRouter);
 app.use('/orgs', organizationsRouter);
 app.use('/admin', adminRouter);
 app.use('/public/billing', billingPublicRouter);
+// The marketing site is a different origin, so this router handles its own CORS.
+app.use('/public/contact', contactPublicRouter);
+app.use('/admin/contact', contactRouter);
 
 app.get('/healthz', (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
@@ -45,7 +50,19 @@ app.post('/cron/purge-trials', async (req, res) => {
 
   try {
     const result = await purgeExpiredTrials();
-    res.json(result);
+    // Contact housekeeping rides along: it clears the IP addresses kept for
+    // rate limiting once they are 30 days old, and drops messages marked as
+    // spam. A failure here must not fail the trial purge, which is the part
+    // that deletes customer data on a promise.
+    // supabase-js resolves with { data, error } rather than rejecting, so the
+    // error has to be read: wrapping this in try/catch alone left a
+    // permanently failing cleanup reporting null for ever, with nothing said.
+    const { data: contactData, error: contactError } = await supabase.rpc('cleanup_contact_messages');
+    if (contactError) console.error('contact cleanup failed:', contactError.message);
+    const contact = contactError
+      ? { error: contactError.message }
+      : (Array.isArray(contactData) ? contactData[0] : contactData);
+    res.json({ ...result, contact });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -53,7 +70,7 @@ app.post('/cron/purge-trials', async (req, res) => {
 
 // 404 for API routes; everything else falls through to the static site
 app.use((req, res) => {
-  if (req.path.startsWith('/auth') || req.path.startsWith('/orgs') || req.path.startsWith('/admin') || req.path.startsWith('/webhooks') || req.path.startsWith('/cron')) {
+  if (req.path.startsWith('/auth') || req.path.startsWith('/orgs') || req.path.startsWith('/admin') || req.path.startsWith('/webhooks') || req.path.startsWith('/cron') || req.path.startsWith('/public/')) {
     return res.status(404).json({ error: 'Endpoint not found' });
   }
   res.status(404).sendFile(path.join(__dirname, '..', 'public', '404.html'), (err) => {

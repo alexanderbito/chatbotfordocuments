@@ -249,7 +249,7 @@ export function toast(message, type = '') {
 }
 
 /* ---------- Dialogs ---------- */
-export function modal({ title, body, okText = 'Save', cancelText = 'Cancel', wide = false, danger = false, onOk }) {
+export function modal({ title, body, okText = 'Save', cancelText = 'Cancel', wide = false, danger = false, hideCancel = false, onOk }) {
   const back = document.createElement('div');
   back.className = 'modal-backdrop open';
   back.innerHTML = `
@@ -257,7 +257,7 @@ export function modal({ title, body, okText = 'Save', cancelText = 'Cancel', wid
       <div class="modal-head"><h3>${esc(title)}</h3><button class="icon-btn" data-x>${icon.close}</button></div>
       <div class="modal-body">${body}</div>
       <div class="modal-foot">
-        <button class="btn" data-x>${esc(cancelText)}</button>
+        ${hideCancel ? '' : `<button class="btn" data-x>${esc(cancelText)}</button>`}
         <button class="btn ${danger ? 'danger' : 'primary'}" data-ok>${esc(okText)}</button>
       </div>
     </div>`;

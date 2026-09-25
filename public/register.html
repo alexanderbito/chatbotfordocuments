@@ -71,7 +71,9 @@
     document.getElementById('plans').innerHTML = d.plans.map((p) => `
       <div class="auth-feature">
         <div class="ico">${p.price === 0 ? '0' : '$'}</div>
-        <div><b>${esc(p.name)} — ${p.price === 0 ? t('Free') : esc(money(p.price)) + t('/month')}</b>
+        <div><b>${esc(p.name)} — ${p.price === 0
+          ? t('Free')
+          : esc(money(p.price)) + t('/month') + (p.has_yearly ? ` ${t('or')} ${esc(money(p.price_yearly))}${t('/year')}` : '')}</b>
         <span>${fmt.num(p.max_documents)} ${t('documents')} · ${fmt.num(p.max_members)} ${t('members')} · ${fmt.num(p.max_questions_per_month)} ${t('questions/month')}</span></div>
       </div>`).join('');
   }).catch(() => {});

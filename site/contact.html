@@ -79,9 +79,10 @@
   <div class="form-card">
     <h3 style="margin-top:0;margin-bottom:6px">Send a message</h3>
     <p class="muted" style="font-size:14px;margin:0 0 22px">
-      This opens your email program with the message ready to send.
+      We read every message and reply by email, usually within one working day.
     </p>
-    <form id="contactForm">
+    <div class="form-note" id="cnote" role="status" aria-live="polite" hidden></div>
+    <form id="contactForm" novalidate>
       <div class="field">
         <label for="cname">Your name</label>
         <input type="text" id="cname" required placeholder="Jane Smith" />
@@ -108,9 +109,18 @@
         <label for="cmsg">Message</label>
         <textarea id="cmsg" required placeholder="Tell us what you are trying to solve, and roughly how many people would use it."></textarea>
       </div>
-      <button class="btn primary" type="submit" style="width:100%">Open in my email program</button>
+      <!-- A field no person sees. Anything typed into it came from a program
+           that fills every input it finds, and the server drops that message.
+           Hidden with CSS rather than type="hidden", because a bot reads the
+           type attribute; tabindex and autocomplete keep it out of the way of
+           anyone using a keyboard or a password manager. -->
+      <div class="hp" aria-hidden="true">
+        <label for="cwebsite">Website</label>
+        <input type="text" id="cwebsite" name="website" tabindex="-1" autocomplete="off" />
+      </div>
+      <button class="btn primary" type="submit" style="width:100%" id="csend">Send message</button>
       <p class="hint" style="margin-top:12px">
-        Prefer to write it yourself? <a href="mailto:hello@botclarify.com">hello@botclarify.com</a>
+        Prefer your own email program? <a href="mailto:hello@botclarify.com">hello@botclarify.com</a>
       </p>
     </form>
   </div>
@@ -125,7 +135,7 @@
   </details>
   <details>
     <summary>Do you offer annual billing or an invoice?</summary>
-    <p>Not through the self-service checkout yet, but write to us and we will arrange it.</p>
+    <p>Yes to both. Choose <strong>Yearly</strong> on the <a href="/#pricing">pricing page</a> and you pay once for twelve months and keep 18%. Every payment produces a PDF invoice you can download from <strong>Plan &amp; billing</strong> in your console, with your company name and address on it — set those in <strong>Settings</strong> first if your finance team needs them.</p>
   </details>
   <details>
     <summary>We need more than the Business plan allows.</summary>

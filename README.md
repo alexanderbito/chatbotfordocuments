@@ -100,6 +100,8 @@ In **Supabase Dashboard -> SQL Editor -> New query**, run these files in order:
 9. `migration_v9_invoices.sql` — **required**. Adds the customer's billing name and address, plus the invoice numbering the PDF download uses.
 10. `migration_v10_yearly_billing.sql` — **required**. Adds annual billing: a yearly price per plan (seeded at 18% off twelve months) and the billing cycle on each payment. Skipping it leaves `plans.price_usd_yearly` missing, and because the pricing endpoint asks for that column by name, the public pricing page answers with an error instead of a price list.
 
+11. `migration_v11_contact_messages.sql` — **required**. Creates `contact_messages`, the table behind the contact form on botclarify.com and the **Messages** inbox in `/sysadmin.html`. Without it every message sent from the form fails. Row-level security is switched on with no policy at all, so the table is reachable only through the server's service-role key.
+
 **Run them in that order.** Every file from v3 onwards starts with a precondition check and
 stops with a clear message if an earlier file has not been run.
 
@@ -441,8 +443,14 @@ The backend enforces quotas at the API level, not merely in the interface:
 - OCR on a scanned PDF: checks the OCR pages left this month (section 11).
 
 Three plans are seeded by the migrations — `free` (the 3-day trial), `pro` (Professional,
-$19) and `business` (Business, $79) — and every limit and price is editable in
-`/sysadmin.html` -> **Plan & billing**.
+$19/month or $187/year) and `business` (Business, $79/month or $777/year) — and every
+limit and price is editable in `/sysadmin.html` -> **Plans**.
+
+Each paid plan has two prices: `price_usd` for one month and `price_usd_yearly` for twelve
+months paid up front, seeded at 18% off. Setting a plan's yearly price to 0 takes it off
+the yearly view and sells it by the month only. The saving shown to customers is computed
+from the two stored prices rather than from a percentage in the code, so editing a price
+changes the advertised discount with it.
 
 ---
 

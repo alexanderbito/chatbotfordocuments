@@ -10,7 +10,10 @@
   # attributes for a handful of one-off layout tweaks. That is a far smaller
   # risk than inline script, and removing it would mean a class for every
   # single adjustment.
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; upgrade-insecure-requests
+  # connect-src names the application's origin because the contact form posts
+  # there; default-src 'self' would block that fetch and the form would fail
+  # with nothing in the interface to explain it.
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://app.botclarify.com; form-action 'none'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; upgrade-insecure-requests
   # Stops a browser from second-guessing a declared Content-Type, which is how
   # an uploaded file ends up being executed as script.
   X-Content-Type-Options: nosniff

@@ -66,15 +66,52 @@ router.get('/overview', async (req, res) => {
       .filter((p) => (p.created_at || '').slice(0, 7) === monthKey)
       .reduce((s, p) => s + Number(p.amount || 0), 0);
 
-    // Breakdown by plan
-    const { data: orgPlans } = await supabase.from('organizations').select('status, plan:plans(code, name)');
+    // Breakdown by plan, and normalised recurring revenue.
+    //
+    // "Revenue this month" is cash collected, and once annual plans exist that
+    // number jumps around: one customer paying $777 in March makes March look
+    // like a record month and April like a collapse. MRR spreads each
+    // subscription over the period it actually covers, so the two answer
+    // different questions and both are shown.
+    const { data: orgPlans } = await supabase
+      .from('organizations')
+      .select('id, status, billing_status, plan_expires_at, plan:plans(code, name, price_usd, price_usd_yearly)');
+
+    // The cycle a customer is on is whatever their most recent received
+    // payment says — that row is the only record of what was actually sold.
+    const { data: cycleRows } = await supabase
+      .from('payments')
+      .select('organization_id, billing_cycle, paid_at')
+      .eq('status', 'paid')
+      .not('paid_at', 'is', null)
+      .order('paid_at', { ascending: false })
+      // PostgREST caps a request at 1000 rows unless asked otherwise. Without
+      // this an organization whose latest payment fell outside the newest 1000
+      // quietly counted as monthly, overstating its contribution by about a
+      // fifth — a wrong number that looks entirely plausible.
+      .limit(20000);
+    const cycleByOrg = {};
+    for (const r of cycleRows || []) {
+      if (!(r.organization_id in cycleByOrg)) cycleByOrg[r.organization_id] = r.billing_cycle || 'monthly';
+    }
+
     const byPlan = {};
     let suspended = 0;
+    let mrr = 0;
     for (const o of orgPlans || []) {
       const name = o.plan?.name || 'No plan assigned';
       byPlan[name] = (byPlan[name] || 0) + 1;
       if (o.status === 'suspended') suspended++;
+
+      const live = o.billing_status === 'paid'
+        && o.status !== 'suspended'
+        && (!o.plan_expires_at || new Date(o.plan_expires_at) > now);
+      if (!live) continue;
+      const yearly = cycleByOrg[o.id] === 'yearly';
+      const amount = yearly ? Number(o.plan?.price_usd_yearly || 0) / 12 : Number(o.plan?.price_usd || 0);
+      mrr += amount;
     }
+    mrr = Math.round(mrr * 100) / 100;
 
     // OCR statistics
     const { data: ocrRows } = await supabase.from('documents').select('ocr_pages, extraction_method, created_at');
@@ -101,7 +138,7 @@ router.get('/overview', async (req, res) => {
         suspended_organizations: suspended,
         storage_mb: Math.round((storageBytes / (1024 * 1024)) * 100) / 100,
       },
-      revenue: { total: revenueTotal, this_month: revenueMonth },
+      revenue: { total: revenueTotal, this_month: revenueMonth, mrr },
       by_plan: byPlan,
       series,
     });

@@ -9,7 +9,7 @@ const TYPES = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
 function fileServer(root, api) {
   return (req, res) => {
     const p = new URL(req.url, 'http://x').pathname;
-    if (api) { const handled = api(p, res); if (handled) return; }
+    if (api) { const handled = api(p, res, req); if (handled) return; }
     const f = path.join(root, p === '/' ? 'index.html' : p.replace(/^\//, ''));
     fs.readFile(f, (e, d) => {
       if (e) { res.writeHead(404); return res.end('nf'); }
@@ -39,9 +39,34 @@ const PLANS = [
   { id:'p2', code:'pro', name:'Professional', description:'For a growing team.', price_usd:19, price_usd_yearly:187, trial_days:0, ocr_enabled:true, max_documents:500, max_members:30, max_storage_mb:5000, max_questions_per_month:10000, max_ocr_pages_per_month:2000 },
   { id:'p3', code:'business', name:'Business', description:'For a whole company.', price_usd:79, price_usd_yearly:777, trial_days:0, ocr_enabled:true, max_documents:10000, max_members:300, max_storage_mb:50000, max_questions_per_month:100000, max_ocr_pages_per_month:20000 },
 ].map(deco);
+const MSGS = [
+  { id:'c1', name:'Jane Smith', email:'jane@acme.com', company:'Acme Inc.', status:'new',
+    created_at:'2026-09-24T09:12:00Z', read_at:null,
+    message:'We have about 400 policy documents in SharePoint and nobody can find anything.\n\nCould we see a demo next week?' },
+  { id:'c2', name:'<img src=x onerror=alert(1)>', email:'"><script>alert(2)</script>@evil.example', company:'<b>bold</b>',
+    status:'new', created_at:'2026-09-24T08:02:00Z', read_at:null,
+    message:'<script>alert(3)</script> and some <b>markup</b> in the body too.' },
+  { id:'c3', name:'Tom Reed', email:'tom@globex.com', company:null, status:'read',
+    created_at:'2026-09-20T14:30:00Z', read_at:'2026-09-20T15:00:00Z',
+    message:'What happens to our documents if we cancel?' },
+];
 const J = (res, d) => { res.writeHead(200, { 'Content-Type':'application/json' }); res.end(JSON.stringify(d)); return true; };
 
-http.createServer(fileServer(APP_DIR, (p, res) => {
+http.createServer(fileServer(APP_DIR, (p, res, req) => {
+  // PATCH on a message really changes it, so the unread badge can be tested
+  // end to end rather than assumed.
+  const m = /^\/admin\/contact\/([^/]+)$/.exec(p);
+  if (m && req?.method === 'PATCH') {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      const row = MSGS.find((x) => x.id === m[1]);
+      if (row) Object.assign(row, JSON.parse(body || '{}'));
+      J(res, row || {});
+    });
+    return true;
+  }
+
   if (p === '/auth/me') return J(res, {
     user: { id:'u1', email:'admin@company.com', full_name:'Alex Morgan', is_system_admin:true },
     organizations: [{ id:'o1', name:'Acme Inc.', role:'admin', billing_status:'paid', plan:PLANS[1], trial:{ isTrial:false } }],
@@ -54,6 +79,8 @@ http.createServer(fileServer(APP_DIR, (p, res) => {
     payments: [{ id:'x1', created_at:'2026-09-01T00:00:00Z', period_start:'2026-09-01', period_end:'2027-09-01', amount:187, currency:'USD', billing_cycle:'yearly', method:'paypal', status:'paid', paid_at:'2026-09-01T00:00:00Z' }],
     available_plans: PLANS, providers:[{ id:'paypal', name:'PayPal / Credit or debit card', description:'Pay' }],
   });
+  if (p === '/admin/contact/unread') return J(res, { unread: MSGS.filter((m) => m.status === 'new').length });
+  if (p === '/admin/contact') return J(res, { items: MSGS, unread: MSGS.filter((m) => m.status === 'new').length });
   if (p.startsWith('/orgs/') || p.startsWith('/admin/')) return J(res, { items:[], total:0, folders:[], members:[], documents:[], checks:[], organizations:[], users:[], admins:[], env_emails:[], env_pending:[] });
   return false;
 })).listen(4601, () => console.log('site 4600, app 4601'));
