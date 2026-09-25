@@ -15,7 +15,7 @@
 <div class="shell" id="shell"></div>
 
 <script type="module">
-import {api, Session, requireSession, buildSidebar, logout, icon, esc, fmt, toast, emptyState, t, trialBanner} from '/assets/app.js';
+import {api, Session, requireSession, buildSidebar, logout, icon, esc, fmt, toast, emptyState, t, trialBanner, mountMobileNav} from '/assets/app.js';
 
 const me = await requireSession();
 if (!me.organizations.length) {
@@ -84,6 +84,9 @@ function render() {
 
   document.getElementById('trialBar').innerHTML = trialBanner(trial);
 
+  // The shell is in the DOM by now, which is what mountMobileNav needs: it
+  // puts the hamburger into the topbar and wires the drawer.
+  mountMobileNav();
   document.getElementById('logoutBtn').onclick = logout;
   document.getElementById('orgSwitch').onchange = (e) => { Session.orgId = e.target.value; location.reload(); };
 

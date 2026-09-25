@@ -223,6 +223,7 @@ export const icon = {
   upload: I('<path d="M12 19V7"/><path d="M7 11l5-5 5 5"/><path d="M4 20h16"/>'),
   edit: I('<path d="M4 20h4l10-10a2.8 2.8 0 1 0-4-4L4 16z"/>'),
   close: I('<path d="M6 6l12 12M18 6L6 18"/>'),
+  menu: I('<path d="M4 7h16M4 12h16M4 17h16"/>'),
   check: I('<path d="M5 13l4 4L19 7"/>'),
   alert: I('<path d="M12 8v5M12 17h.01"/><circle cx="12" cy="12" r="9"/>'),
   info: I('<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>'),
@@ -321,10 +322,11 @@ export function buildSidebar({ brandSub, items, user, orgs, currentOrgId, onOrgC
     .join('');
 
   return `
-    <aside class="sidebar">
+    <aside class="sidebar" id="appSidebar">
       <div class="brand">
         <img class="brand-mark" src="/assets/brand/mark-light.png" alt="BotClarify" />
         <div><div class="brand-name">BotClarify</div><div class="brand-sub">${esc(brandSub)}</div></div>
+        <button class="drawer-close" type="button" aria-label="Close menu">${icon.close}</button>
       </div>
       ${orgBlock}
       <nav class="nav">${nav}</nav>
@@ -385,3 +387,105 @@ export function trialBanner(trial, { upgradeHref = '/pricing.html' } = {}) {
 
 export const emptyState = (text, sub = '') =>
   `<div class="empty">${icon.inbox}<b>${esc(text)}</b>${sub ? `<div>${esc(sub)}</div>` : ''}</div>`;
+
+/* ---------- Mobile navigation drawer ---------- */
+/**
+ * Turn the sidebar into a hamburger drawer on small screens.
+ *
+ * Call once per page, after the shell has been written into the DOM. The
+ * toggle is inserted into the existing .topbar rather than into each page's
+ * markup, so the three consoles stay in step with one another.
+ *
+ * Everything here is behaviour only: the drawer, the scrim and the toggle are
+ * all hidden above the breakpoint by CSS alone, so a wide screen is unaffected
+ * whether or not this ever runs.
+ */
+export function mountMobileNav() {
+  const sidebar = document.getElementById('appSidebar');
+  const topbar = document.querySelector('.topbar');
+  const main = document.querySelector('.main');
+  if (!sidebar || !topbar || document.querySelector('.nav-toggle')) return;
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'nav-toggle';
+  toggle.setAttribute('aria-label', 'Menu');
+  toggle.setAttribute('aria-controls', 'appSidebar');
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.innerHTML = icon.menu;
+  topbar.prepend(toggle);
+
+  const scrim = document.createElement('div');
+  scrim.className = 'nav-scrim';
+  document.body.appendChild(scrim);
+
+  // Matches the breakpoint in app.css. Held as a media query rather than read
+  // from window.innerWidth so the two cannot drift apart silently, and so
+  // turning a phone sideways is handled without a resize listener.
+  const small = window.matchMedia('(max-width: 1000px)');
+
+  /**
+   * Everything the open drawer covers, EXCEPT the hamburger.
+   *
+   * The obvious move is to mark .main inert, and it is wrong: the hamburger
+   * lives inside .main's topbar, and inert makes a whole subtree unclickable.
+   * The button could open the drawer and then never close it. So the siblings
+   * are listed instead — the topbar's other children, the rest of .main, and
+   * the trial banner, which sits outside .shell entirely and would otherwise
+   * stay reachable by Tab from behind the scrim.
+   */
+  const covered = () => [
+    ...(main ? [...main.children].filter((el) => el !== topbar) : []),
+    ...[...topbar.children].filter((el) => el !== toggle),
+    document.getElementById('trialBar'),
+  ].filter(Boolean);
+
+  function setOpen(open) {
+    sidebar.classList.toggle('open', open);
+    scrim.classList.toggle('open', open);
+    document.body.classList.toggle('nav-open', open);
+    toggle.setAttribute('aria-expanded', String(open));
+
+    // The scrim stops the mouse but not the keyboard: without this, Tab walks
+    // through a page the person cannot see, and a screen reader reads it out.
+    for (const el of covered()) {
+      if (open) el.setAttribute('inert', '');
+      else el.removeAttribute('inert');
+    }
+
+    // A closed drawer is off-canvas, not hidden — transform takes nothing out
+    // of the tab order. Left alone, tabbing on a phone walked through the
+    // organization switcher, every menu item and Sign out, all off-screen with
+    // no visible focus ring.
+    syncClosedDrawer(open);
+
+    if (open) sidebar.querySelector('.drawer-close')?.focus({ preventScroll: true });
+    else toggle.focus({ preventScroll: true });
+  }
+
+  function syncClosedDrawer(open) {
+    if (small.matches && !open) sidebar.setAttribute('inert', '');
+    else sidebar.removeAttribute('inert');
+  }
+
+  const close = () => { if (sidebar.classList.contains('open')) setOpen(false); };
+
+  toggle.addEventListener('click', () => setOpen(!sidebar.classList.contains('open')));
+  scrim.addEventListener('click', close);
+  sidebar.querySelector('.drawer-close')?.addEventListener('click', close);
+
+  // Choosing a destination closes the drawer: on a phone the page behind it is
+  // the thing being navigated to, so leaving the drawer open would make every
+  // menu choice need a second, dismissing tap.
+  sidebar.addEventListener('click', (e) => { if (e.target.closest('.nav-item')) close(); });
+
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+
+  // Crossing the breakpoint either way. Growing past it puts the sidebar back
+  // into the layout, so the body must not stay scroll-locked and the page must
+  // not stay inert on a desktop that no longer has a drawer to close; shrinking
+  // below it means the now-off-canvas drawer has to leave the tab order.
+  small.addEventListener('change', () => { close(); syncClosedDrawer(false); });
+
+  syncClosedDrawer(false);
+}

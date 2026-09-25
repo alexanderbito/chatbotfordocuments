@@ -14,7 +14,7 @@
 <div class="shell" id="shell"></div>
 
 <script type="module">
-import {api, requireSession, buildSidebar, logout, icon, esc, fmt, money, toast, modal, confirmDialog, emptyState, badge, LABEL, renderBars, debounce, router, downloadFile} from '/assets/app.js';
+import {api, requireSession, buildSidebar, logout, icon, esc, fmt, money, toast, modal, confirmDialog, emptyState, badge, LABEL, renderBars, debounce, router, downloadFile, mountMobileNav} from '/assets/app.js';
 
 const me = await requireSession({ systemAdmin: true });
 let cache = { plans: [], orgs: [] };
@@ -57,6 +57,9 @@ function shell() {
         ${Object.keys(TITLES).map((v) => `<section class="page-section" data-view="${v}" id="view-${v}"></section>`).join('')}
       </div>
     </div>`;
+  // The shell is in the DOM by now, which is what mountMobileNav needs: it
+  // puts the hamburger into the topbar and wires the drawer.
+  mountMobileNav();
   document.getElementById('logoutBtn').onclick = logout;
 }
 
