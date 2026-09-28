@@ -514,6 +514,14 @@ router.post('/payments', async (req, res) => {
       await supabase.from('organizations').update(patch).eq('id', organization_id);
     }
 
+    // Money received is money received: a customer who pays by bank transfer
+    // earns their referrer exactly what a card payment does. The function does
+    // nothing when there is no referral, so calling it unconditionally is safe.
+    if (paid) {
+      const { error: commissionError } = await supabase.rpc('record_commission', { p_payment_id: data.id });
+      if (commissionError) console.error('[billing] could not record a commission:', commissionError.message);
+    }
+
     await logEvent({ scope: 'billing', organizationId: organization_id, userId: req.user.id, message: `Recorded a payment of $${Number(amount || 0).toLocaleString('en-US')}` });
     res.json(data);
   } catch (err) {
@@ -568,6 +576,10 @@ router.patch('/payments/:id', async (req, res) => {
     if (req.body?.status === 'paid') {
       const { data: activated, error: rpcError } = await supabase.rpc('activate_paid_plan', { p_payment_id: req.params.id });
       if (rpcError) throw rpcError;
+      // Same reason as above: marking a payment received is the moment the
+      // commission is earned, whichever way the money arrived.
+      const { error: commissionError } = await supabase.rpc('record_commission', { p_payment_id: req.params.id });
+      if (commissionError) console.error('[billing] could not record a commission:', commissionError.message);
       await logEvent({
         scope: 'billing', userId: req.user.id,
         message: activated

@@ -28,7 +28,7 @@ process behind a small in-memory queue (`src/queue.js`).
 2. Text is extracted in `src/textExtract.js` — `pdf-parse` for PDF, `mammoth` for `.docx`,
    plain UTF-8 for `.txt`. Any other MIME type is rejected.
 3. If a PDF yields almost no text it is treated as a scan and handed to the OCR path in
-   `src/ocr.js`, which sends page batches to Gemini (section 11).
+   `src/ocr.js`, which sends page batches to Gemini (section 12).
 4. The text is split into overlapping chunks (`src/chunk.js`, 1000 characters with 150 of
    overlap) and embedded with Voyage AI `voyage-4-lite`, 1024 dimensions (`src/embed.js`).
 5. Chunks and vectors land in the `document_chunks` table, which is indexed with pgvector.
@@ -103,6 +103,15 @@ In **Supabase Dashboard -> SQL Editor -> New query**, run these files in order:
 11. `migration_v11_contact_messages.sql` — **required**. Creates `contact_messages`, the table behind the contact form on botclarify.com and the **Messages** inbox in `/sysadmin.html`. Without it every message sent from the form fails. Row-level security is switched on with no policy at all, so the table is reachable only through the server's service-role key.
 
 12. `migration_v12_api.sql` — **required**. Creates `api_keys` and `api_usage`, and adds `plans.api_enabled` / `plans.max_api_calls_per_month`. Seeds the Business plan with 20,000 API calls a month. Both tables have row-level security on with no policy, so they are reachable only through the server's service-role key — a stolen copy of the database still lets nobody call the API, because only a SHA-256 hash of each key is stored.
+
+13. `migration_v13_starter_subscriptions_affiliates.sql` — **required**. Three things at once,
+    because they were built together: the **Starter** plan ($5 a month / $49 a year); the
+    `subscriptions` table and the `plans.paypal_plan_id_*` columns behind automatic renewal
+    (section 10); and the affiliate programme — `affiliates`, `referrals`, `commissions`,
+    `affiliate_payouts` and the functions `record_commission`, `affiliate_balance` and
+    `pay_affiliate`. It also creates `system_settings`, a small key/value table
+    holding the PayPal product id. Every new table has row-level security on with no policy,
+    so all of it is reachable only through the server's service-role key.
 
 **Run them in that order.** Every file from v3 onwards starts with a precondition check and
 stops with a clear message if an earlier file has not been run.
@@ -191,6 +200,7 @@ cp .env.example .env    # then fill in the real values
 | `PAYPAL_ENV` | **Read the warning below** | `sandbox` or `live`. Defaults to `sandbox` |
 | `PAYPAL_WEBHOOK_ID` | To sell | Created when you add the webhook in the PayPal Developer Dashboard. Without it webhooks are rejected, so a payer can pay without getting their plan |
 | `APP_BASE_URL` | Recommended | The app's public URL, used for the return links after checkout. On Render it falls back to `RENDER_EXTERNAL_URL` |
+| `SITE_URL` | Optional | The **marketing site's** address, not the app's. Affiliate links are built from it so a referral lands on the sales page rather than a sign-in form. Defaults to `https://botclarify.com` |
 
 > ### `PAYPAL_ENV` must match the credentials
 >
@@ -389,13 +399,22 @@ GET    /orgs/:orgId                           organization details plus the call
 PATCH  /orgs/:orgId                           edit the company profile             (org admin)
 GET    /orgs/:orgId/overview                  dashboard figures                    (org admin)
 GET    /orgs/:orgId/billing                   plan and payment history             (org admin)
-POST   /orgs/:orgId/billing/checkout          open a checkout session              (org admin)
+POST   /orgs/:orgId/billing/checkout          open a one-off checkout session      (org admin)
+POST   /orgs/:orgId/billing/subscribe        start an automatically renewing plan (org admin)
+GET    /orgs/:orgId/billing/subscription     the live subscription, if any        (org admin)
+DELETE /orgs/:orgId/billing/subscription/:id stop renewing at the end of the period (org admin)
 GET    /orgs/:orgId/billing/payments/:id      status of one transaction            (org admin)
 POST   /orgs/:orgId/billing/payments/:id/capture  capture a PayPal order           (org admin)
 GET    /orgs/:orgId/billing/payments/:id/invoice.pdf  download the PDF invoice     (org admin)
 
 GET    /public/billing/plans                  the public price list, in USD, plus the
                                               gateways that are currently configured
+GET    /public/affiliate/:code                is this referral code usable? (answers only
+                                              yes or no — never who owns it)
+
+GET    /affiliate                             enrolment, link, balance, referrals (signed in)
+POST   /affiliate/join                        join the programme (paid plan required)
+PATCH  /affiliate                             change the PayPal address for payouts
 GET    /healthz                               liveness probe
 POST   /cron/purge-trials                     purge expired trial data (header x-cron-secret)
 POST   /admin/maintenance/purge-trials        purge on demand                    (system admin)
@@ -427,6 +446,9 @@ GET    /orgs/:orgId/chat/history              the whole organization's history  
 POST   /admin/users                           create a new system administrator
 GET    /admin/system-admins                   who currently holds system admin rights
 GET    /admin/payments/:id/invoice.pdf        the same invoice, for any organization
+GET    /admin/affiliates                      every affiliate and what is owed     (system admin)
+POST   /admin/affiliates/:id/payout           record money already sent            (system admin)
+PATCH  /admin/affiliates/:id                  suspend or reinstate an affiliate    (system admin)
 ```
 
 Authentication: the `Authorization: Bearer <access_token>` header, with a token issued by
@@ -442,11 +464,16 @@ The backend enforces quotas at the API level, not merely in the interface:
   when either is exceeded.
 - Inviting a member: checks the member ceiling.
 - Asking the chatbot: checks the number of questions used this month.
-- OCR on a scanned PDF: checks the OCR pages left this month (section 11).
+- OCR on a scanned PDF: checks the OCR pages left this month (section 12).
 
-Three plans are seeded by the migrations — `free` (the 3-day trial), `pro` (Professional,
-$19/month or $187/year) and `business` (Business, $79/month or $777/year) — and every
-limit and price is editable in `/sysadmin.html` -> **Plans**.
+Four plans are seeded by the migrations — `free` (the 3-day trial), `starter` (Starter,
+$5/month or $49/year), `pro` (Professional, $19/month or $187/year) and `business`
+(Business, $79/month or $777/year) — and every limit and price is editable in
+`/sysadmin.html` -> **Plans**.
+
+Starter is the small end: 100 documents, 5 members, 1,500 questions a month, 1 GB, and
+neither scanned-PDF reading nor API access. It exists so that a company with a handful of
+handbooks is not asked for $19, and so the affiliate programme has a cheap way in.
 
 Each paid plan has two prices: `price_usd` for one month and `price_usd_yearly` for twelve
 months paid up front, seeded at 18% off. Setting a plan's yearly price to 0 takes it off
@@ -583,15 +610,209 @@ for "already handled", because that column is only ever written inside that SQL 
 
 If the current plan has time left on it, the remaining time is **added** rather than lost.
 
+### Automatic renewal (PayPal Subscriptions)
+
+PayPal does charge on a schedule, and the app uses it. Automatic renewal is the default at
+checkout; paying once, for a single period, is still offered beside it, because some finance
+departments will not approve a standing charge.
+
+PayPal needs three objects before it will charge anybody repeatedly:
+
+| Object | Ours or theirs | Created |
+|---|---|---|
+| **Product** | One, for the whole service | Once. Its id is kept in `system_settings.paypal_product_id` |
+| **Billing plan** | One per plan per cycle | On first use. Its id is kept in `plans.paypal_plan_id_monthly` / `_yearly` |
+| **Subscription** | One per customer | Each time somebody subscribes; the row is in `subscriptions` |
+
+**A price change makes a new billing plan.** PayPal will not let the price on a billing plan
+be edited, so the price each one was created with is stored beside its id in
+`paypal_synced_price_monthly` / `_yearly`. When they disagree, the stored id is stale: a new
+billing plan is created at the new price and the old one is deactivated. Without that check,
+changing a price in `/sysadmin.html` would go on charging every new subscriber the old amount
+and nothing would look wrong anywhere. Customers already on the old plan keep paying what
+they agreed to — which is both the honest behaviour and the only one PayPal allows.
+
+**Every renewal is an ordinary payment.** `PAYMENT.SALE.COMPLETED` writes a `payments` row and
+runs the same `activate_paid_plan()` as a one-off, so invoices, payment history and affiliate
+commissions behave identically whether the money arrived automatically or by hand. It is
+idempotent on PayPal's own sale id, because PayPal retries webhooks and a retry must not buy
+a second month.
+
+**Cancelling is a decision not to renew.** The plan runs to the end of the period already paid
+for; it is not a refund and nothing is shortened.
+
+One live subscription per organization, enforced by a partial unique index rather than by the
+application, so two browser tabs cannot produce two standing charges.
+
+#### Webhook events to subscribe to
+
+Automatic renewal does not work until six more events are added to the existing PayPal
+webhook. Nothing warns you: the subscription is created, the customer approves it, PayPal
+charges them every month — and because the renewal event never arrives, the plan is never
+extended and expires while they are still paying. **This is the single most important step
+after deploying automatic renewal.**
+
+##### Step 0 — know which environment you are configuring
+
+Check `PAYPAL_ENV` in Render's Environment tab. `live` means the webhook goes on the **Live**
+app; `sandbox` means the Sandbox one. The PayPal dashboard keeps two entirely separate lists
+of apps, and adding the events to the wrong one looks exactly like doing nothing at all.
+
+##### Step 1 — open the app
+
+Sign in at developer.paypal.com, go to **Apps & Credentials**
+(`https://developer.paypal.com/dashboard/applications/`), pick the **Sandbox** or **Live** tab
+to match step 0, and open the app whose Client ID matches `PAYPAL_CLIENT_ID` in Render.
+Compare the first several characters rather than assuming — an account can hold several apps.
+
+##### Step 2 — find the Webhooks section, and EDIT rather than recreate
+
+The app's detail page has a **Webhooks** section near the bottom.
+
+- A webhook already pointing at `https://app.botclarify.com/webhooks/paypal` — use its
+  **Edit** action. Editing keeps the same Webhook ID, so nothing in Render has to change.
+- No webhook yet — **Add Webhook**, and use exactly that URL.
+
+**Do not delete the existing webhook and make a new one.** A new webhook gets a new Webhook
+ID, and the old `PAYPAL_WEBHOOK_ID` in Render then rejects every incoming webhook with a 401
+— the exact failure where customers pay and their plan is never activated.
+
+##### Step 3 — tick the events
+
+Leave whatever is already ticked (`PAYMENT.CAPTURE.COMPLETED` and `CHECKOUT.ORDER.COMPLETED`
+drive the one-off flow) and add these six:
+
+| Event | What the app does with it |
+|---|---|
+| `PAYMENT.SALE.COMPLETED` | **The one that matters.** Every automatic charge. Writes a `payments` row, runs `activate_paid_plan`, extends the period, records the affiliate commission. Missing it is the failure described above |
+| `BILLING.SUBSCRIPTION.ACTIVATED` | The customer finished approving — moves the row from `pending` to `active` and clears the "not approved yet" card in Plan & billing |
+| `BILLING.SUBSCRIPTION.CANCELLED` | Cancelled on PayPal's side rather than through our button; also frees the one-live-per-organization slot so they can subscribe again |
+| `BILLING.SUBSCRIPTION.SUSPENDED` | Shows the customer a warning. The period already paid for is **not** shortened |
+| `BILLING.SUBSCRIPTION.EXPIRED` | The subscription reached the end of its life |
+| `BILLING.SUBSCRIPTION.PAYMENT.FAILED` | A card that stopped working. Warns the customer to fix it; again, the paid period is untouched |
+
+The event list is long — use its search box for `SALE.COMPLETED`, then for
+`BILLING.SUBSCRIPTION`. Do not choose **All events**: dozens of event types we do nothing with
+would arrive, each costing a signature-verification call and filling the log with noise.
+
+`PAYMENT.SALE.COMPLETED` also exists for some one-off payments. The two are told apart by
+`billing_agreement_id`, which only a subscription payment carries.
+
+##### Step 4 — check the Webhook ID against Render
+
+After saving, PayPal shows the Webhook ID. Compare it with `PAYPAL_WEBHOOK_ID` in Render's
+Environment tab. Identical (the normal case when editing) — nothing to do. Different — update
+Render and redeploy, or every webhook from now on is rejected.
+
+##### Step 5 — prove it works
+
+**Quick check (proves the URL is reachable, nothing more).** Use PayPal's webhook simulator to
+send a `PAYMENT.SALE.COMPLETED`. The app will answer **401** and write
+`Rejected a PayPal webhook with an invalid signature` into `/sysadmin.html` -> **Logs**. That
+is the correct result: a simulated event cannot pass PayPal's own
+`verify-webhook-signature`, so a rejection means the URL is right, the route is live and
+signatures are genuinely being checked. Seeing *nothing* in the log is the bad outcome — wrong
+URL, wrong environment, or the app has not been redeployed.
+
+**Real check (worth doing once in sandbox).** Subscribe to a plan with a sandbox buyer
+account, choosing "Renew automatically". After approval there should be:
+
+- `Started a … subscription` and then `Subscription renewed` in **Logs**
+- a "Renewing automatically" card on that organization's Plan & billing tab
+- `plan_expires_at` moved forward
+
+To see a second charge without waiting a month, create a sandbox billing plan on a short
+interval, or resend the delivered event from the webhook's event history in the dashboard.
+
+##### If nothing arrives
+
+1. `PAYPAL_ENV` in Render matches the environment the app belongs to.
+2. `APP_BASE_URL` is exactly `https://app.botclarify.com`. PayPal signs against the address, so
+   a stale value breaks every signature. The **System health** page in `/sysadmin.html` checks
+   this specifically and says so in words.
+3. The delivery history in the PayPal dashboard shows the response code: **401** means
+   `PAYPAL_WEBHOOK_ID` is wrong, **404** means the URL is wrong, and a timeout usually means
+   the instance was asleep — PayPal retries, so that one tends to resolve itself.
+
 ### Not built yet
 
-- **No recurring billing.** The customer has to pay again each period.
-- **No invoicing.** Selling to companies at scale needs an invoicing integration.
+- **No invoicing integration.** Selling to companies at scale needs one.
 - **No refunds in the interface.** Refunds have to be issued from PayPal directly.
+- **No plan change mid-subscription.** Moving between plans means cancelling and subscribing
+  again; the period already paid for is not prorated.
 
 ---
 
-## 11. OCR for scanned PDFs
+## 11. The affiliate programme
+
+Customers on a paid plan can recommend BotClarify and take a share of what the companies they
+introduce pay. **20% of every monthly payment, 30% of every yearly one**, on every payment for
+as long as the customer stays — not only the first.
+
+An affiliate is a **person**, not an organization: the money is paid to somebody, and one
+person may administer several companies. Taking part requires an account *and* an
+organization on a paid plan, checked both at enrolment and every time the page is opened. A
+lapsed subscription pauses the affiliate account; commissions already recorded are untouched.
+
+### How a referral is recorded
+
+1. The affiliate's link is `https://botclarify.com/?ref=<code>`. The code is eight characters
+   from an alphabet with no vowels and no `0/O/1/l/I`, so it never accidentally spells a word
+   and survives being read down a phone.
+2. `site/assets/site.js` stores the code in `sessionStorage` and appends it to every link
+   pointing at the app, so a detour through the pricing page does not lose it.
+3. `public/register.html` reads `?ref=` (falling back to `localStorage`) and sends it with the
+   registration.
+4. `referrals.organization_id` is the **primary key**, so a company can be claimed exactly
+   once. The first code wins and an existing customer cannot be claimed at all.
+
+### How a commission is recorded
+
+`record_commission(payment_id)` runs after every successful payment — a PayPal capture,
+an automatic renewal, and a payment a system administrator records by hand. It is
+the database's decision, not the application's, and it computes from the money actually
+received rather than from the list price. It records nothing when:
+
+- the payment is not yet paid, or a commission already exists for it;
+- the organization has no referral;
+- the affiliate is suspended, **or their own organization is no longer on a paid
+  plan** — the programme is for customers, so earning pauses with their own
+  subscription and resumes when it does. Nothing already recorded is touched;
+- **the affiliate owns the organization, or is an admin member of it.** Self-referral is
+  blocked on both, because either alone is trivially worked around.
+
+Each commission is held for 30 days from `payments.paid_at` before it becomes payable — long
+enough to cover a refund or a chargeback, so payouts come out of money actually kept.
+
+### Getting paid
+
+Payouts are manual. A system administrator sends the money, then records it in
+`/sysadmin.html` -> **Affiliates**, which is worded to say so plainly: the button records a
+payment already made and moves no money itself.
+
+`pay_affiliate()` claims the commissions and totals them in one statement:
+
+```sql
+with claimed as (
+  update commissions set status = 'paid', payout_id = v_id
+  where affiliate_id = $1 and status in ('pending','approved')
+    and available_at <= now() and payout_id is null
+  returning amount
+)
+select coalesce(sum(amount), 0), count(*) from claimed
+```
+
+Written this way, two administrators pressing the button at the same moment cannot pay the
+same commissions twice: the `UPDATE` is the compare-and-swap, and only rows it actually
+claimed are counted. Both screens — the affiliate's and the administrator's — read their
+figures from the same `affiliate_balance()` function, so they cannot disagree about what is
+owed, which is the kind of disagreement that turns into an argument about money.
+
+The public terms are at `site/affiliate.html`.
+
+---
+
+## 12. OCR for scanned PDFs
 
 When a PDF is uploaded the real text layer is read first. If that yields fewer than roughly
 60 characters per page, the file is treated as a scan and handed to Gemini.
@@ -649,7 +870,7 @@ Background Worker on Render.
 ---
 
 
-## 12. Invoices
+## 13. Invoices
 
 Every payment that has actually been received can be downloaded as a PDF invoice — by the
 organization's own administrators from **Plan & billing**, and by a system administrator from
@@ -684,7 +905,7 @@ look different on different servers.
 and no tax line. If BotClarify Pte. Ltd. registers for GST, this needs revisiting before the next
 invoice is issued.
 
-## 13. Answer language
+## 14. Answer language
 
 The chatbot answers in the language the question was asked in, even when the
 documents it is quoting are written in another language. A Vietnamese question
@@ -714,7 +935,7 @@ The "nothing relevant found" reply never reaches the model at all, so it is
 translated in `src/language.js` for every language detection can name, and
 falls back to English otherwise.
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 **The system health page.** `/sysadmin.html` -> **System health** probes every dependency:
 Supabase, Cloudflare R2, Voyage AI, DeepSeek, Gemini (each model in the fallback chain), the
@@ -745,7 +966,7 @@ names". That is `POST /admin/maintenance/fix-filenames`; add `?dry_run=1` to pre
 
 ---
 
-## 15. Known limitations
+## 16. Known limitations
 
 - **Documents are processed inside the web process.** Very large files can time out on Render
   Free. With real customers, split this into a dedicated worker.

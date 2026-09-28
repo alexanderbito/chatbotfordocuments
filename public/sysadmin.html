@@ -26,6 +26,7 @@ const TITLES = {
   plans: ['Plans', 'Define the limits and price of each plan.'],
   payments: ['Payments', 'Record transactions and extend customer plans.'],
   users: ['Users', 'Every account on the platform.'],
+  affiliates: ['Affiliates', 'Who is introducing customers, and what they are owed.'],
   messages: ['Messages', 'Enquiries sent from the contact form on botclarify.com.'],
   logs: ['Activity log', 'Events and errors raised while the system runs.'],
   health: ['System health', 'Check connectivity to every upstream service.'],
@@ -42,6 +43,7 @@ function shell() {
         { view: 'orgs', icon: 'building', label: 'Organizations' },
         { view: 'plans', icon: 'card', label: 'Plans' },
         { view: 'payments', icon: 'chart', label: 'Payments' },
+        { view: 'affiliates', icon: 'users', label: 'Affiliates' },
         { group: 'Operations' },
         { view: 'messages', icon: 'inbox', label: 'Messages' },
         { view: 'users', icon: 'users', label: 'Users' },
@@ -87,19 +89,20 @@ async function refreshUnread() {
   }
 }
 
+/** One figure in a card. Shared by every view that shows a row of them. */
+const stat = (label, value, ic, foot = '') => `
+  <div class="stat">
+    <div class="row between"><div class="label">${esc(label)}</div><div class="icon">${icon[ic]}</div></div>
+    <div class="value">${value}</div>
+    ${foot ? `<div class="foot">${foot}</div>` : ''}
+  </div>`;
+
 /* =================== DASHBOARD =================== */
 async function viewOverview() {
   const el = document.getElementById('view-overview');
   el.innerHTML = '<div class="loading-line"></div>';
   const d = await api('/admin/overview');
   const t = d.totals;
-
-  const stat = (label, value, ic, foot = '') => `
-    <div class="stat">
-      <div class="row between"><div class="label">${esc(label)}</div><div class="icon">${icon[ic]}</div></div>
-      <div class="value">${value}</div>
-      ${foot ? `<div class="foot">${foot}</div>` : ''}
-    </div>`;
 
   el.innerHTML = `
     <div class="stat-grid">
@@ -490,6 +493,127 @@ function paymentModal() {
   planEl.onchange = sync;
   cycleEl.onchange = sync;
   document.getElementById('y_start').onchange = sync;
+}
+
+/* =================== AFFILIATES =================== */
+/**
+ * Affiliates, from the side that pays them.
+ *
+ * "Available" is the only figure that may be paid out: past its 30-day hold and
+ * not already in a payout. It is read from the same database function the
+ * affiliate's own page uses, so the two screens cannot disagree about what is
+ * owed — which is the kind of disagreement that turns into an argument about
+ * money.
+ */
+async function viewAffiliates() {
+  const el = document.getElementById('view-affiliates');
+  el.innerHTML = '<div class="loading-line"></div>';
+
+  const d = await api('/admin/affiliates');
+  const owed = d.affiliates.reduce((s, a) => s + Number(a.available || 0), 0);
+  const held = d.affiliates.reduce((s, a) => s + Number(a.pending || 0), 0);
+
+  el.innerHTML = `
+    <div class="stat-grid mb-2">
+      ${stat('Ready to pay out', fmt.money(owed), 'card', `${fmt.money(held)} still held`)}
+      ${stat('Affiliates', fmt.num(d.affiliates.length), 'users',
+        `${fmt.num(d.affiliates.filter((a) => a.status === 'active').length)} active`)}
+      ${stat('Commission', `${Math.round(d.rates.monthly * 100)}% / ${Math.round(d.rates.yearly * 100)}%`, 'chart', 'monthly / yearly, every payment')}
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Affiliates</h3><span class="sub">held 30 days after each customer payment</span></div>
+      <div class="card-body flush">${
+        d.affiliates.length
+          ? `<div class="table-wrap"><table class="tbl">
+              <thead><tr><th>Person</th><th>Code</th><th>Pay to</th><th class="num">Referred</th>
+                <th class="num">Held</th><th class="num">Ready</th><th class="num">Paid</th><th>Status</th><th></th></tr></thead>
+              <tbody>${d.affiliates.map((a) => `<tr>
+                <td><div class="cell-main">${esc(a.user?.full_name || a.user?.email || '—')}</div>
+                    <div class="cell-sub">${esc(a.user?.email || '')}</div></td>
+                <td class="mono small">${esc(a.code)}</td>
+                <td class="small">${a.paypal_email
+                  ? esc(a.paypal_email)
+                  : '<span class="badge warn">not given</span>'}</td>
+                <td class="num">${fmt.num(a.paying)} / ${fmt.num(a.referred)}</td>
+                <td class="num muted">${esc(fmt.money(a.pending))}</td>
+                <td class="num"><b>${esc(fmt.money(a.available))}</b></td>
+                <td class="num muted">${esc(fmt.money(a.paid))}</td>
+                <td>${a.status === 'active' ? '<span class="badge ok">Active</span>' : '<span class="badge">Suspended</span>'}</td>
+                <td class="nowrap" style="width:1%">
+                  ${Number(a.available) > 0 && a.paypal_email
+                    ? `<button class="btn sm primary" data-pay="${esc(a.id)}">Record payout</button>`
+                    : ''}
+                  <button class="icon-btn" data-aff="${esc(a.id)}" title="Change status">${icon.edit}</button>
+                </td>
+              </tr>`).join('')}</tbody></table></div>`
+          : emptyState('No affiliates yet', 'Customers on a paid plan can join from their own console.')
+      }</div>
+    </div>`;
+
+  el.querySelectorAll('[data-pay]').forEach((b) => {
+    b.onclick = () => payoutDialog(d.affiliates.find((a) => a.id === b.dataset.pay));
+  });
+  el.querySelectorAll('[data-aff]').forEach((b) => {
+    b.onclick = () => affiliateDialog(d.affiliates.find((a) => a.id === b.dataset.aff));
+  });
+}
+
+function payoutDialog(a) {
+  modal({
+    title: `Record a payout to ${a.user?.full_name || a.user?.email || a.code}`,
+    okText: 'Record it',
+    body: `
+      <div class="alert info show">
+        This records money you have <strong>already sent</strong>. It does not move any money.
+        Send ${esc(fmt.money(a.available))} to <strong>${esc(a.paypal_email)}</strong> first, then record it here.
+      </div>
+      <div class="form-grid">
+        <div class="field"><label>Amount</label><div style="font-size:20px;font-weight:650">${esc(fmt.money(a.available))}</div>
+          <div class="hint">Everything currently past its hold. Not editable — the figure comes from the commissions themselves.</div></div>
+        <div class="field"><label>Method</label><select id="poMethod">
+          <option value="paypal">PayPal</option><option value="bank_transfer">Bank transfer</option><option value="other">Other</option>
+        </select></div>
+      </div>
+      <div class="field"><label>Reference</label><input type="text" id="poRef" placeholder="PayPal transaction id" /></div>
+      <div class="field"><label>Note</label><textarea id="poNote" rows="2"></textarea></div>`,
+    onOk: async (box) => {
+      const r = await api(`/admin/affiliates/${a.id}/payout`, {
+        method: 'POST',
+        body: {
+          method: box.querySelector('#poMethod').value,
+          reference: box.querySelector('#poRef').value.trim(),
+          note: box.querySelector('#poNote').value.trim(),
+        },
+      });
+      toast(`Recorded ${fmt.money(r.amount)} across ${r.commissions} commissions`, 'ok');
+      viewAffiliates();
+    },
+  });
+}
+
+function affiliateDialog(a) {
+  modal({
+    title: `Affiliate ${a.code}`,
+    okText: 'Save',
+    body: `
+      <div class="field"><label>Status</label>
+        <select id="afStatus">
+          <option value="active" ${a.status === 'active' ? 'selected' : ''}>Active</option>
+          <option value="suspended" ${a.status === 'suspended' ? 'selected' : ''}>Suspended</option>
+        </select>
+        <div class="hint">A suspended affiliate earns nothing on new payments. Commissions already recorded are unaffected.</div>
+      </div>
+      <div class="field"><label>Note</label><textarea id="afNote" rows="3">${esc(a.note || '')}</textarea></div>`,
+    onOk: async (box) => {
+      await api(`/admin/affiliates/${a.id}`, {
+        method: 'PATCH',
+        body: { status: box.querySelector('#afStatus').value, note: box.querySelector('#afNote').value.trim() },
+      });
+      toast('Saved', 'ok');
+      viewAffiliates();
+    },
+  });
 }
 
 /* =================== MESSAGES =================== */
@@ -884,7 +1008,7 @@ async function viewHealth() {
 }
 
 /* =================== BOOTSTRAP =================== */
-const VIEWS = { overview: viewOverview, orgs: viewOrgs, plans: viewPlans, payments: viewPayments, messages: viewMessages, users: viewUsers, logs: viewLogs, health: viewHealth };
+const VIEWS = { overview: viewOverview, orgs: viewOrgs, plans: viewPlans, payments: viewPayments, affiliates: viewAffiliates, messages: viewMessages, users: viewUsers, logs: viewLogs, health: viewHealth };
 
 shell();
 router(async (view) => {

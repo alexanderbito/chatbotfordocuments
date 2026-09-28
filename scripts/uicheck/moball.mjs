@@ -8,8 +8,10 @@ for (const w of [320, 390]) {
   const pages = [
     ['site', 4600, '/'], ['site', 4600, '/security.html'], ['site', 4600, '/contact.html'],
     ['site', 4600, '/terms.html'], ['site', 4600, '/privacy.html'],
+    ['site', 4600, '/api.html'], ['site', 4600, '/affiliate.html'],
     ['app', 4601, '/login.html'], ['app', 4601, '/register.html'], ['app', 4601, '/pricing.html'],
-    ['app', 4601, '/admin.html#billing'], ['app', 4601, '/chat.html'], ['app', 4601, '/sysadmin.html'],
+    ['app', 4601, '/admin.html#billing'], ['app', 4601, '/admin.html#affiliate'],
+    ['app', 4601, '/chat.html'], ['app', 4601, '/sysadmin.html'], ['app', 4601, '/sysadmin.html#affiliates'],
   ];
   for (const [side, port, url] of pages) {
     const pg = await ctx.newPage();

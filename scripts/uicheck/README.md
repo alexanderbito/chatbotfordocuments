@@ -19,6 +19,7 @@ node scripts/uicheck/chatlayout.mjs    # chat page at three widths, with and wit
 node scripts/uicheck/cyc.mjs           # monthly / yearly prices in all three places
 node scripts/uicheck/inbox.mjs         # contact inbox, including that hostile input renders as text
 node scripts/uicheck/apiui.mjs         # API key tab, plan pricing, and the developer documentation
+node scripts/uicheck/aff.mjs           # affiliate ledger, payout dialog, referral link, public page
 ```
 
 Each prints `vấn đề: không có` when it is clean, or a list naming the element

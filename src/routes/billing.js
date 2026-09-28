@@ -2,8 +2,12 @@ import express from 'express';
 import { supabase } from '../supabaseClient.js';
 import { requireAuth, requireOrgMember, requireOrgAdmin } from '../auth.js';
 import { logEvent } from '../logger.js';
-import { availableProviders, startCheckout, markPaid, findPayment, paypal } from '../payments/index.js';
+import { availableProviders, startCheckout, markPaid, findPayment, paypal, baseUrl } from '../payments/index.js';
 import { decoratePlan } from '../payments/cycles.js';
+import {
+  startSubscription, cancelSubscription, recordSubscriptionPayment,
+  findSubscription, applySubscriptionStatus,
+} from '../payments/subscriptions.js';
 import { buildInvoicePdf, invoiceFilename } from '../invoice.js';
 
 const router = express.Router({ mergeParams: true });
@@ -71,6 +75,74 @@ router.post('/checkout', async (req, res) => {
   }
 });
 
+/**
+ * POST /orgs/:orgId/billing/subscribe { plan_id, billing_cycle }
+ *
+ * Starts an automatically renewing subscription. The browser sends a plan and a
+ * cycle, never a price.
+ */
+router.post('/subscribe', async (req, res) => {
+  try {
+    const { plan_id, billing_cycle } = req.body || {};
+    if (!plan_id) return res.status(400).json({ error: 'Choose a plan' });
+
+    const { data: plan } = await supabase.from('plans').select('*').eq('id', plan_id).maybeSingle();
+    if (!plan) return res.status(404).json({ error: 'Plan not found' });
+    if (!plan.is_active) return res.status(400).json({ error: 'This plan is no longer on sale' });
+
+    const result = await startSubscription({
+      org: req.org,
+      plan,
+      cycle: billing_cycle,
+      userId: req.user.id,
+      baseUrl: baseUrl(req),
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('subscribe error:', err);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/** GET /orgs/:orgId/billing/subscription — the current subscription, if any. */
+router.get('/subscription', async (req, res) => {
+  try {
+    const { data } = await supabase
+      .from('subscriptions')
+      .select('id, plan_id, billing_cycle, amount, currency, status, approve_url, created_at, activated_at, cancelled_at, last_payment_at, plan:plans(name)')
+      .eq('organization_id', req.org.id)
+      // A 'failed' row is an attempt PayPal refused before anything began.
+      // Showing it as a subscription card only invites a support question.
+      .neq('status', 'failed')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    res.json({ subscription: data || null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** DELETE /orgs/:orgId/billing/subscription/:id — stop renewing. */
+router.delete('/subscription/:id', async (req, res) => {
+  try {
+    const result = await cancelSubscription({
+      org: req.org,
+      subscriptionId: req.params.id,
+      userId: req.user.id,
+      reason: String(req.body?.reason || '').slice(0, 120) || undefined,
+    });
+    res.json({
+      message: result.already
+        ? 'This subscription was already stopped.'
+        : 'Renewal stopped. Your plan stays active until the period you have paid for ends.',
+      ...result,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 /** GET /orgs/:orgId/billing/payments/:paymentId — status of one transaction. */
 router.get('/payments/:paymentId', async (req, res) => {
   try {
@@ -110,6 +182,10 @@ router.post('/payments/:paymentId/capture', async (req, res) => {
     if (!result.paid) return res.json({ status: payment.status, activated: false });
 
     const out = await markPaid({ payment, raw: result.raw });
+
+    const { error: commissionError } = await supabase.rpc('record_commission', { p_payment_id: payment.id });
+    if (commissionError) console.error('[billing] could not record a commission:', commissionError.message);
+
     res.json({ status: 'paid', ...out });
   } catch (err) {
     console.error('capture error:', err);
@@ -184,6 +260,55 @@ export default router;
 export const webhookRouter = express.Router();
 
 /**
+ * Apply one subscription event.
+ *
+ * An event we cannot make sense of is logged and acknowledged rather than
+ * refused: PayPal reads a non-2xx as "try again" and would redeliver it for
+ * days. A genuine failure — the database unreachable, a function erroring — is
+ * still allowed to travel, because there a retry is exactly what we want.
+ */
+async function handleSubscriptionEvent(evt, raw) {
+  const subscription = await findSubscription({ customId: evt.customId, providerRef: evt.providerRef });
+  if (!subscription) {
+    // A sale with no subscription behind it is an ordinary one-off payment
+    // being reported a second way, not a problem.
+    if (evt.kind === 'payment' && !evt.providerRef) return;
+    await logEvent({
+      level: 'warn', scope: 'billing',
+      message: 'PayPal subscription event for a subscription we do not know',
+      detail: { provider_ref: evt.providerRef, custom_id: evt.customId },
+    });
+    return;
+  }
+
+  if (evt.kind === 'payment') {
+    if (!evt.saleId) {
+      await logEvent({ level: 'warn', scope: 'billing', message: 'Subscription payment event with no transaction id' });
+      return;
+    }
+    await recordSubscriptionPayment({
+      subscription,
+      saleId: evt.saleId,
+      amount: evt.amount,
+      currency: evt.currency,
+      raw,
+    });
+    return;
+  }
+
+  if (evt.status) {
+    await applySubscriptionStatus(subscription, evt.status, {
+      event: raw?.event_type,
+      // A failed payment suspends the subscription but does NOT shorten the
+      // plan: the customer has already paid for the period they are in, and
+      // cutting them off early over a card that will probably be fixed in a
+      // day is how a renewal becomes a cancellation.
+      note: evt.failed ? 'payment failed; the current paid period is unaffected' : undefined,
+    });
+  }
+}
+
+/**
  * PayPal posts here. Uses express.raw() because the signature check has to be
  * given the request body VERBATIM — re-serializing a parsed object can reorder
  * keys or change how numbers are written, and the signature then fails.
@@ -191,6 +316,17 @@ export const webhookRouter = express.Router();
 webhookRouter.post('/paypal', express.raw({ type: '*/*' }), async (req, res) => {
   try {
     const info = await paypal.verifyWebhook({ headers: req.headers, rawBody: req.body });
+
+    // Subscription events are read from the same verified body but with their
+    // own field lookups: a renewal arrives as PAYMENT.SALE.COMPLETED whose
+    // resource is a sale, while the lifecycle events carry the subscription
+    // itself. Forcing both through one shape is how a renewal gets applied to
+    // the wrong customer.
+    const sub = paypal.readSubscriptionEvent(info.raw);
+    if (sub.kind !== 'other') {
+      await handleSubscriptionEvent(sub, info.raw);
+      return res.json({ received: true });
+    }
 
     if (!info.paid) return res.json({ received: true });
 
@@ -212,6 +348,13 @@ webhookRouter.post('/paypal', express.raw({ type: '*/*' }), async (req, res) => 
     }
 
     await markPaid({ payment, providerRef: info.providerRef, raw: info.raw });
+
+    // A one-off payment earns its referrer a commission too. Computed by the
+    // database from the payment row, so it is derived from the money actually
+    // received rather than from anything the application decided.
+    const { error: commissionError } = await supabase.rpc('record_commission', { p_payment_id: payment.id });
+    if (commissionError) console.error('[billing] could not record a commission:', commissionError.message);
+
     res.json({ received: true });
   } catch (err) {
     if (err.invalidSignature) {

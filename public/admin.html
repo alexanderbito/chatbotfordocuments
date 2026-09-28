@@ -34,6 +34,7 @@ const TITLES = {
   history: ['Chat history', 'Every question members asked and how the chatbot answered.'],
   billing: ['Plan & billing', 'Current usage and payment history.'],
   api: ['API', 'Keys for reading your documents from your own systems.'],
+  affiliate: ['Affiliate', 'Recommend BotClarify and earn a share of what the companies you introduce pay.'],
   settings: ['Settings', 'Company profile and your account.'],
 };
 
@@ -53,6 +54,7 @@ function shell() {
         { group: 'Account' },
         { view: 'billing', icon: 'card', label: 'Plan & billing' },
         { view: 'api', icon: 'key', label: 'API' },
+        { view: 'affiliate', icon: 'chart', label: 'Affiliate' },
         { view: 'settings', icon: 'settings', label: 'Settings' },
       ],
     })}
@@ -63,7 +65,7 @@ function shell() {
         <a class="btn" href="/chat.html">${icon.chat} Open chatbot</a>
       </div>
       <div class="page">
-        ${['overview', 'documents', 'members', 'history', 'billing', 'api', 'settings']
+        ${['overview', 'documents', 'members', 'history', 'billing', 'api', 'affiliate', 'settings']
           .map((v) => `<section class="page-section" data-view="${v}" id="view-${v}"></section>`).join('')}
       </div>
     </div>`;
@@ -578,7 +580,11 @@ async function loadHistory() {
 async function viewBilling() {
   const el = document.getElementById('view-billing');
   el.innerHTML = '<div class="loading-line"></div>';
-  const b = await api(`/orgs/${orgId}/billing`);
+  const [b, subInfo] = await Promise.all([
+    api(`/orgs/${orgId}/billing`),
+    api(`/orgs/${orgId}/billing/subscription`).catch(() => ({ subscription: null })),
+  ]);
+  const sub = subInfo.subscription;
   const u = b.usage, L = u.limits;
   
   const line = (label, used, limit, unit = '') => `
@@ -645,11 +651,19 @@ async function viewBilling() {
           </div>
         </div>
 
+        ${sub ? `
+        <div class="card">
+          <div class="card-head"><h3>Automatic renewal</h3></div>
+          <div class="card-body">
+            ${subscriptionBody(sub)}
+          </div>
+        </div>` : ''}
+
         <div class="card">
           <div class="card-head"><h3>Other plans</h3></div>
           <div class="card-body">
             ${b.available_plans.filter((p) => p.id !== b.plan?.id).map((p) => `
-              <div class="mb-2" style="padding-bottom:12px;border-bottom:1px solid var(--border)">
+              <div class="plan-opt mb-2" style="padding-bottom:12px;border-bottom:1px solid var(--border)">
                 <div class="row between"><b>${esc(p.name)}</b><span>${esc(money(p.price_usd))}${esc(t('/month'))}</span></div>
                 ${p.has_yearly
                   ? `<div class="small" style="color:var(--primary);font-weight:600">${esc(t('or {amount}/year — save {n}%', { amount: money(p.price_yearly), n: p.yearly_saving_pct }))}</div>`
@@ -680,6 +694,67 @@ async function viewBilling() {
   el.querySelectorAll('[data-buy]').forEach((btn) => {
     btn.onclick = () => startCheckout(b, btn.dataset.buy);
   });
+
+  el.querySelector('[data-cancel-sub]')?.addEventListener('click', async (e) => {
+    const id = e.currentTarget.dataset.cancelSub;
+    if (!(await confirmDialog('Stop automatic renewal',
+      'Your plan stays active until the end of the period you have already paid for, and is not renewed after that. Nothing is refunded.',
+      'Stop renewing'))) return;
+    try {
+      const r = await api(`/orgs/${orgId}/billing/subscription/${id}`, { method: 'DELETE' });
+      toast(r.message, 'ok');
+      viewBilling();
+    } catch (err) { toast(err.message, 'err'); }
+  });
+
+  el.querySelector('[data-finish-sub]')?.addEventListener('click', (e) => {
+    location.href = e.currentTarget.dataset.finishSub;
+  });
+}
+
+/**
+ * The subscription card.
+ *
+ * Every state says what will happen next and when, because "active" on its own
+ * does not tell somebody whether money is about to leave their account.
+ */
+function subscriptionBody(sub) {
+  const amount = money(sub.amount, sub.currency);
+  const every = sub.billing_cycle === 'yearly' ? t('year') : t('month');
+  const planName = sub.plan?.name || '';
+
+  if (sub.status === 'pending') {
+    return `
+      <div class="alert warn show" style="background:var(--warn-soft);color:var(--warn)">
+        ${esc(t('This subscription has not been approved yet. Nothing has been charged.'))}
+      </div>
+      ${sub.approve_url ? `<button class="btn primary block" data-finish-sub="${esc(sub.approve_url)}">${esc(t('Finish setting it up'))}</button>` : ''}
+      <button class="btn block mt-1" data-cancel-sub="${esc(sub.id)}">${esc(t('Cancel'))}</button>`;
+  }
+
+  if (sub.status === 'active') {
+    return `
+      <div class="mt-0">${badge('active', LABEL.subscription)}</div>
+      <div class="mt-2" style="font-size:19px;font-weight:650">${esc(amount)}<span class="muted small"> ${esc(t('every {period}', { period: every }))}</span></div>
+      ${planName ? `<div class="muted small">${esc(planName)}</div>` : ''}
+      ${sub.last_payment_at ? `<div class="small muted mt-1">${esc(t('Last charged'))}: ${esc(fmt.date(sub.last_payment_at))}</div>` : ''}
+      <button class="btn block mt-2" data-cancel-sub="${esc(sub.id)}">${esc(t('Stop renewing'))}</button>
+      <p class="small muted mt-1 mb-0">${esc(t('Stopping keeps your plan until the end of the period you have paid for.'))}</p>`;
+  }
+
+  if (sub.status === 'suspended') {
+    return `
+      <div class="alert error show">
+        ${esc(t('PayPal could not take the last payment. Check the payment method in your PayPal account — your plan runs until the period you have already paid for ends.'))}
+      </div>
+      <button class="btn block" data-cancel-sub="${esc(sub.id)}">${esc(t('Stop renewing'))}</button>`;
+  }
+
+  return `
+    <div class="mt-0">${badge(sub.status, LABEL.subscription)}</div>
+    <p class="small muted mt-1 mb-0">
+      ${esc(t('This subscription is no longer renewing. Choose a plan below to start again.'))}
+    </p>`;
 }
 
 /** Pick a payment method, then hand off to the gateway's checkout page. */
@@ -716,6 +791,17 @@ function startCheckout(billing, planId) {
             <span class="who"><b>${esc(p.name)}</b><span>${esc(p.description)}</span></span>
           </label>`).join('')}
       </div>
+      <div class="field">
+        <label>${esc(t('Renewal'))}</label>
+        <label class="pay-method sel" data-ren="1">
+          <input type="radio" name="ren" value="auto" checked />
+          <span class="who"><b>${esc(t('Renew automatically'))}</b><span id="renAutoNote"></span></span>
+        </label>
+        <label class="pay-method" data-ren="1">
+          <input type="radio" name="ren" value="once" />
+          <span class="who"><b>${esc(t('Pay once'))}</b><span id="renOnceNote"></span></span>
+        </label>
+      </div>
       <div class="row between" style="padding-top:10px;border-top:1px solid var(--border)">
         <b id="ckLabel"></b><b style="font-size:18px" id="ckTotal"></b>
       </div>
@@ -723,6 +809,18 @@ function startCheckout(billing, planId) {
     onOk: async (box) => {
       const provider = box.querySelector('input[name="prov"]:checked').value;
       const cycle = box.querySelector('input[name="cyc"]:checked')?.value || 'monthly';
+      const renew = box.querySelector('input[name="ren"]:checked')?.value || 'auto';
+
+      // Two different endpoints, because they are two different things at the
+      // gateway: a subscription PayPal will charge again, or a single order.
+      if (renew === 'auto') {
+        const res = await api(`/orgs/${orgId}/billing/subscribe`, {
+          method: 'POST',
+          body: { plan_id: planId, billing_cycle: cycle },
+        });
+        location.href = res.approve_url;
+        return false;
+      }
       const res = await api(`/orgs/${orgId}/billing/checkout`, {
         method: 'POST',
         body: { plan_id: planId, provider, billing_cycle: cycle },
@@ -737,11 +835,28 @@ function startCheckout(billing, planId) {
   // showing one number while the customer is agreeing to another.
   const refresh = () => {
     const yearly = document.querySelector('input[name="cyc"]:checked')?.value === 'yearly';
-    document.getElementById('ckLabel').textContent = yearly ? t('Total for 12 months') : t('Total for 1 month');
-    document.getElementById('ckTotal').textContent = money(yearly ? plan.price_yearly : plan.price_usd);
-    document.getElementById('ckNote').textContent = yearly
-      ? t('If your current plan is still valid, twelve months are added to the remaining time.')
-      : t('If your current plan is still valid, one month is added to the remaining time.');
+    const auto = document.querySelector('input[name="ren"]:checked')?.value !== 'once';
+    const amount = money(yearly ? plan.price_yearly : plan.price_usd);
+    const period = yearly ? t('year') : t('month');
+
+    document.getElementById('ckLabel').textContent = auto
+      ? t('Charged today, then every {period}', { period })
+      : (yearly ? t('Total for 12 months') : t('Total for 1 month'));
+    document.getElementById('ckTotal').textContent = amount;
+
+    // Say what will happen next, in both cases. "Renews automatically" without
+    // a date and an amount is the sentence people later say they never saw.
+    document.getElementById('renAutoNote').textContent =
+      t('{amount} now, then {amount} every {period} until you cancel.', { amount, period });
+    document.getElementById('renOnceNote').textContent = yearly
+      ? t('One payment for twelve months. Nothing is charged again.')
+      : t('One payment for one month. Nothing is charged again.');
+
+    document.getElementById('ckNote').textContent = auto
+      ? t('Cancel any time in Plan & billing. Your plan runs to the end of the period you have paid for.')
+      : (yearly
+          ? t('If your current plan is still valid, twelve months are added to the remaining time.')
+          : t('If your current plan is still valid, one month is added to the remaining time.'));
   };
   refresh();
 
@@ -749,7 +864,7 @@ function startCheckout(billing, planId) {
   // the payment method every time the cycle was clicked.
   document.querySelectorAll('.pay-method').forEach((el2) => {
     el2.onclick = () => {
-      const group = el2.dataset.cyc ? '[data-cyc]' : '[data-prov]';
+      const group = el2.dataset.cyc ? '[data-cyc]' : el2.dataset.ren ? '[data-ren]' : '[data-prov]';
       document.querySelectorAll(`.pay-method${group}`).forEach((x) => x.classList.remove('sel'));
       el2.classList.add('sel');
       refresh();
@@ -1083,8 +1198,204 @@ async function viewSettings() {
   };
 }
 
+/* =================== AFFILIATE =================== */
+/**
+ * The affiliate programme, from the referrer's side.
+ *
+ * Two quite different screens behind one tab: an invitation for somebody who
+ * has not joined, and a ledger for somebody who has. They are kept in one place
+ * because the answer to "where do I find my link" has to be the same in both.
+ */
+async function viewAffiliate() {
+  const el = document.getElementById('view-affiliate');
+  el.innerHTML = '<div class="loading-line"></div>';
+
+  let d;
+  try { d = await api('/affiliate'); }
+  catch (err) { el.innerHTML = `<div class="alert error show">${esc(err.message)}</div>`; return; }
+
+  const pct = (r) => `${Math.round(r * 100)}%`;
+
+  if (!d.enrolled) {
+    el.innerHTML = `
+      <div class="card">
+        <div class="card-body">
+          <div class="aff-hero">
+            <h2>Earn ${esc(pct(d.rates.monthly))} of every monthly payment, ${esc(pct(d.rates.yearly))} of every yearly one</h2>
+            <p class="lead">
+              Recommend BotClarify to another company. When they subscribe, you take a share of
+              what they pay — not once, but every time they pay, for as long as they stay.
+            </p>
+            <ul class="aff-points">
+              <li>${icon.check}<span>A link of your own. Anyone who signs up through it is yours.</span></li>
+              <li>${icon.check}<span>${esc(pct(d.rates.monthly))} on monthly plans, ${esc(pct(d.rates.yearly))} on yearly — every payment, no end date.</span></li>
+              <li>${icon.check}<span>Held 30 days after each payment, then paid to your PayPal.</span></li>
+            </ul>
+            ${d.eligible
+              ? `<button class="btn primary lg" id="joinAff">Join the affiliate programme</button>`
+              : `<div class="alert warn show" style="background:var(--warn-soft);color:var(--warn)">
+                   ${esc(d.reason || 'The affiliate programme is open to customers on a paid plan.')}
+                 </div>
+                 <a class="btn primary" href="#billing">See the plans</a>`}
+          </div>
+        </div>
+      </div>`;
+    document.getElementById('joinAff')?.addEventListener('click', joinAffiliate);
+    return;
+  }
+
+  const a = d.affiliate;
+  const b = d.balance;
+
+  // Said at the top rather than left to be discovered from a ledger that has
+  // stopped growing: earning is paused while their own plan is not paid for.
+  const paused = !d.eligible ? `
+    <div class="alert warn show" style="background:var(--warn-soft);color:var(--warn)">
+      ${esc(t('Your own plan is not active, so new commissions are paused. Anything already earned is still yours and will still be paid.'))}
+      <a href="#billing">${esc(t('See the plans'))}</a>
+    </div>` : '';
+
+  el.innerHTML = `
+    ${paused}
+    <div class="split" style="grid-template-columns:1fr 320px">
+      <div>
+        <div class="card">
+          <div class="card-head"><h2>Your link</h2>
+            <span class="sub">${esc(pct(d.rates.monthly))} monthly · ${esc(pct(d.rates.yearly))} yearly</span></div>
+          <div class="card-body">
+            <div class="key-reveal">
+              <code id="affLink">${esc(a.link)}</code>
+              <button class="btn sm" id="copyLink">${icon.check} Copy</button>
+            </div>
+            <p class="small muted mt-2 mb-0">
+              Anyone who signs up through this link is recorded as yours, and stays yours.
+              A company that already has an account cannot be claimed.
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Companies you introduced</h2><span class="sub">${b.paying} of ${b.referred} are paying</span></div>
+          <div class="card-body flush">${
+            d.referrals.length
+              ? `<div class="table-wrap"><table class="tbl">
+                  <thead><tr><th>Company</th><th>Signed up</th><th>Status</th></tr></thead>
+                  <tbody>${d.referrals.map((r) => `<tr>
+                    <td class="cell-main">${esc(r.name)}</td>
+                    <td class="small">${esc(fmt.date(r.referred_at))}</td>
+                    <td>${r.paying ? '<span class="badge ok">Paying</span>' : '<span class="badge">Not yet</span>'}</td>
+                  </tr>`).join('')}</tbody></table></div>`
+              : emptyState('Nobody yet', 'Share your link and the companies that sign up appear here.')
+          }</div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Commissions</h2></div>
+          <div class="card-body flush">${
+            d.commissions.length
+              ? `<div class="table-wrap"><table class="tbl">
+                  <thead><tr><th>Earned</th><th>On</th><th class="num">Amount</th><th>Status</th></tr></thead>
+                  <tbody>${d.commissions.map((c) => `<tr>
+                    <td class="small">${esc(fmt.date(c.created_at))}</td>
+                    <td class="small">${esc(c.billing_cycle === 'yearly' ? 'Yearly payment' : 'Monthly payment')} · ${esc(pct(Number(c.rate)))}</td>
+                    <td class="num">${esc(money(c.amount, c.currency))}</td>
+                    <td>${commissionBadge(c)}</td>
+                  </tr>`).join('')}</tbody></table></div>`
+              : emptyState('No commissions yet', 'They appear here the first time a company you introduced pays.')
+          }</div>
+        </div>
+
+        ${d.payouts.length ? `
+        <div class="card">
+          <div class="card-head"><h3>Paid to you</h3></div>
+          <div class="card-body flush"><div class="table-wrap"><table class="tbl">
+            <thead><tr><th>Date</th><th class="num">Amount</th><th>Method</th><th>Reference</th></tr></thead>
+            <tbody>${d.payouts.map((p) => `<tr>
+              <td class="small">${esc(fmt.date(p.paid_at))}</td>
+              <td class="num">${esc(money(p.amount, p.currency))}</td>
+              <td class="small">${esc(p.method || '—')}</td>
+              <td class="small mono">${esc(p.reference || '—')}</td>
+            </tr>`).join('')}</tbody></table></div></div>
+        </div>` : ''}
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="card-head"><h3>Earnings</h3></div>
+          <div class="card-body">
+            <div class="muted small">Ready to pay out</div>
+            <div style="font-size:28px;font-weight:700;color:var(--primary)">${esc(money(b.available))}</div>
+            <div class="row between small mt-2"><span class="muted">Still held</span><b>${esc(money(b.pending))}</b></div>
+            <div class="row between small"><span class="muted">Paid to you</span><b>${esc(money(b.paid))}</b></div>
+            <p class="small muted mt-2 mb-0">
+              Each commission is held for 30 days after the customer pays, in case the payment
+              is refunded. After that it can be paid out.
+            </p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Where to pay you</h3></div>
+          <div class="card-body">
+            <div class="field">
+              <label for="affPaypal">PayPal email</label>
+              <input type="text" id="affPaypal" value="${esc(a.paypal_email || '')}" placeholder="you@example.com" />
+              <div class="hint">We cannot pay you without this.</div>
+            </div>
+            <button class="btn block" id="saveAff">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('copyLink').onclick = async () => {
+    try { await navigator.clipboard.writeText(a.link); toast('Link copied', 'ok'); }
+    catch {
+      // Refused in some browsers and over plain http; selecting it always works.
+      const range = document.createRange();
+      range.selectNodeContents(document.getElementById('affLink'));
+      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+      toast('Select and copy the link', 'err');
+    }
+  };
+  document.getElementById('saveAff').onclick = async () => {
+    try {
+      await api('/affiliate', { method: 'PATCH', body: { paypal_email: document.getElementById('affPaypal').value.trim() } });
+      toast('Saved', 'ok');
+    } catch (err) { toast(err.message, 'err'); }
+  };
+}
+
+function commissionBadge(c) {
+  if (c.status === 'paid') return '<span class="badge ok">Paid to you</span>';
+  if (c.status === 'void') return '<span class="badge">Cancelled</span>';
+  if (new Date(c.available_at) > new Date()) {
+    return `<span class="badge warn">Held until ${esc(fmt.date(c.available_at))}</span>`;
+  }
+  return '<span class="badge info">Ready</span>';
+}
+
+async function joinAffiliate() {
+  modal({
+    title: 'Join the affiliate programme',
+    okText: 'Create my link',
+    body: `
+      <p class="small">You get a link of your own. Every company that signs up through it is
+      recorded as yours, and you earn a share of what they pay for as long as they stay.</p>
+      <div class="field">
+        <label for="joinPaypal">PayPal email for payouts</label>
+        <input type="text" id="joinPaypal" placeholder="you@example.com" />
+        <div class="hint">You can add or change this later — you just cannot be paid without it.</div>
+      </div>`,
+    onOk: async (box) => {
+      await api('/affiliate/join', { method: 'POST', body: { paypal_email: box.querySelector('#joinPaypal').value.trim() } });
+      toast('You are in. Your link is ready.', 'ok');
+      viewAffiliate();
+    },
+  });
+}
+
 /* =================== BOOTSTRAP =================== */
-const VIEWS = { overview: viewOverview, documents: viewDocuments, members: viewMembers, history: viewHistory, billing: viewBilling, api: viewApi, settings: viewSettings };
+const VIEWS = { overview: viewOverview, documents: viewDocuments, members: viewMembers, history: viewHistory, billing: viewBilling, api: viewApi, affiliate: viewAffiliate, settings: viewSettings };
 
 shell();
 document.getElementById('trialBar').innerHTML = trialBanner(trial);

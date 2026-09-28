@@ -26,7 +26,7 @@ async function shot(pg, name) { await pg.screenshot({ path: `./${name}.png`, ful
 
   // Every paid plan's price must actually change, and the year price must be
   // strictly less than twelve months of the monthly price.
-  const pairs = [['Professional', 19, 187], ['Business', 79, 777]];
+  const pairs = [['Starter', 5, 49], ['Professional', 19, 187], ['Business', 79, 777]];
   for (const [name, m, y] of pairs) {
     const mCard = monthly.find(t => t.includes(name)) || '';
     const yCard = yearly.find(t => t.includes(name)) || '';
@@ -58,12 +58,16 @@ async function shot(pg, name) { await pg.screenshot({ path: `./${name}.png`, ful
 
   const mTxt = await pg.locator('.plans').innerText();
   if (!/\$19/.test(mTxt) || /\$187/.test(mTxt)) problems.push('site: khổ tháng không đúng');
+  if (!/\$5\s*\/month/.test(mTxt)) problems.push('site: khổ tháng thiếu gói Starter $5');
+  // Four plans, and the yearly figures on the site must match the app's.
+  const cards = await pg.locator('.plans .plan').count();
+  if (cards !== 4) problems.push(`site: có ${cards} thẻ gói, đáng lẽ 4`);
   await shot(pg, 'cyc-site-monthly');
 
   await pg.click('.cycle-toggle [data-cycle="yearly"]');
   await pg.waitForTimeout(300);
   const yTxt = await pg.locator('.plans').innerText();
-  for (const need of ['$187', '$777', '$228', '$948', 'save 18%']) {
+  for (const need of ['$49', '$187', '$777', '$60', '$228', '$948', 'save 18%']) {
     if (!yTxt.includes(need)) problems.push(`site: khổ năm thiếu "${need}"`);
   }
   if (/\$19\s*\/month/.test(yTxt)) problems.push('site: khổ năm vẫn còn giá tháng');
@@ -94,21 +98,61 @@ async function shot(pg, name) { await pg.screenshot({ path: `./${name}.png`, ful
   await shot(pg, 'cyc-admin');
 
   // The upgrade dialog must offer both cycles and total the chosen one.
-  const buy = pg.locator('[data-buy]').first();
+  // Business by name, not the first button on the page: the order of the plan
+  // list changes whenever a plan is added, and the figures below are
+  // Business's. The stubbed customer is on Professional, so that row is not
+  // offered.
+  const buy = pg.locator('.plan-opt', { hasText: 'Business' }).locator('[data-buy]').first();
   if (await buy.count()) {
     await buy.click();
     await pg.waitForTimeout(400);
     const dlg = await pg.locator('.modal-backdrop .modal-body').last().innerText();
     if (!/Yearly/.test(dlg)) problems.push('admin: hộp thoại nâng cấp không có lựa chọn năm');
+
+    // Read the summary by id rather than scanning the whole dialog: the static
+    // descriptions beside each option also contain "every month" and "until you
+    // cancel", so a loose match passes whatever the summary actually says.
+    const label = () => pg.locator('#ckLabel').textContent();
+    const total = () => pg.locator('#ckTotal').textContent();
+    const autoNote = () => pg.locator('#renAutoNote').textContent();
+    const note = () => pg.locator('#ckNote').textContent();
+
     // The larger charge must never be the one pre-selected: an admin who
     // clicks straight through should be billed for a month, not a year.
-    if (!/Total for 1 month/.test(dlg)) problems.push('admin: hộp thoại mặc định KHÔNG phải theo tháng');
     const preChecked = await pg.locator('input[name="cyc"]:checked').getAttribute('value');
     if (preChecked !== 'monthly') problems.push(`admin: chu kỳ mặc định là "${preChecked}"`);
+    if ((await total()) !== '$79') problems.push(`admin: tổng mặc định là "${await total()}"`);
+
+    // Automatic renewal is the default, and the summary has to say so rather
+    // than quoting a single period's total.
+    const preRen = await pg.locator('input[name="ren"]:checked').getAttribute('value');
+    if (preRen !== 'auto') problems.push(`admin: mặc định gia hạn là "${preRen}"`);
+    if (!/every month$/.test(await label())) problems.push(`admin: nhãn tổng ghi "${await label()}"`);
+    if (!/\$79 now, then \$79 every month/.test(await autoNote())) {
+      problems.push(`admin: không nói rõ sẽ thu lại hằng tháng — "${await autoNote()}"`);
+    }
+
     await pg.click('[data-cyc="yearly"]');
     await pg.waitForTimeout(250);
-    const dlg2 = await pg.locator('.modal-backdrop .modal-body').last().innerText();
-    if (!/Total for 12 months/.test(dlg2)) problems.push('admin: đổi sang năm mà tổng không đổi');
+    if ((await total()) !== '$777') problems.push(`admin: đổi sang năm mà tổng là "${await total()}"`);
+    if (!/every year$/.test(await label())) problems.push(`admin: chọn năm rồi nhãn vẫn "${await label()}"`);
+    if (!/\$777 now, then \$777 every year/.test(await autoNote())) {
+      problems.push(`admin: chọn năm rồi vẫn hứa thu hằng tháng — "${await autoNote()}"`);
+    }
+
+    // Paying once must drop the promise of a repeat charge entirely — this is
+    // the sentence a customer's finance department reads.
+    await pg.locator('input[name="ren"][value="once"]').click();
+    await pg.waitForTimeout(250);
+    if (!/Total for 12 months/.test(await label())) {
+      problems.push(`admin: trả một lần mà nhãn là "${await label()}"`);
+    }
+    if (/until you cancel/.test(await note())) problems.push('admin: trả một lần mà vẫn nói sẽ thu tiếp');
+    if (!/twelve months are added/.test(await note())) {
+      problems.push(`admin: trả một lần không nói cộng dồn thời gian — "${await note()}"`);
+    }
+    await pg.locator('input[name="ren"][value="auto"]').click();
+    await pg.waitForTimeout(200);
     await shot(pg, 'cyc-admin-modal');
     // Switching the cycle must not clear the payment method.
     const provSel = await pg.locator('.pay-method[data-prov].sel').count();

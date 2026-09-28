@@ -9,6 +9,7 @@ import adminRouter from './routes/admin.js';
 import { publicRouter as billingPublicRouter, webhookRouter } from './routes/billing.js';
 import contactRouter, { publicRouter as contactPublicRouter } from './routes/contact.js';
 import v1Router from './routes/v1.js';
+import affiliateRouter, { publicRouter as affiliatePublicRouter, adminRouter as affiliateAdminRouter } from './routes/affiliates.js';
 import { purgeExpiredTrials } from './trials.js';
 import { supabase } from './supabaseClient.js';
 
@@ -35,6 +36,9 @@ app.use('/public/billing', billingPublicRouter);
 // The marketing site is a different origin, so this router handles its own CORS.
 app.use('/public/contact', contactPublicRouter);
 app.use('/admin/contact', contactRouter);
+app.use('/public/affiliate', affiliatePublicRouter);
+app.use('/affiliate', affiliateRouter);
+app.use('/admin/affiliates', affiliateAdminRouter);
 
 // The public API. Authenticated by API key rather than by session, so it is
 // mounted at the top level and shares nothing with the browser routes.
@@ -92,7 +96,7 @@ app.post('/cron/purge-trials', async (req, res) => {
 
 // 404 for API routes; everything else falls through to the static site
 app.use((req, res) => {
-  if (req.path.startsWith('/auth') || req.path.startsWith('/orgs') || req.path.startsWith('/admin') || req.path.startsWith('/webhooks') || req.path.startsWith('/cron') || req.path.startsWith('/public/') || req.path.startsWith('/v1')) {
+  if (req.path.startsWith('/auth') || req.path.startsWith('/orgs') || req.path.startsWith('/admin') || req.path.startsWith('/webhooks') || req.path.startsWith('/cron') || req.path.startsWith('/public/') || req.path.startsWith('/v1') || req.path.startsWith('/affiliate')) {
     return res.status(404).json({ error: 'Endpoint not found' });
   }
   res.status(404).sendFile(path.join(__dirname, '..', 'public', '404.html'), (err) => {

@@ -36,9 +36,12 @@ function deco(p) {
 }
 const PLANS = [
   { id:'p1', code:'free', name:'Free trial', description:'Everything except OCR, for 3 days.', price_usd:0, price_usd_yearly:0, trial_days:3, ocr_enabled:false, api_enabled:false, max_api_calls_per_month:0, max_documents:20, max_members:5, max_storage_mb:100, max_questions_per_month:500, max_ocr_pages_per_month:0 },
+  { id:'p4', code:'starter', name:'Starter', description:'For a small team.', price_usd:5, price_usd_yearly:49, trial_days:0, ocr_enabled:false, api_enabled:false, max_api_calls_per_month:0, max_documents:100, max_members:5, max_storage_mb:1000, max_questions_per_month:1500, max_ocr_pages_per_month:0 },
   { id:'p2', code:'pro', name:'Professional', description:'For a growing team.', price_usd:19, price_usd_yearly:187, trial_days:0, ocr_enabled:true, api_enabled:false, max_api_calls_per_month:0, max_documents:500, max_members:30, max_storage_mb:5000, max_questions_per_month:10000, max_ocr_pages_per_month:2000 },
   { id:'p3', code:'business', name:'Business', description:'For a whole company.', price_usd:79, price_usd_yearly:777, trial_days:0, ocr_enabled:true, api_enabled:true, max_api_calls_per_month:20000, max_documents:10000, max_members:300, max_storage_mb:50000, max_questions_per_month:100000, max_ocr_pages_per_month:20000 },
 ].map(deco);
+/** By code, never by position: the list grows and positions move. */
+const PLAN = (code) => PLANS.find((x) => x.code === code);
 const MSGS = [
   { id:'c1', name:'Jane Smith', email:'jane@acme.com', company:'Acme Inc.', status:'new',
     created_at:'2026-09-24T09:12:00Z', read_at:null,
@@ -80,11 +83,11 @@ http.createServer(fileServer(APP_DIR, (p, res, req) => {
 
   if (p === '/auth/me') return J(res, {
     user: { id:'u1', email:'admin@company.com', full_name:'Alex Morgan', is_system_admin:true },
-    organizations: [{ id:'o1', name:'Acme Inc.', role:'admin', billing_status:'paid', plan:PLANS[1], trial:{ isTrial:false } }],
+    organizations: [{ id:'o1', name:'Acme Inc.', role:'admin', billing_status:'paid', plan:PLAN('pro'), trial:{ isTrial:false } }],
   });
   if (p === '/public/billing/plans') return J(res, { currency:'USD', providers:[{ id:'paypal', name:'PayPal / Credit or debit card', description:'Pay with PayPal balance, credit or debit card' }], plans:PLANS });
   if (p.endsWith('/billing')) return J(res, {
-    plan: PLANS[1], billing_status:'paid', plan_expires_at:'2026-12-31T00:00:00Z', trial:{ isTrial:false },
+    plan: PLAN('pro'), billing_status:'paid', plan_expires_at:'2026-12-31T00:00:00Z', trial:{ isTrial:false },
     usage: { documents:12, members:4, questions_this_month:340, storage_mb:82, ocr_pages_this_month:15,
       limits:{ max_documents:500, max_members:30, max_questions_per_month:10000, max_storage_mb:5000, max_ocr_pages_per_month:2000 } },
     payments: [{ id:'x1', created_at:'2026-09-01T00:00:00Z', period_start:'2026-09-01', period_end:'2027-09-01', amount:187, currency:'USD', billing_cycle:'yearly', method:'paypal', status:'paid', paid_at:'2026-09-01T00:00:00Z' }],
@@ -114,10 +117,55 @@ http.createServer(fileServer(APP_DIR, (p, res, req) => {
   // /admin/plans answers an ARRAY, not the generic object below; the plans
   // table reads it directly and renders nothing when handed an object.
   if (p === '/admin/plans') return J(res, PLANS.map((x, i) => ({ ...x, organization_count: [0, 4, 1][i], is_active: true, sort_order: i })));
+  // The affiliate's own page: enrolled, with money in all three states so the
+  // held / ready / paid columns are each exercised.
+  if (p === '/affiliate') return J(res, {
+    enrolled: true, eligible: true, rates: { monthly: 0.20, yearly: 0.30 },
+    affiliate: { id:'a1', code:'mk7qtv3n', paypal_email:'alex@example.com', status:'active',
+      created_at:'2026-07-01T00:00:00Z', link:'https://botclarify.com/?ref=mk7qtv3n' },
+    balance: { pending: 45.60, available: 233.10, paid: 78.00, referred: 4, paying: 2 },
+    referrals: [
+      { name:'Globex', referred_at:'2026-08-02T00:00:00Z', paying:true },
+      { name:'Initech', referred_at:'2026-09-11T00:00:00Z', paying:false },
+    ],
+    commissions: [
+      { id:'m1', amount:233.10, currency:'USD', billing_cycle:'yearly', rate:0.30, status:'approved',
+        available_at:'2026-09-01T00:00:00Z', created_at:'2026-08-02T00:00:00Z' },
+      { id:'m2', amount:15.80, currency:'USD', billing_cycle:'monthly', rate:0.20, status:'pending',
+        available_at:'2026-11-01T00:00:00Z', created_at:'2026-09-24T00:00:00Z' },
+      { id:'m3', amount:78.00, currency:'USD', billing_cycle:'monthly', rate:0.20, status:'paid',
+        available_at:'2026-07-15T00:00:00Z', created_at:'2026-06-15T00:00:00Z' },
+    ],
+    payouts: [{ id:'po1', amount:78.00, currency:'USD', method:'paypal', reference:'8XY123', paid_at:'2026-07-20T00:00:00Z' }],
+  });
+  if (p === '/admin/affiliates') return J(res, {
+    rates: { monthly: 0.20, yearly: 0.30 },
+    affiliates: [
+      { id:'a1', user_id:'u1', code:'mk7qtv3n', paypal_email:'alex@example.com', status:'active',
+        created_at:'2026-07-01T00:00:00Z', user:{ email:'alex@example.com', full_name:'Alex Morgan' },
+        pending:45.60, available:233.10, paid:78.00, referred:4, paying:2 },
+      // No payout address and nothing payable: the row must still render, and
+      // must not offer a Record payout button.
+      { id:'a2', user_id:'u2', code:'wqz4bn8s', paypal_email:null, status:'suspended',
+        created_at:'2026-08-20T00:00:00Z', user:{ email:'sam@example.com', full_name:'Sam Diaz' },
+        pending:0, available:0, paid:0, referred:1, paying:0 },
+    ],
+  });
+  if (/\/billing\/subscription$/.test(p)) return J(res, {
+    subscription: { id:'s1', status:'active', billing_cycle:'monthly', amount:19, currency:'USD',
+      plan:{ name:'Professional' }, last_payment_at:'2026-09-01T00:00:00Z',
+      activated_at:'2026-06-01T00:00:00Z', approve_url:null },
+  });
+
   if (/\/folders$/.test(p)) return J(res, { folders: [
     { id:'f1', name:'Employee handbook', visibility:'public' },
     { id:'f2', name:'Contracts', visibility:'private' },
   ] });
- return J(res, { items:[], total:0, folders:[], members:[], documents:[], checks:[], organizations:[], users:[], admins:[], env_emails:[], env_pending:[] });
+  // Only API paths get the empty-but-well-shaped answer. Without this guard the
+  // stub also answers /admin.html with JSON, every page renders as a blob of
+  // text, and the suites fail in a way that looks like a bug in the pages.
+  if (p.startsWith('/orgs/') || p.startsWith('/admin/') || p.startsWith('/auth/') || p.startsWith('/public/') || p === '/affiliate' || p.startsWith('/affiliate/')) {
+    return J(res, { items:[], total:0, folders:[], members:[], documents:[], checks:[], organizations:[], users:[], admins:[], env_emails:[], env_pending:[] });
+  }
   return false;
 })).listen(4601, () => console.log('site 4600, app 4601'));

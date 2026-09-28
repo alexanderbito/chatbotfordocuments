@@ -194,6 +194,10 @@ export const LABEL = {
   method: { text: 'Text', ocr: 'OCR', mixed: 'Mixed' },
   role: { admin: 'Admin', member: 'Member' },
   billing: { trial: 'Trial', paid: 'Paid', overdue: 'Overdue' },
+  subscription: {
+    pending: 'Waiting for approval', active: 'Renewing automatically',
+    suspended: 'Payment problem', cancelled: 'Stopped', expired: 'Ended', failed: 'Could not start',
+  },
   payment: { paid: 'Received', pending: 'Pending', failed: 'Failed', refunded: 'Refunded' },
   level: { info: 'Info', warn: 'Warning', error: 'Error' },
   scope: { auth: 'Account', upload: 'Documents', chat: 'Chat', billing: 'Payments', api: 'API', contact: 'Contact form', system: 'System' },

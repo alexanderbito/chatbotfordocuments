@@ -173,10 +173,17 @@ section.tint { background: var(--bg-soft); border-top: 1px solid var(--border); 
 .step p { margin: 0; color: var(--text-2); font-size: 14.8px; }
 
 /* ---------- Pricing ---------- */
-.plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; align-items: start; }
+/* Four plans. They stop fitting side by side well before the page's own
+   900px breakpoint, so pricing gets an earlier one of its own: two wide cards
+   read better than four narrow ones. */
+.plans { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; align-items: start; }
 .plan {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
-  padding: 30px 26px; box-shadow: var(--shadow-sm); position: relative;
+  padding: 28px 22px; box-shadow: var(--shadow-sm); position: relative;
+}
+@media (max-width: 1080px) {
+  .plans { grid-template-columns: repeat(2, 1fr); gap: 22px; }
+  .plan { padding: 30px 26px; }
 }
 .plan.featured { border-color: var(--primary); box-shadow: var(--shadow); }
 .plan .tag {

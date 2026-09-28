@@ -13,9 +13,48 @@ const router = express.Router();
  *  - organization_name present -> create the account plus a new organization; the registrant becomes its ADMIN
  *  - invite_token present      -> create the account and join the inviting organization with the role already assigned
  */
+/**
+ * Record who introduced a new organization.
+ *
+ * Silent on every failure. A bad code, a suspended affiliate, or somebody
+ * signing up through their own link are all ordinary things that must not stop
+ * an account being created — and telling the visitor which of those happened
+ * would let anyone probe whether a code exists.
+ */
+async function attributeReferral(org, ref, userId) {
+  try {
+    const code = String(ref || '').trim().toLowerCase().slice(0, 32);
+    if (!code || !org?.id) return;
+
+    const { data: affiliate } = await supabase
+      .from('affiliates').select('id, user_id, status').eq('code', code).maybeSingle();
+    if (!affiliate || affiliate.status !== 'active') return;
+
+    // Nobody introduces themselves. The commission function checks this again
+    // at payment time, because an affiliate can be added to an organization
+    // after it signs up.
+    if (affiliate.user_id === userId) return;
+
+    // organization_id is the primary key of referrals, so a second attempt to
+    // claim the same organization loses. That is deliberate: a customer belongs
+    // to whoever brought them first and is never reassigned.
+    const { error } = await supabase
+      .from('referrals').insert({ organization_id: org.id, affiliate_id: affiliate.id });
+    if (error && error.code !== '23505') throw error;
+    if (!error) {
+      await logEvent({
+        scope: 'billing', organizationId: org.id,
+        message: `Organization signed up through referral code ${code}`,
+      });
+    }
+  } catch (err) {
+    console.error('[auth] could not attribute a referral:', err.message);
+  }
+}
+
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, full_name, organization_name, invite_token } = req.body || {};
+    const { email, password, full_name, organization_name, invite_token, ref } = req.body || {};
 
     if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
     if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
@@ -105,6 +144,14 @@ router.post('/register', async (req, res) => {
         .select()
         .single();
       if (orgErr) throw orgErr;
+
+      // Attribute the referral, if a code came with the sign-up.
+      //
+      // Done here rather than on first payment because the link click is the
+      // thing that identifies the referrer, and a customer may take weeks to
+      // upgrade. Failing to attribute must never fail the registration: the
+      // account is what the person came for.
+      await attributeReferral(org, ref, userId);
 
       await supabase.from('organization_members').insert({
         organization_id: org.id,

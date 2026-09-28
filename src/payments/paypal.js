@@ -287,3 +287,157 @@ export async function verifyWebhook({ headers, rawBody }) {
     raw: event,
   };
 }
+
+// =====================================================================
+// SUBSCRIPTIONS
+//
+// PayPal charges on a schedule only through its own objects: a Product, a
+// Billing Plan, and then a Subscription per customer. The helpers below are
+// thin wrappers over those three endpoints; the decisions about when to create
+// what live in ./subscriptions.js.
+// =====================================================================
+
+/** The thing being sold. Created once for the whole installation. */
+export async function createProduct({ name, description }) {
+  return callPaypal('/v1/catalogs/products', {
+    body: {
+      name: String(name).slice(0, 127),
+      description: String(description || '').slice(0, 256),
+      type: 'SERVICE',
+      category: 'SOFTWARE',
+    },
+    // PayPal deduplicates on this, so a retried request cannot create a second
+    // product with the same name.
+    headers: { 'PayPal-Request-Id': `product-${name}`.slice(0, 108) },
+  });
+}
+
+/**
+ * A price and an interval.
+ *
+ * total_cycles: 0 means "until cancelled", which is the whole point.
+ *
+ * setup_fee_failure_action and payment_failure_threshold decide what happens
+ * when a card is declined: PayPal retries up to three times before suspending
+ * the subscription, which is what gives a customer with an expired card a
+ * chance to fix it rather than losing access the same day.
+ */
+export async function createBillingPlan({ productId, name, price, interval }) {
+  return callPaypal('/v1/billing/plans', {
+    body: {
+      product_id: productId,
+      name: String(name).slice(0, 127),
+      status: 'ACTIVE',
+      billing_cycles: [{
+        frequency: { interval_unit: interval, interval_count: 1 },
+        tenure_type: 'REGULAR',
+        sequence: 1,
+        total_cycles: 0,
+        pricing_scheme: { fixed_price: { value: Number(price).toFixed(2), currency_code: 'USD' } },
+      }],
+      payment_preferences: {
+        auto_bill_outstanding: true,
+        setup_fee_failure_action: 'CONTINUE',
+        payment_failure_threshold: 3,
+      },
+    },
+  });
+}
+
+/** Retire a plan we have replaced. Subscribers already on it are unaffected. */
+export async function deactivateBillingPlan(planId) {
+  return callPaypal(`/v1/billing/plans/${encodeURIComponent(planId)}/deactivate`, { body: {} });
+}
+
+/**
+ * Start a subscription and return the link the customer approves it at.
+ *
+ * custom_id carries our own subscription row id, and PayPal sends it back on
+ * every later event — the activation, each renewal, the cancellation. It is the
+ * only reliable way to know which customer an incoming event belongs to.
+ */
+export async function createSubscription({ paypalPlanId, customId, orgName, email, baseUrl }) {
+  const sub = await callPaypal('/v1/billing/subscriptions', {
+    body: {
+      plan_id: paypalPlanId,
+      custom_id: customId,
+      subscriber: {
+        name: { given_name: String(orgName || 'Customer').slice(0, 140) },
+        ...(email ? { email_address: email } : {}),
+      },
+      application_context: {
+        brand_name: 'BotClarify',
+        user_action: 'SUBSCRIBE_NOW',
+        shipping_preference: 'NO_SHIPPING',
+        payment_method: { payer_selected: 'PAYPAL', payee_preferred: 'IMMEDIATE_PAYMENT_REQUIRED' },
+        return_url: `${baseUrl}/billing-return.html?subscription=${customId}`,
+        cancel_url: `${baseUrl}/billing-return.html?subscription=${customId}&cancelled=1`,
+      },
+    },
+    headers: { 'PayPal-Request-Id': String(customId) },
+  });
+
+  const approve = (sub.links || []).find((l) => l.rel === 'approve');
+  if (!approve?.href) throw new Error('PayPal did not return an approval link for the subscription');
+  return { id: sub.id, approveUrl: approve.href, raw: sub };
+}
+
+export async function getSubscription(subscriptionId) {
+  return callPaypal(`/v1/billing/subscriptions/${encodeURIComponent(subscriptionId)}`, { method: 'GET' });
+}
+
+export async function cancelSubscription(subscriptionId, reason) {
+  return callPaypal(`/v1/billing/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`, {
+    body: { reason: String(reason || 'Cancelled by the customer').slice(0, 127) },
+  });
+}
+
+/**
+ * Read a verified webhook event that concerns a subscription.
+ *
+ * Kept apart from verifyWebhook's one-off-payment shape because the two carry
+ * completely different resources: a renewal arrives as PAYMENT.SALE.COMPLETED
+ * whose resource is a sale, while the lifecycle events carry the subscription
+ * itself. Squeezing both through one set of field lookups is how a renewal ends
+ * up applied to the wrong row.
+ */
+export function readSubscriptionEvent(event) {
+  const r = event.resource || {};
+  const type = event.event_type || '';
+
+  if (type === 'PAYMENT.SALE.COMPLETED') {
+    return {
+      kind: 'payment',
+      // billing_agreement_id is PayPal's id for the subscription this sale
+      // belongs to. A sale with no such field is a one-off payment and is
+      // handled by the other webhook path.
+      providerRef: r.billing_agreement_id || null,
+      customId: r.custom || r.custom_id || null,
+      saleId: r.id || null,
+      amount: Number(r.amount?.total ?? r.amount?.value ?? 0),
+      currency: r.amount?.currency ?? r.amount?.currency_code ?? 'USD',
+    };
+  }
+
+  const STATUS = {
+    'BILLING.SUBSCRIPTION.ACTIVATED': 'active',
+    'BILLING.SUBSCRIPTION.RE-ACTIVATED': 'active',
+    'BILLING.SUBSCRIPTION.UPDATED': null,
+    'BILLING.SUBSCRIPTION.CANCELLED': 'cancelled',
+    'BILLING.SUBSCRIPTION.SUSPENDED': 'suspended',
+    'BILLING.SUBSCRIPTION.EXPIRED': 'expired',
+    'BILLING.SUBSCRIPTION.PAYMENT.FAILED': 'suspended',
+  };
+
+  if (type in STATUS) {
+    return {
+      kind: 'lifecycle',
+      status: STATUS[type],
+      providerRef: r.id || null,
+      customId: r.custom_id || null,
+      failed: type === 'BILLING.SUBSCRIPTION.PAYMENT.FAILED',
+    };
+  }
+
+  return { kind: 'other' };
+}

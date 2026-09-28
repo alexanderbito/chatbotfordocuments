@@ -66,6 +66,53 @@
   const show = (msg, kind = 'error') => { alertEl.textContent = msg; alertEl.className = `alert ${kind} show`; };
   const inviteToken = new URLSearchParams(location.search).get('invite');
 
+  /**
+   * The referral code, if this visitor arrived through somebody's link.
+   *
+   * Read from the URL first, then from storage: the link lands on
+   * botclarify.com, which stores the code and passes it on, and a visitor who
+   * reads the site for a while before signing up would otherwise lose it.
+   *
+   * Stored with an expiry rather than for ever. Without one, a code picked up
+   * by somebody who did not sign up sits in their browser indefinitely and
+   * attaches itself to an unrelated sign-up a year later — which reads as a
+   * commission somebody did not earn. Thirty days is the window the affiliate
+   * is told about, and the same one the marketing site uses.
+   */
+  const REF_KEY = 'botclarify_ref';
+  const REF_WINDOW_DAYS = 30;
+
+  function storedRef() {
+    try {
+      const raw = localStorage.getItem(REF_KEY);
+      if (!raw) return '';
+      const v = JSON.parse(raw);
+      if (!v || !v.c || !v.e || v.e < Date.now()) { localStorage.removeItem(REF_KEY); return ''; }
+      return String(v.c);
+    } catch { return ''; }
+  }
+
+  function referralCode() {
+    const fromUrl = new URLSearchParams(location.search).get('ref');
+    let code = (fromUrl || '').trim().toLowerCase();
+    if (!code) code = storedRef().trim().toLowerCase();
+    // Same alphabet the server issues. Anything else is not a code we made.
+    if (!/^[a-z0-9-]{4,32}$/.test(code)) return null;
+    try { localStorage.removeItem(REF_KEY); } catch {}
+    return code;
+  }
+
+  // Remember a code that arrived in the URL, in case the visitor wanders off
+  // to read the pricing page before finishing.
+  (() => {
+    const fromUrl = (new URLSearchParams(location.search).get('ref') || '').trim().toLowerCase();
+    if (/^[a-z0-9-]{4,32}$/.test(fromUrl)) {
+      try {
+        localStorage.setItem(REF_KEY, JSON.stringify({ c: fromUrl, e: Date.now() + REF_WINDOW_DAYS * 864e5 }));
+      } catch {}
+    }
+  })();
+
   // Plan summary shown in the left-hand panel.
   api('/public/billing/plans').then((d) => {
     document.getElementById('plans').innerHTML = d.plans.map((p) => `
@@ -111,6 +158,7 @@
           full_name: fullName.value.trim(),
           organization_name: inviteToken ? null : orgName.value.trim(),
           invite_token: inviteToken || null,
+          ref: referralCode(),
         },
       });
       if (data.requires_login) return (location.href = '/login.html');
